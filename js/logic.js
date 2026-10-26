@@ -372,7 +372,7 @@ export function buildDay(state, key, now = new Date()) {
       tag, ref: hold ? null : evRef(mine), owner: mine.owner, calName: (calOf(state, mine) || {}).name, src: mine
     };
     if (who === 'both') together.push(it);
-    else if (persons[who]) persons[who].items.push(it);
+    else if (persons[who]) addOwn(persons[who], it);
   }
   // requests not in the calendars yet
   for (const r of state.requests) {
@@ -386,9 +386,9 @@ export function buildDay(state, key, now = new Date()) {
     } else if (r.status === 'yes' && r.type !== 'heads') {
       if (r.type === 'favour') {
         const doer = r.to;
-        if (persons[doer]) persons[doer].items.push({ kind: 'event', who: doer, title: r.title, start, end, allDay: r.when.allDay, sub: `${nameOf(state, r.from)} asked`, pending: true });
+        if (persons[doer]) addOwn(persons[doer], { kind: 'event', who: doer, title: r.title, start, end, allDay: r.when.allDay, sub: `${nameOf(state, r.from)} asked`, pending: true });
       } else if (r.type === 'add') {
-        if (persons[r.to]) persons[r.to].items.push({ kind: 'event', who: r.to, title: r.title, start, end, allDay: r.when.allDay, sub: `Added by ${nameOf(state, r.from)}`, pending: true });
+        if (persons[r.to]) addOwn(persons[r.to], { kind: 'event', who: r.to, title: r.title, start, end, allDay: r.when.allDay, sub: `Added by ${nameOf(state, r.from)}`, pending: true });
       } else {
         together.push({ kind: 'together', who: 'both', title: r.type === 'free' ? `Kept free: ${r.title}` : r.title, start, end, allDay: r.when.allDay, sub: 'Saving to your calendars', pending: true, reqId: r.id });
       }
@@ -404,7 +404,7 @@ export function buildDay(state, key, now = new Date()) {
     const end = ev.allDay ? new Date(dayEnd) : atTime(key, ev.end);
     const it = { kind: o.both ? 'together' : 'event', who: o.both ? 'both' : o.person, title: ev.title, start, end, allDay: ev.allDay, sub: 'Saving to Google Calendar', pending: true, tag: o.tag, ref: `t:${o.tag}`, owner: o.person };
     if (o.both) { if (o.person === state.me) together.push(it); }
-    else if (persons[o.person]) persons[o.person].items.push(it);
+    else if (persons[o.person]) addOwn(persons[o.person], it);
   }
   // together things make both of you busy
   for (const t of together) {
@@ -441,6 +441,11 @@ export function buildDay(state, key, now = new Date()) {
   cache.set(ck, out);
   if (cache.size > 400) cache.delete(cache.keys().next().value);
   return out;
+}
+// one person's own thing: on their list, and (when it has a time) it makes them busy
+function addOwn(p, it) {
+  p.items.push(it);
+  if (!it.allDay) p.busy.push([it.start.getTime(), it.end.getTime()]);
 }
 function addHM(hm, mins) {
   const t = minutesOf(hm) + mins;
