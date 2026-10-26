@@ -253,3 +253,18 @@ test('something added to a calendar in your other Google account goes to that ac
   assert.equal(items.edit, 'Second Gmail');
   await page.context().close();
 });
+
+test('odd values in your partner’s record or the ideas jar can’t break your screens', async () => {
+  const page = await open('ethan');
+  await mods(page, (store) => store.store.backend.commit([
+    { type: 'update', path: 'people/sophie', data: { name: 9, settings: { workDays: 5, sleepUntil: 14, travelMins: 'x', shiftTypes: { night: { label: 3, start: 7, end: { a: 1 } } } }, countdowns: { c1: { title: 'Trip', date: 5, shared: true } } } },
+    { type: 'set', path: 'ideas/odd', data: { title: 3, cost: 'lots', where: 'out' } }
+  ]));
+  await page.waitForTimeout(200);
+  for (const h of ['#today', '#calendar', '#requests', '#ask', '#jar', '#settings/shifts', '#settings/holidays']) {
+    await go(page, h);
+    assert.doesNotMatch(await page.textContent('main'), /Something went wrong/, h);
+  }
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});

@@ -53,6 +53,24 @@ export function settingsOf(state, pid) {
   s.notif = Object.assign({}, DEFAULT_SETTINGS.notif, (p.settings && p.settings.notif) || {});
   s.autoRemind = Object.assign({}, DEFAULT_SETTINGS.autoRemind, (p.settings && p.settings.autoRemind) || {});
   for (const k of ['quiet', 'morning', 'weekAhead', 'leave']) s[k] = Object.assign({}, DEFAULT_SETTINGS[k], (p.settings && p.settings[k]) || {});
+  return tidySettings(s);
+}
+// Either of you can change some of the other's settings (shift times, sleep), so only shapes the screens can use
+const isHMs = (v) => typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v);
+function tidySettings(s) {
+  for (const k of ['workStart', 'workEnd', 'sleepUntil', 'remindAt']) if (!isHMs(s[k])) s[k] = DEFAULT_SETTINGS[k];
+  for (const k of ['from', 'to']) if (!isHMs(s.quiet[k])) s.quiet[k] = DEFAULT_SETTINGS.quiet[k];
+  s.workDays = Array.isArray(s.workDays) ? s.workDays.map(Number).filter((d) => d >= 1 && d <= 7) : DEFAULT_SETTINGS.workDays;
+  s.travelMins = Number(s.travelMins) || 0;
+  s.lowCals = Array.isArray(s.lowCals) ? s.lowCals : [];
+  if (s.altOff && (typeof s.altOff !== 'object' || typeof s.altOff.from !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s.altOff.from))) s.altOff = null;
+  for (const [k, t] of Object.entries(s.shiftTypes)) {
+    if (!t || typeof t !== 'object') { s.shiftTypes[k] = DEFAULT_SHIFT_TYPES[k] || { label: 'Shift', allDay: true }; continue; }
+    const def = DEFAULT_SHIFT_TYPES[k] || {};
+    const c = Object.assign({}, t, { label: typeof t.label === 'string' ? t.label : (def.label || 'Shift') });
+    for (const f of ['start', 'end']) if (c[f] != null && !isHMs(c[f])) c[f] = def[f];
+    s.shiftTypes[k] = c;
+  }
   return s;
 }
 export function nameOf(state, pid) {
@@ -921,7 +939,7 @@ export function countdowns(state, now = new Date()) {
   for (const pid of [state.me, state.partner].filter(Boolean)) {
     const p = state.people[pid] || {};
     for (const [id, c] of Object.entries(p.countdowns || {})) {
-      if (!c || !c.date) continue;
+      if (!c || typeof c.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(c.date)) continue;
       if (pid !== state.me && c.shared === false) continue;
       add(`${pid}:${id}`, c.title, c.date, pid, pid === state.me);
     }

@@ -63,7 +63,8 @@ export function setRaw(raw, extra = {}) {
   s.people = {};
   let n = 0;
   for (const [pid, p] of Object.entries(raw.people || {})) {
-    s.people[pid] = Object.assign({ id: pid }, p, { colour: pick(p.colour, COLOURS, n === 0 ? 'blue' : 'orange') });
+    s.people[pid] = Object.assign({ id: pid }, p, { colour: pick(p.colour, COLOURS, n === 0 ? 'blue' : 'orange'), name: str(p.name), email: str(p.email) });
+    if (p.settings && typeof p.settings !== 'object') s.people[pid].settings = {};
     n++;
   }
   const email = (s.user && s.user.email || '').toLowerCase();
@@ -125,7 +126,7 @@ export function setRaw(raw, extra = {}) {
   s.notes = Object.entries(raw.notes || {}).filter(([, x]) => x && typeof x === 'object').map(([id, x]) => Object.assign({ id }, x, { text: str(x.text) })).sort((a, b) => (b.created || 0) - (a.created || 0));
   s.outbox = Object.entries(raw.outbox || {}).map(([id, o]) => Object.assign({ id }, o)).filter((o) => !o.done);
   s.jobs = Object.entries(raw.jobs || {}).filter(([, j]) => j && typeof j === 'object').map(([id, j]) => Object.assign({ id }, cleanJob(j)));
-  s.ideas = Object.entries(raw.ideas || {}).map(([id, i]) => Object.assign({ id }, i)).sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+  s.ideas = Object.entries(raw.ideas || {}).filter(([, i]) => i && typeof i === 'object').map(([id, i]) => Object.assign({ id }, i, { title: str(i.title), cost: Number(i.cost) || 0, used: Number(i.used) || 0 })).sort((a, b) => a.title.localeCompare(b.title));
   s.tokens = raw.tokens === undefined ? null : Object.keys(raw.tokens || {});
   s.status = raw.status || {};
   s.linked = store.linked || {};
