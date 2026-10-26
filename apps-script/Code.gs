@@ -810,6 +810,10 @@ function parseIcs_(text) {
     if (line === 'BEGIN:VEVENT') { cur = { exdates: [] }; return; }
     if (line === 'END:VEVENT') { if (cur && cur.start) raw.push(cur); cur = null; return; }
     if (!cur) return;
+    // an alarm inside a shift has its own SUMMARY, DURATION and so on: never the shift's
+    if (/^BEGIN:/i.test(line)) { cur.nest = (cur.nest || 0) + 1; return; }
+    if (/^END:/i.test(line)) { if (cur.nest) cur.nest--; return; }
+    if (cur.nest) return;
     var idx = line.indexOf(':');
     if (idx < 0) return;
     var left = line.slice(0, idx); var val = line.slice(idx + 1);
@@ -817,6 +821,7 @@ function parseIcs_(text) {
     if (name === 'SUMMARY') cur.summary = val.replace(/\\,/g, ',').replace(/\\n/gi, ' ').replace(/\\;/g, ';');
     else if (name === 'UID') cur.uid = val;
     else if (name === 'STATUS') cur.status = val.toUpperCase();
+    else if (name === 'CLASS') cur.priv = /^(PRIVATE|CONFIDENTIAL)$/i.test(String(val).trim());
     else if (name === 'DTSTART') cur.start = icsTime_(left, val);
     else if (name === 'DTEND') cur.end = icsTime_(left, val);
     else if (name === 'DURATION') cur.duration = icsDuration_(val);
@@ -839,7 +844,7 @@ function parseIcs_(text) {
     if (!r.rrule) { pushInst_(out, r, r.start, from, to); return; }
     var ex = {};
     r.exdates.forEach(function (x) { ex[instKey_(x)] = true; if (x.date) ex['d:' + x.v] = true; });
-    icsExpand_(r, to).forEach(function (st) {
+    icsExpand_(r, to, from).forEach(function (st) {
       var k = instKey_(st);
       if (ex[k] || ex['d:' + (st.date ? st.v : st.v.slice(0, 10))]) return;
       if (overrides[(r.uid || '') + '|' + k]) return;
@@ -851,6 +856,8 @@ function parseIcs_(text) {
 function instKey_(t) { return t.date ? 'd:' + t.v : 'm:' + t.ms; }
 function pushInst_(out, r, st, from, to) {
   var o = { id: shortKey_((r.uid || '') + '|' + st.v), uid: shortKey_(r.uid || st.v), t: r.summary || 'Shift' };
+  // marked private in the rota: your partner only ever sees "Busy", as for your own calendars
+  if (r.priv) o.pb = 1;
   if (st.date) {
     o.ad = 1; o.sd = st.v;
     var days = 1;
@@ -901,7 +908,8 @@ function icsRule_(val) {
   };
 }
 // Every start of a repeating entry up to the end of the window (and COUNT/UNTIL).
-function icsExpand_(r, to) {
+// from: the start of the window (a daily entry begun years ago starts counting near it)
+function icsExpand_(r, to, from) {
   var rule = r.rrule;
   var st = r.start;
   var startKey = st.date ? st.v : st.v.slice(0, 10);
@@ -928,7 +936,12 @@ function icsExpand_(r, to) {
   }
   var guard = 0;
   if (rule.freq === 'DAILY') {
-    for (var k = 0; guard++ < 2000; k += rule.interval) { if (!add(keyPlus_(startKey, k))) break; }
+    var k0 = 0;
+    if (!rule.count && from) {
+      var gap = daysBetween_(startKey, Utilities.formatDate(new Date(from - 2 * 864e5), TZ, 'yyyy-MM-dd'));
+      if (gap > 0) k0 = Math.floor(gap / rule.interval) * rule.interval;
+    }
+    for (var k = k0; guard++ < 2000; k += rule.interval) { if (!add(keyPlus_(startKey, k))) break; }
   } else if (rule.freq === 'WEEKLY') {
     var startWd = isoWd_(startKey);
     var days = (rule.byday && rule.byday.length ? rule.byday : [dayCodes[startWd - 1]]).map(function (c) { return dayCodes.indexOf(c) + 1; }).filter(function (x) { return x > 0; }).sort();

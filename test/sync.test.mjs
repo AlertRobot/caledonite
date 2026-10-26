@@ -1281,3 +1281,27 @@ test("your partner's change to something for you both reaches your copy, even in
   assert.equal(writes[0].update.fields.done.booleanValue, true);
   assert.ok(!('none' in writes[0].update.fields.result.mapValue.fields));
 });
+
+test('a rota link: alarms inside a shift, shifts marked private, and a daily entry begun years ago', () => {
+  withDigest();
+  const day = (ms) => ctx.Utilities.formatDate(new Date(ms), 'Europe/London', 'yyyy-MM-dd').replace(/-/g, '');
+  const soon = day(Date.now() + 3 * 864e5);
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'BEGIN:VEVENT', 'UID:a1', 'SUMMARY:Long day', `DTSTART;TZID=Europe/London:${soon}T073000`, `DTEND;TZID=Europe/London:${soon}T200000`,
+    'BEGIN:VALARM', 'ACTION:EMAIL', 'SUMMARY:Shift reminder', 'TRIGGER:-PT1H', 'DURATION:PT15M', 'REPEAT:2', 'END:VALARM',
+    'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:a2', 'SUMMARY:Appraisal', 'CLASS:PRIVATE', `DTSTART;TZID=Europe/London:${soon}T210000`, `DTEND;TZID=Europe/London:${soon}T220000`, 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:a3', 'SUMMARY:Handover', 'DTSTART;TZID=Europe/London:20150105T070000', 'DTEND;TZID=Europe/London:20150105T071500', 'RRULE:FREQ=DAILY', 'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+  const evs = ctx.parseIcs_(ics);
+  const long = evs.find((e) => e.t === 'Long day' || e.t === 'Shift reminder');
+  assert.equal(long.t, 'Long day', "the alarm's name isn't the shift's");
+  assert.equal(long.e - long.s, 12.5 * 3600e3, "nor its length");
+  const appr = evs.find((e) => e.t === 'Appraisal');
+  assert.equal(appr.pb, 1);
+  assert.equal(ctx.shareFilter_({ share: 'all' }, [appr])[0].t, 'Busy');
+  const hand = evs.filter((e) => e.t === 'Handover');
+  assert.ok(hand.length > 100, `every day in the window (${hand.length})`);
+});
