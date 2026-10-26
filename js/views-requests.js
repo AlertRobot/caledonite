@@ -1,6 +1,6 @@
 // Requests, asking something, and adding something.
 import { esc, dayKey, addDays, fromDayKey, fmtTime, agoText, relDay, atTime } from './util.js';
-import { nameOf, freeSlots, sleepingUntil, settingsOf, personColour, SHIFT_ORDER } from './logic.js';
+import { nameOf, freeSlots, sleepingUntil, settingsOf, personColour, SHIFT_ORDER, REMIND_OPTIONS, REMIND_NOTES } from './logic.js';
 import { whenLabel } from './store.js';
 import { icon, avatar, seg, toggleRow, empty } from './ui.js';
 import { ui } from './uistate.js';
@@ -202,6 +202,15 @@ export function viewAdd(state) {
       out.push(`<section class="stack-s"><label for="add-cal" class="h4">Which calendar?</label><select id="add-cal" data-bind="add.cal">${cals.map((c) => `<option value="${esc(c.calKey)}" ${a.cal === c.calKey || (!a.cal && c.primary) ? 'selected' : ''}>${esc(c.name)}${c.account ? ` (${esc(c.account)})` : ''}</option>`).join('')}</select></section>`);
     }
     if (P) out.push(`<section class="stack-s"><span class="h4">${esc(nameOf(state, P))} sees it as</span>${seg([{ v: 'all', label: 'Full details', on: !a.busyOnly }, { v: 'busy', label: 'Just “Busy”', on: a.busyOnly }], { act: 'addBusy', label: 'What your partner sees', cls: 'seg-full' })}</section>`);
+  }
+  if (a.who !== 'partner') {
+    const opts = REMIND_OPTIONS.filter((o) => !a.allDay || !o.timedOnly);
+    out.push(`<section class="stack-s"><h2 class="h4">Remind me</h2>
+      <div class="row-wrap">${opts.map((o) => `<button type="button" class="chip-btn ${a.remind.includes(o.v) ? 'on' : ''}" aria-pressed="${a.remind.includes(o.v)}" data-act="addRemind" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
+      ${a.remind.length ? `<span class="b">What do you need to do?</span>
+      <div class="row-wrap">${REMIND_NOTES.map((n) => `<button type="button" class="chip-btn ${a.note === n ? 'on' : ''}" aria-pressed="${a.note === n}" data-act="addNotePick" data-v="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+      <div class="field"><label for="add-note">Or write your own</label><input id="add-note" type="text" data-bind="add.note" value="${esc(REMIND_NOTES.includes(a.note) ? '' : a.note)}" placeholder="Optional" autocomplete="off"></div>` : '<span class="small muted">Optional. Shows on Today and on your phone.</span>'}
+    </section>`);
   }
   const label = a.who === 'me' ? 'Add to my calendar' : a.who === 'both' ? 'Add for both of us' : `Send to ${nameOf(state, P)}`;
   out.push(`<button type="button" class="btn big-btn" data-act="addSave">${esc(label)}</button>`);

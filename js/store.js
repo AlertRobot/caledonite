@@ -1,7 +1,7 @@
 // The app's state, built from whichever backend is running (Firebase, or the demo).
 // Views read `store.state` and call `actions.*`. Every change re-renders.
 import { dayKey, fromDayKey, uid, addDays, startOfDay } from './util.js';
-import { clearDayCache, settingsOf, sleepingUntil, nameOf, DEFAULT_SETTINGS } from './logic.js';
+import { clearDayCache, settingsOf, sleepingUntil, nameOf, DEFAULT_SETTINGS, reminderId } from './logic.js';
 
 const listeners = new Set();
 export const store = {
@@ -55,7 +55,7 @@ export function setRaw(raw, extra = {}) {
         end = new Date(e.e);
       }
       if (!(end > start)) end = new Date(start.getTime() + 30 * 60000);
-      evs.push({ owner: f.owner, calKey: f.calKey, id: e.id, title: e.t || '', start, end, allDay: !!e.ad, startKey: e.ad ? e.sd : null, busy: !!e.b, tag: e.tag || null, location: e.l || '' });
+      evs.push({ owner: f.owner, calKey: f.calKey, id: e.id, title: e.t || '', start, end, allDay: !!e.ad, startKey: e.ad ? e.sd : null, busy: !!e.b, tag: e.tag || null, location: e.l || '', sid: e.sid || null });
     }
   }
   s.events = evs;
@@ -188,6 +188,7 @@ export const actions = {
       await db().add('outbox', { person: st.me, op: 'create', tag, event: ev, done: false, created: now() });
     }
     db().ping();
+    return tag;
   },
 
   async setShift(pid, key, type) {
@@ -232,6 +233,34 @@ export const actions = {
   },
   async updatePerson(pid, patch) {
     await db().update(`people/${pid}`, patch);
+  },
+  // Reminders live on your own person record, one per event (or repeating series).
+  async setReminder({ ref, owner, title, times, note }) {
+    const st = store.state;
+    const id = reminderId(ref);
+    const cur = ((st.people[st.me] || {}).reminders || {})[id] || {};
+    const r = { ref, owner, title: title || cur.title || '', times: times ?? cur.times ?? [], note: note ?? cur.note ?? '', created: cur.created || now(), updated: now() };
+    await db().update(`people/${st.me}`, { reminders: { [id]: r } });
+  },
+  async removeReminder(ref) {
+    await db().unset(`people/${store.state.me}`, `reminders.${reminderId(ref)}`);
+  },
+  async reminderDone(ref, occ, title) {
+    const st = store.state;
+    const id = reminderId(ref);
+    const cur = ((st.people[st.me] || {}).reminders || {})[id];
+    if (!cur) {
+      // an automatic birthday reminder: keep a record so it stays ticked off
+      const s = settingsOf(st, st.me);
+      await db().update(`people/${st.me}`, { reminders: { [id]: { ref, owner: st.me, title: title || '', times: s.autoRemind.birthdays || [], note: '', auto: true, created: now(), done: { [occ]: now() } } } });
+      return;
+    }
+    await db().update(`people/${st.me}`, { reminders: { [id]: { done: { [occ]: now() } } } });
+  },
+  async testPush() {
+    const st = store.state;
+    await db().add('notify', { to: st.me, kind: 'test', title: 'Caledonite test', body: 'Notifications are working on this phone.', link: '#settings/notifications', sendAfter: now(), sent: false, created: now() });
+    return db().ping();
   },
   syncNow() { return db().ping(true); },
   enableNotifications() { return db().enableNotifications(); },

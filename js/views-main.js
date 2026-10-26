@@ -4,7 +4,7 @@ import {
 } from './util.js';
 import {
   buildDay, dayList, statusNow, nextBothFree, itemTime, itemTitle, itemSub, nameOf, personColour, monthCell, allLayers,
-  layerChipLabel, LAYER_INFO, settingsOf, isWorkingShift
+  layerChipLabel, LAYER_INFO, settingsOf, isWorkingShift, reminderFor, myReminders, reminderLine
 } from './logic.js';
 import { icon, avatar, whoChip, seg, empty } from './ui.js';
 import { ui } from './uistate.js';
@@ -49,6 +49,12 @@ export function viewToday(state) {
       <div class="row">${avatar(state, n.from, 32)}<span class="b muted grow">A note from ${esc(nameOf(state, n.from))}</span></div>
       <p class="note-text">${esc(n.text)}</p>
       <button type="button" class="btn sec self-start" data-act="noteSeen" data-id="${esc(n.id)}">Got it</button></div>`);
+  }
+
+  // reminders that are due (a week before a birthday, on the day...)
+  const due = myReminders(state, now).filter((x) => x.active);
+  if (due.length) {
+    out.push(`<section class="stack"><h2 class="label">To remember</h2>${due.slice(0, 4).map((x) => reminderCard(state, x, now)).join('')}</section>`);
   }
 
   // my shift today (big card, like Sophie's design)
@@ -137,6 +143,16 @@ export function viewToday(state) {
 }
 function hm(d) { return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
 
+function reminderCard(state, x, now) {
+  const day = x.ev.allDay ? (x.ev.startKey || dayKey(x.ev.start)) : dayKey(x.ev.start);
+  return `<div class="card stack-s remind-card">
+    <div class="row"><span class="remind-ic">${icon.bell(22)}</span><span class="grow col"><span class="h3">${esc(x.title)}</span><span>${esc(reminderLine(x.ev, now))}</span></span></div>
+    ${x.note ? `<p class="b remind-note">${esc(x.note)}</p>` : ''}
+    <div class="row-wrap"><button type="button" class="btn" data-act="remDone" data-ref="${esc(x.ref)}" data-occ="${esc(x.occ)}" data-title="${esc(x.title)}">${icon.check(18)} Done</button>
+    <button type="button" class="btn sec" data-act="openEv" data-ref="${esc(x.ref)}" data-day="${day}">Change reminder</button></div>
+  </div>`;
+}
+
 function workSeenAs(state) {
   const workCals = Object.values(state.calendars).filter((c) => c.owner === state.me && c.role === 'work');
   if (!workCals.length) return 'Working';
@@ -160,14 +176,21 @@ export function itemRow(state, it, key, { compact = false } = {}) {
   if (it.kind === 'hold' || it.pending) cls.push('item-dashed');
   if (it.kind === 'together' || it.kind === 'hold') cls.push('item-tog');
   const sub = itemSub(state, it);
-  return `<div class="${cls.join(' ')}">
-    <span class="item-time">${esc(itemTime(it, key))}</span>
-    <div class="item-main">
+  const inner = `<span class="item-time">${esc(itemTime(it, key))}</span>
+    <span class="item-main">
       ${whoChip(state, it.who)}
-      <span class="b">${esc(itemTitle(state, it))}</span>
+      <span class="b">${esc(itemTitle(state, it))}${bellFor(state, it)}</span>
       ${sub && !compact ? `<span class="small muted">${esc(sub)}</span>` : ''}
-    </div>
-  </div>`;
+    </span>`;
+  if (!it.ref) return `<div class="${cls.join(' ')}">${inner}</div>`;
+  cls.push('item-tap');
+  return `<button type="button" class="${cls.join(' ')}" data-act="openEv" data-ref="${esc(it.ref)}" data-day="${key}" aria-label="${esc(itemTitle(state, it))}, ${esc(itemTime(it, key))}. Open for reminders.">${inner}<span class="item-go" aria-hidden="true">${icon.next(18)}</span></button>`;
+}
+// a small bell after the name when there's a reminder
+export function bellFor(state, it) {
+  if (!it.ref) return '';
+  const r = reminderFor(state, it.ref, it);
+  return r && (r.times || []).length ? `<span class="bell-mark" title="Reminder set">${icon.bell(16)}<span class="sr">Reminder set</span></span>` : '';
 }
 
 function comingUp(state, key) {
@@ -308,7 +331,10 @@ export function barColour(state, b) {
 }
 
 function miniRow(state, it, key) {
-  return `<div class="mini ${it.kind === 'hold' || it.pending ? 'dashed' : ''}"><span class="mini-time b">${esc(itemTime(it, key))}</span><span class="grow">${esc(itemTitle(state, it))}</span>${whoChip(state, it.who)}</div>`;
+  const inner = `<span class="mini-time b">${esc(itemTime(it, key))}</span><span class="grow">${esc(itemTitle(state, it))}${bellFor(state, it)}</span>${whoChip(state, it.who)}`;
+  const cls = `mini ${it.kind === 'hold' || it.pending ? 'dashed' : ''}`;
+  if (!it.ref) return `<div class="${cls}">${inner}</div>`;
+  return `<button type="button" class="${cls} mini-tap" data-act="openEv" data-ref="${esc(it.ref)}" data-day="${key}">${inner}</button>`;
 }
 
 function weekView(state) {

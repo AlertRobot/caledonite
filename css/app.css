@@ -211,7 +211,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .field label { font-size: 15px; font-weight: 700; }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 700; }
 .check input { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); }
-.time-sm { width: 112px !important; flex: none; }
+.time-sm { width: 138px !important; flex: none; }
 
 /* switches */
 .row-toggle { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 12px 14px; border: none; border-top: 1px solid var(--line2); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
@@ -334,3 +334,19 @@ details.older .stack { margin-top: 8px; }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(92px + env(safe-area-inset-bottom, 0px)); z-index: 30; max-width: min(92vw, 480px); padding: 12px 16px; border-radius: 14px; background: var(--ink); color: var(--bg); font-weight: 700; box-shadow: 0 6px 24px rgba(0,0,0,.25); text-align: center; }
 .type-times { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line2); }
 .card.flush > .type-times:first-child { border-top: none; }
+
+/* tappable things and reminders */
+.item-tap { width: 100%; text-align: left; font: inherit; color: var(--ink); cursor: pointer; align-items: center; }
+.item-tap .item-time { align-self: flex-start; }
+.item-tap .item-main { align-self: flex-start; }
+.item-tap:active { transform: scale(.99); }
+.item-go { flex: none; color: var(--muted); display: inline-flex; }
+.mini-tap { width: 100%; text-align: left; font: inherit; color: var(--ink); background: none; border: none; border-radius: 8px; cursor: pointer; min-height: 40px; align-items: center; }
+.mini-tap:hover { background: var(--soft); }
+.bell-mark { display: inline-flex; vertical-align: -2px; margin-left: 6px; color: var(--accent, var(--tog)); }
+.remind-card { border-left: 6px solid var(--accent, var(--tog)); }
+.remind-ic { flex: none; width: 40px; height: 40px; border-radius: 20px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent-soft, var(--soft)); color: var(--accent, var(--tog)); }
+.remind-note { padding: 8px 12px; border-radius: 10px; background: var(--soft); }
+.card.inset { box-shadow: none; background: var(--soft); border-color: transparent; padding: 0; }
+.card.inset .row-toggle { background: transparent; }
+.card.inset > .row-toggle:first-child { border-top: none; }

@@ -125,6 +125,7 @@ function syncCalendars_(me, ctx) {
   var writes = [];
   var props = PropertiesService.getUserProperties();
   var seenCalKeys = {};
+  var seenEvents = [];
   var count = 0;
   for (var i = 0; i < cals.length; i++) {
     var cal = cals[i];
@@ -161,6 +162,7 @@ function syncCalendars_(me, ctx) {
         if (o) events.push(o);
       }
     }
+    events.forEach(function (o) { seenEvents.push({ calKey: calKey, shown: doc.show !== false, ev: o }); });
     writes = writes.concat(feedWrites_(me, ctx, calKey, doc, events, props));
     if (doc.role === 'rota') rotaChanged_(me, ctx, calKey, events, props);
   }
@@ -175,6 +177,7 @@ function syncCalendars_(me, ctx) {
     props.deleteProperty(k);
   });
   fsCommit_(writes);
+  try { fireReminders_(me, ctx, seenEvents); } catch (err) { Logger.log('Reminders: ' + err.message); }
   return count;
 }
 
@@ -188,6 +191,10 @@ function defaultsFor_(cal, isPrimary, me) {
   if (/rota|roster|shift|loop|healthroster/.test(name)) return { show: true, share: 'all', role: 'rota', layer: 'own' };
   if (/work|office/.test(name) || (!personal && isPrimary)) return { show: true, share: 'hours', role: 'work', layer: 'own' };
   if (isPrimary && me.main) return { show: true, share: 'all', role: 'normal', layer: 'own' };
+  // someone's main calendar at a company address, shared into this account: almost always your work calendar
+  if (!cal.isOwnedByMe() && /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(id) && !/@(gmail|googlemail|hotmail|outlook|live|icloud|me|mac|yahoo|aol|btinternet|sky|proton|protonmail)\.|calendar\.google\.com$/i.test(id) && personal) {
+    return { show: true, share: 'hours', role: 'work', layer: 'own' };
+  }
   if (!cal.isOwnedByMe()) {
     if (/family|mum|dad|parents|home/.test(name)) return { show: true, share: 'all', role: 'normal', layer: 'family' };
     if (/friend|mates|crew|squad|book club/.test(name)) return { show: true, share: 'all', role: 'normal', layer: 'friends' };
@@ -209,6 +216,7 @@ function norm_(ev) {
   var desc = ev.getDescription() || '';
   var start = ev.getStartTime();
   var o = { id: shortKey_(ev.getId() + '|' + start.getTime()), t: ev.getTitle() || '' };
+  try { if (ev.isRecurringEvent()) o.sid = shortKey_(ev.getId()); } catch (e) { /* ignore */ }
   if (ev.isAllDayEvent()) {
     o.ad = 1;
     o.sd = day_(ev.getAllDayStartDate());
@@ -438,6 +446,120 @@ function changeEvent_(me, o) {
     done++;
   });
   return { changed: done };
+}
+
+// ===================== event reminders =====================
+// Reminders are kept on each person's record (people/{id}.reminders), set in the app.
+// This account sends the ones for events in its own calendars, whoever set them.
+var REMIND_DAYS_ = { w2: 14, w1: 7, d1: 1, d0: 0 };
+var BIRTHDAY_RE_ = /\bbirthday\b|\bbday\b|\bb-day\b/i;
+
+function evRef_(person, calKey, o) {
+  if (o.tag) return 't:' + o.tag;
+  return 'e:' + person + ':' + calKey + ':' + (o.sid || o.id);
+}
+function reminderId_(ref) {
+  var h = 5381;
+  for (var i = 0; i < ref.length; i++) h = ((h * 33) ^ ref.charCodeAt(i)) >>> 0;
+  return 'r' + h.toString(36) + ref.length.toString(36);
+}
+function evStartKey_(o) { return o.ad ? o.sd : Utilities.formatDate(new Date(o.s), TZ, 'yyyy-MM-dd'); }
+function keyPlus_(key, n) {
+  var d = Utilities.parseDate(key + ' 12:00', TZ, 'yyyy-MM-dd HH:mm');
+  return Utilities.formatDate(new Date(d.getTime() + n * 864e5), TZ, 'yyyy-MM-dd');
+}
+function localTime_(key, hm) { return Utilities.parseDate(key + ' ' + (hm || '09:00'), TZ, 'yyyy-MM-dd HH:mm').getTime(); }
+
+// When each reminder goes off, the same way the app works it out.
+function fireTimes_(times, o, remindAt) {
+  var out = [];
+  var key = evStartKey_(o);
+  (times || []).forEach(function (code) {
+    if (code === 'h1') { if (!o.ad) out.push({ code: code, at: o.s - 3600e3 }); return; }
+    if (REMIND_DAYS_[code] === undefined) return;
+    var at = localTime_(keyPlus_(key, -REMIND_DAYS_[code]), remindAt);
+    if (code === 'd0' && !o.ad && o.s - 3600e3 < at) at = o.s - 3600e3;
+    out.push({ code: code, at: at });
+  });
+  return out;
+}
+function reminderLine_(o, now) {
+  var key = evStartKey_(o);
+  var today = Utilities.formatDate(new Date(now), TZ, 'yyyy-MM-dd');
+  var days = Math.round((localTime_(key, '12:00') - localTime_(today, '12:00')) / 864e5);
+  var time = o.ad ? '' : ' at ' + timeText_(o.s);
+  var full = Utilities.formatDate(new Date(localTime_(key, '12:00')), TZ, 'EEEE d MMMM');
+  if (days <= 0) return (!o.ad && o.s > now && o.s - now <= 90 * 60e3) ? 'Soon, at ' + timeText_(o.s) + '.' : 'Today' + time + '.';
+  if (days === 1) return 'Tomorrow' + time + '.';
+  if (days === 7) return 'In a week, on ' + full + time + '.';
+  if (days === 14) return 'In two weeks, on ' + full + time + '.';
+  return 'In ' + days + ' days, on ' + full + time + '.';
+}
+function timeText_(ms) {
+  var h = Number(Utilities.formatDate(new Date(ms), TZ, 'H'));
+  var m = Number(Utilities.formatDate(new Date(ms), TZ, 'm'));
+  var suf = h < 12 ? 'am' : 'pm';
+  var h12 = h % 12 === 0 ? 12 : h % 12;
+  return h12 + (m ? ':' + (m < 10 ? '0' : '') + m : '') + suf;
+}
+
+function fireReminders_(me, ctx, seen) {
+  var now = Date.now();
+  var byRef = {};
+  seen.forEach(function (x) {
+    var ref = evRef_(me.person, x.calKey, x.ev);
+    (byRef[ref] = byRef[ref] || []).push(x);
+  });
+  var props = PropertiesService.getUserProperties();
+  var fired = JSON.parse(props.getProperty('rem_fired') || '{}');
+  var writes = [];
+  var changed = false;
+
+  function consider(personId, settings, ref, rem, list) {
+    (list || []).forEach(function (x) {
+      var o = x.ev;
+      var end = o.ad ? localTime_(o.ed || keyPlus_(o.sd, 1), '00:00') : o.e;
+      if (end <= now) return;
+      var occ = ref + '@' + evStartKey_(o);
+      var doneAt = (rem.done && rem.done[occ]) || 0;
+      fireTimes_(rem.times, o, settings.remindAt || '09:00').forEach(function (f) {
+        if (f.at > now || now - f.at > 36 * 3600e3) return;
+        var key = personId + '|' + occ + '|' + f.code;
+        if (fired[key] || doneAt >= f.at) return;
+        fired[key] = now; changed = true;
+        var body = reminderLine_(o, now) + (rem.note ? ' ' + String(rem.note).replace(/\.?$/, '.') : '');
+        writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), {
+          to: personId, kind: 'reminders', title: o.t || rem.title || 'Reminder', body: body, link: '#today', sendAfter: now, sent: false, created: now
+        }));
+      });
+    });
+  }
+
+  me.people.forEach(function (p) {
+    var rems = p.data.reminders || {};
+    var settings = p.data.settings || {};
+    var bdays = (settings.autoRemind && settings.autoRemind.birthdays) || [];
+    Object.keys(rems).forEach(function (id) {
+      var r = rems[id];
+      if (!r || r.owner !== me.person || !r.ref) return;
+      var times = r.auto ? bdays : r.times;
+      if (!times || !times.length) return;
+      consider(p.id, settings, r.ref, merge_(r, { times: times }), byRef[r.ref]);
+    });
+    // every birthday in your own calendars, unless you've set that one yourself
+    if (p.id === me.person && bdays.length) {
+      Object.keys(byRef).forEach(function (ref) {
+        if (rems[reminderId_(ref)]) return;
+        var list = byRef[ref].filter(function (x) { return x.shown && x.ev.ad && BIRTHDAY_RE_.test(x.ev.t || ''); });
+        if (list.length) consider(p.id, settings, ref, { times: bdays, note: '', title: list[0].ev.t }, list);
+      });
+    }
+  });
+  if (writes.length) fsCommit_(writes);
+  if (changed) {
+    Object.keys(fired).forEach(function (k) { if (now - fired[k] > 45 * 864e5) delete fired[k]; });
+    props.setProperty('rem_fired', JSON.stringify(fired));
+  }
 }
 
 // ===================== reminders for unanswered requests =====================

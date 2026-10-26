@@ -1,9 +1,9 @@
 // Caledonite service worker: works offline, and shows notifications.
-const VERSION = 'caledonite-v5';
+const VERSION = 'caledonite-v6';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
   './js/app.js', './js/config.js', './js/util.js', './js/logic.js', './js/store.js', './js/ui.js', './js/uistate.js',
-  './js/theme.js', './js/views-main.js', './js/views-requests.js', './js/views-settings.js', './js/firebase.js', './js/demo.js',
+  './js/theme.js', './js/views-main.js', './js/views-requests.js', './js/views-settings.js', './js/views-event.js', './js/firebase.js', './js/demo.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'
 ];
 self.addEventListener('install', (e) => {

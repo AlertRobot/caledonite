@@ -4,11 +4,12 @@ import { ui, resetAsk, resetAdd } from './uistate.js';
 import { viewToday, viewCalendar, waitingForMe } from './views-main.js';
 import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey } from './views-requests.js';
 import { viewSettings, viewSignedOut, viewSetup, viewNotMember, viewLoading } from './views-settings.js';
+import { viewEvent, findEvent } from './views-event.js';
 import { applyLook, setLook } from './theme.js';
 import { FIREBASE, APP } from './config.js';
 import { icon } from './ui.js';
 import { dayKey, addDays, fromDayKey, mondayOf, esc, minutesOf, pad } from './util.js';
-import { freeSlots, settingsOf, shiftFor, SHIFT_ORDER, nameOf } from './logic.js';
+import { freeSlots, settingsOf, shiftFor, SHIFT_ORDER, nameOf, reminderFor } from './logic.js';
 import { whenLabel } from './store.js';
 
 const root = document.getElementById('app');
@@ -28,7 +29,7 @@ function isEditing() {
 function navBar(state, r) {
   const n = waitingForMe(state).length;
   const tab = (href, key, label, ic, extra = '') => {
-    const on = r === key || (key === 'requests' && r === 'ask');
+    const on = r === key || (key === 'requests' && r === 'ask') || (r === 'event' && ui.ev.back && ui.ev.back.startsWith('#' + key));
     return `<a href="#${href}" class="nav-item ${on ? 'on' : ''}" ${on ? 'aria-current="page"' : ''}><span class="nav-ic">${ic}${extra}</span>${label}</a>`;
   };
   return `<nav class="bottom-nav" aria-label="Main">
@@ -54,7 +55,7 @@ export function render() {
   else {
     nav = true;
     if (r === 'settings') ui.settings.page = sub || 'home';
-    const view = { today: viewToday, calendar: viewCalendar, requests: viewRequests, ask: viewAsk, add: viewAdd, settings: viewSettings }[r] || viewToday;
+    const view = { today: viewToday, calendar: viewCalendar, requests: viewRequests, ask: viewAsk, add: viewAdd, settings: viewSettings, event: viewEvent }[r] || viewToday;
     try { html = view(st); } catch (e) {
       console.error(e);
       html = `<div class="welcome"><h1 class="h2">Something went wrong</h1><p class="muted">${esc(e && e.message)}</p><a class="btn" href="#today">Back to Today</a></div>`;
@@ -78,6 +79,11 @@ function toast(text) {
 function go(hash) {
   if (location.hash === hash) render();
   else location.hash = hash;
+}
+// the next Monday (1) ... Sunday (7), counting today
+function nextWeekday(iso) {
+  for (let i = 0; i < 7; i++) { const d = addDays(new Date(), i); if ((d.getDay() || 7) === iso) return dayKey(d); }
+  return dayKey(new Date());
 }
 function plusMins(hm, mins) {
   const t = Math.min(23 * 60 + 59, minutesOf(hm) + mins);
@@ -117,6 +123,65 @@ const H = {
   weekToday: () => { ui.weekStart = mondayOf(new Date()); ui.weekOpen = dayKey(new Date()); render(); },
   addFor: (el) => { resetAdd(); ui.add.kind = 'event'; ui.add.day = 'pick'; ui.add.date = el.dataset.day; },
   reqTab: (el) => { ui.reqTab = el.dataset.v; render(); },
+  // ----- one event, and its reminder -----
+  openEv: (el) => {
+    const h = location.hash || '#today';
+    ui.ev = { ref: el.dataset.ref, day: el.dataset.day, back: h.startsWith('#event') ? ui.ev.back : h, noteDraft: null };
+    go('#event');
+  },
+  evBack: () => go(ui.ev.back || '#today'),
+  evTime: (el) => {
+    const st = store.state;
+    const { it, ev } = findEvent(st, ui.ev.ref, ui.ev.day);
+    const base = ev || it;
+    if (!base) return;
+    const owner = (it && it.owner) || base.owner || st.me;
+    const rem = reminderFor(st, ui.ev.ref, Object.assign({}, base, { owner }));
+    const cur = (rem && rem.times) || [];
+    const v = el.dataset.v;
+    const times = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v];
+    run(actions.setReminder({ ref: ui.ev.ref, owner, title: (it && it.title) || base.title, times, note: rem ? rem.note : '' }));
+  },
+  evNotePick: (el) => {
+    const st = store.state;
+    const { it, ev } = findEvent(st, ui.ev.ref, ui.ev.day);
+    const base = ev || it;
+    const owner = (it && it.owner) || base.owner || st.me;
+    const rem = reminderFor(st, ui.ev.ref, Object.assign({}, base, { owner }));
+    const note = rem && rem.note === el.dataset.v ? '' : el.dataset.v;
+    ui.ev.noteDraft = null;
+    run(actions.setReminder({ ref: ui.ev.ref, owner, title: (it && it.title) || base.title, times: rem ? rem.times : [], note }));
+  },
+  evRemOff: () => {
+    const st = store.state;
+    const { it, ev } = findEvent(st, ui.ev.ref, ui.ev.day);
+    const base = ev || it;
+    const owner = (it && it.owner) || (base && base.owner) || st.me;
+    // keep an empty one, so an automatic birthday reminder stays off too
+    run(actions.setReminder({ ref: ui.ev.ref, owner, title: base ? base.title : '', times: [], note: '' }), 'Reminder turned off.');
+  },
+  remDone: (el) => run(actions.reminderDone(el.dataset.ref, el.dataset.occ, el.dataset.title), 'Ticked off.'),
+  testPush: async () => {
+    ui.pushMsg = 'Sending a test. It should arrive within a minute.'; render();
+    try { await actions.testPush(); } catch (e) { console.error(e); ui.pushMsg = 'That didn’t send. Try again in a moment.'; render(); }
+  },
+  autoBday: (el) => {
+    const s = settingsOf(store.state, store.state.me);
+    const cur = s.autoRemind.birthdays || [];
+    const v = el.dataset.v;
+    run(actions.updateMySettings({ autoRemind: Object.assign({}, s.autoRemind, { birthdays: cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v] }) }));
+  },
+  addRemind: (el) => { const v = el.dataset.v; ui.add.remind = ui.add.remind.includes(v) ? ui.add.remind.filter((x) => x !== v) : [...ui.add.remind, v]; render(); },
+  addNotePick: (el) => { ui.add.note = ui.add.note === el.dataset.v ? '' : el.dataset.v; render(); },
+  // ----- every other Friday off -----
+  altOffToggle: () => {
+    const s = settingsOf(store.state, store.state.me);
+    if (s.altOff) return run(actions.updateMySettings({ altOff: null }));
+    const days = s.workDays.filter((d) => d <= 5);
+    const day = days.includes(5) ? 5 : (days[days.length - 1] || 5);
+    run(actions.updateMySettings({ altOff: { day, from: nextWeekday(day) } }));
+  },
+  altOffFrom: (el) => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ altOff: { day: s.altOff.day, from: el.dataset.v } })); },
   askNew: () => { resetAsk(); },
   answer: (el) => run(actions.answerRequest(el.dataset.id, el.dataset.a), {
     yes: 'Done. Saving it to your calendars.', no: 'Answer sent.', maybe: 'Answer sent.', seen: null, cancel: 'Request cancelled.', remind: 'Reminder sent.', 'accept-counter': 'Done. Saving it to your calendars.'
@@ -172,7 +237,8 @@ const H = {
     const cals = Object.values(st.calendars).filter((c) => c.owner === st.me && c.canWrite && c.role !== 'rota');
     const calKey = a.cal || (cals.find((c) => c.primary) || cals[0] || {}).calKey || null;
     try {
-      await actions.addEvent({ who: a.who, title: a.title, day, start: a.allDay ? null : a.start, end: a.allDay ? null : end, allDay: a.allDay, calKey, busyOnly: a.busyOnly });
+      const tag = await actions.addEvent({ who: a.who, title: a.title, day, start: a.allDay ? null : a.start, end: a.allDay ? null : end, allDay: a.allDay, calKey, busyOnly: a.busyOnly });
+      if (a.who !== 'partner' && a.remind.length && tag) await actions.setReminder({ ref: `t:${tag}`, owner: st.me, title: a.title.trim(), times: a.remind, note: a.note.trim() });
       const when = whenLabel({ day, start: a.start, end, allDay: a.allDay });
       ui.add.done = a.who === 'partner' ? `Sent to ${nameOf(st, st.partner)}: ${a.title} (${when}). It goes in their calendar when they say yes.`
         : a.who === 'both' ? `Added for both of you: ${a.title} (${when}).` : `Added: ${a.title} (${when}). It reaches Google Calendar within a few minutes.`;
@@ -293,6 +359,21 @@ const C = {
   },
   personField: (el) => run(actions.updatePersonSettings(el.dataset.p, { [el.dataset.f]: el.dataset.f === 'travelMins' ? Number(el.value) : el.value })),
   myField: (el) => run(actions.updateMySettings({ [el.dataset.f]: el.value })),
+  evNote: (el) => {
+    const st = store.state;
+    const { it, ev } = findEvent(st, ui.ev.ref, ui.ev.day);
+    const base = ev || it;
+    if (!base) return;
+    const owner = (it && it.owner) || base.owner || st.me;
+    const rem = reminderFor(st, ui.ev.ref, Object.assign({}, base, { owner }));
+    ui.ev.noteDraft = null;
+    run(actions.setReminder({ ref: ui.ev.ref, owner, title: (it && it.title) || base.title, times: rem ? rem.times : [], note: el.value.trim() }));
+  },
+  altOffDay: (el) => {
+    const day = Number(el.value);
+    run(actions.updateMySettings({ altOff: { day, from: nextWeekday(day) } }));
+  },
+  addNote: (el) => { ui.add.note = el.value; },
   hhField: (el) => run(actions.updateHousehold({ [el.dataset.f]: el.dataset.f === 'nudgeHours' ? Number(el.value) : el.value }))
 };
 

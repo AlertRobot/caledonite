@@ -18,14 +18,17 @@ export const SHIFT_ORDER = ['off', 'long', 'night', 'early', 'late', 'leave'];
 export const DEFAULT_SETTINGS = {
   workLabel: 'Working',
   workStart: '09:00',
-  workEnd: '17:30',
+  workEnd: '18:00',
   workDays: [1, 2, 3, 4, 5],
+  altOff: null, // { day: 5, from: '2026-10-30' } = every other Friday off, starting then
   hasShifts: false,
   shiftTypes: DEFAULT_SHIFT_TYPES,
   sleepUntil: '14:00',
   travelMins: 30,
   rotaUrl: '',
-  notif: { quiet: true, requests: true, rota: true, notes: true }
+  remindAt: '09:00',
+  autoRemind: { birthdays: [] },
+  notif: { quiet: true, requests: true, rota: true, notes: true, reminders: true }
 };
 
 export const LAYER_INFO = {
@@ -42,6 +45,7 @@ export function settingsOf(state, pid) {
   const s = Object.assign({}, DEFAULT_SETTINGS, p.settings || {});
   s.shiftTypes = Object.assign({}, DEFAULT_SHIFT_TYPES, (p.settings && p.settings.shiftTypes) || {});
   s.notif = Object.assign({}, DEFAULT_SETTINGS.notif, (p.settings && p.settings.notif) || {});
+  s.autoRemind = Object.assign({}, DEFAULT_SETTINGS.autoRemind, (p.settings && p.settings.autoRemind) || {});
   return s;
 }
 export function nameOf(state, pid) {
@@ -131,10 +135,29 @@ export function isWorkingShift(sh) {
 }
 
 // ---------- work hours ----------
+// "Every other Friday off": true on the days off, counting in fortnights from the first one.
+export function isAltDayOff(s, key) {
+  const a = s && s.altOff;
+  if (!a || !a.day || !a.from) return false;
+  const date = fromDayKey(key);
+  if (isoWeekday(date) !== Number(a.day)) return false;
+  const days = Math.round((date - fromDayKey(a.from)) / 86400000);
+  return ((days % 14) + 14) % 14 === 0;
+}
+export function nextAltDaysOff(s, from = new Date(), count = 2) {
+  const out = [];
+  if (!s.altOff) return out;
+  for (let i = 0; i < 60 && out.length < count; i++) {
+    const k = dayKey(addDays(startOfDay(from), i));
+    if (isAltDayOff(s, k)) out.push(k);
+  }
+  return out;
+}
 function workFor(state, pid, key, viewer) {
   const s = settingsOf(state, pid);
   const date = fromDayKey(key);
   if (!s.workDays || !s.workDays.includes(isoWeekday(date))) return null;
+  if (isAltDayOff(s, key)) return null;
   const evs = eventsOn(state, pid, key);
   const ownCalEvs = evs.filter((ev) => {
     const c = calOf(state, ev);
@@ -252,6 +275,10 @@ export function buildDay(state, key, now = new Date()) {
         items.push({ kind: 'shift', who: pid, title: shift.label, sub: shift.type === 'leave' ? 'Holiday' : 'Not working', allDay: true, start: new Date(dayStart), end: new Date(dayEnd), shift });
       }
     }
+    // every other Friday (or whichever day) off
+    if (!s.hasShifts && s.workDays.includes(isoWeekday(date)) && isAltDayOff(s, key) && !shift) {
+      items.push({ kind: 'shift', who: pid, title: 'Day off', sub: `Every other ${DAY_NAMES[date.getDay()]}`, allDay: true, start: new Date(dayStart), end: new Date(dayEnd), dayOff: true });
+    }
     // working hours
     const work = workFor(state, pid, key, state.me);
     if (work) {
@@ -270,7 +297,8 @@ export function buildDay(state, key, now = new Date()) {
       }
       const it = {
         kind: 'event', who: pid, title: ev.busy ? 'Busy' : (ev.title || 'Busy'), sub: c.role === 'work' ? 'Work' : '',
-        start: ev.start, end: ev.end, allDay: ev.allDay, calName: c.name, location: ev.location || '', busyOnly: !!ev.busy
+        start: ev.start, end: ev.end, allDay: ev.allDay, calName: c.name, location: ev.location || '', busyOnly: !!ev.busy,
+        ref: evRef(ev), owner: ev.owner, repeats: !!ev.sid
       };
       if (c.layer && c.layer !== 'own') {
         const lk = layerKey(pid, c.layer);
@@ -296,10 +324,11 @@ export function buildDay(state, key, now = new Date()) {
     if (req && (req.status === 'no' || req.status === 'cancelled')) continue;
     const both = owners.size > 1 || (req && req.type !== 'favour' && req.type !== 'add') || tag.startsWith('both:');
     const who = both ? 'both' : ev.owner;
+    const mine = evs.find((e) => e.owner === state.me) || ev;
     const it = {
       kind: hold ? 'hold' : (both ? 'together' : 'event'), who, title, start: ev.start, end: ev.end, allDay: ev.allDay,
       sub: hold ? `Pencilled in, waiting for ${req ? nameOf(state, req.to) : 'an answer'}` : (req && req.type === 'favour' ? `${nameOf(state, req.from)} asked` : ''),
-      tag
+      tag, ref: hold ? null : evRef(mine), owner: mine.owner, calName: (calOf(state, mine) || {}).name
     };
     if (who === 'both') together.push(it);
     else if (persons[who]) persons[who].items.push(it);
@@ -332,7 +361,7 @@ export function buildDay(state, key, now = new Date()) {
     const ev = o.event;
     const start = ev.allDay ? new Date(dayStart) : atTime(key, ev.start);
     const end = ev.allDay ? new Date(dayEnd) : atTime(key, ev.end);
-    const it = { kind: o.both ? 'together' : 'event', who: o.both ? 'both' : o.person, title: ev.title, start, end, allDay: ev.allDay, sub: 'Saving to Google Calendar', pending: true, tag: o.tag };
+    const it = { kind: o.both ? 'together' : 'event', who: o.both ? 'both' : o.person, title: ev.title, start, end, allDay: ev.allDay, sub: 'Saving to Google Calendar', pending: true, tag: o.tag, ref: `t:${o.tag}`, owner: o.person };
     if (o.both) { if (o.person === state.me) together.push(it); }
     else if (persons[o.person]) persons[o.person].items.push(it);
   }
@@ -594,6 +623,116 @@ export function sleepingUntil(state, pid, now = new Date()) {
   const p = d.persons[pid];
   if (p && p.sleep && p.sleep.start <= now && p.sleep.end > now) return p.sleep.end;
   return null;
+}
+
+// ---------- reminders ----------
+// A reminder belongs to one person and points at an event (or a repeating series, or
+// something added in this app). The calendar sync sends it to their phone at the right
+// time; Today shows it until the day has passed or it's ticked off.
+export const REMIND_OPTIONS = [
+  { v: 'w2', label: 'Two weeks before', days: 14 },
+  { v: 'w1', label: 'A week before', days: 7 },
+  { v: 'd1', label: 'The day before', days: 1 },
+  { v: 'd0', label: 'On the day', days: 0 },
+  { v: 'h1', label: 'An hour before', mins: 60, timedOnly: true }
+];
+export const REMIND_NOTES = ['Buy a card and a present', 'Send a message', 'Book a table', 'Get something ready'];
+const BIRTHDAY_RE = /\bbirthday\b|\bbday\b|\bb-day\b/i;
+
+export function evRef(ev) {
+  if (ev.tag) return `t:${ev.tag}`;
+  return `e:${ev.owner}:${ev.calKey}:${ev.sid || ev.id}`;
+}
+export function reminderId(ref) {
+  let h = 5381;
+  for (let i = 0; i < ref.length; i++) h = ((h * 33) ^ ref.charCodeAt(i)) >>> 0;
+  return 'r' + h.toString(36) + ref.length.toString(36);
+}
+function occKeyOf(ref, ev) {
+  return `${ref}@${ev.allDay ? (ev.startKey || dayKey(ev.start)) : dayKey(ev.start)}`;
+}
+export function isBirthday(ev) {
+  return !!ev.allDay && BIRTHDAY_RE.test(ev.title || '');
+}
+// My own reminder for this event, or the automatic birthday one, or null.
+export function reminderFor(state, ref, ev) {
+  const p = state.people[state.me] || {};
+  const r = (p.reminders || {})[reminderId(ref)];
+  const s = settingsOf(state, state.me);
+  // a ticked-off automatic one follows the birthday setting
+  if (r && r.auto) return Object.assign({ id: reminderId(ref) }, r, { times: s.autoRemind.birthdays || [] });
+  if (r) return Object.assign({ id: reminderId(ref), auto: false }, r);
+  if (ev && ev.owner === state.me && isBirthday(ev) && (s.autoRemind.birthdays || []).length) {
+    return { id: reminderId(ref), ref, owner: ev.owner, times: s.autoRemind.birthdays, note: '', auto: true };
+  }
+  return null;
+}
+export function fireTimes(times, ev, remindAt = '09:00') {
+  const out = [];
+  const startKey = ev.allDay ? (ev.startKey || dayKey(ev.start)) : dayKey(ev.start);
+  for (const code of times || []) {
+    const o = REMIND_OPTIONS.find((x) => x.v === code);
+    if (!o) continue;
+    if (o.timedOnly) { if (!ev.allDay) out.push({ code, at: new Date(ev.start.getTime() - o.mins * 60000) }); continue; }
+    let at = atTime(dayKey(addDays(fromDayKey(startKey), -o.days)), remindAt);
+    // on the day of something early: an hour before it, if that comes first
+    if (o.days === 0 && !ev.allDay && ev.start.getTime() - 3600000 < at.getTime()) at = new Date(ev.start.getTime() - 3600000);
+    out.push({ code, at });
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+// "In a week, on Friday 6 November." Used on Today and in the phone notification.
+export function reminderLine(ev, now = new Date()) {
+  const date = ev.allDay ? fromDayKey(ev.startKey || dayKey(ev.start)) : ev.start;
+  const days = Math.round((startOfDay(date) - startOfDay(now)) / 86400000);
+  const time = ev.allDay ? '' : ` at ${fmtTime(ev.start)}`;
+  const full = `${DAY_NAMES[date.getDay()]} ${date.getDate()} ${MONTH_LONG[date.getMonth()]}`;
+  if (days <= 0) {
+    if (!ev.allDay && ev.start > now && ev.start - now <= 90 * 60000) return `Soon, at ${fmtTime(ev.start)}.`;
+    return `Today${time}.`;
+  }
+  if (days === 1) return `Tomorrow${time}.`;
+  if (days === 7) return `In a week, on ${full}${time}.`;
+  if (days === 14) return `In two weeks, on ${full}${time}.`;
+  return `In ${days} days, on ${full}${time}.`;
+}
+const MONTH_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+// Every event I can see that has a reminder for me, with when it fires.
+export function myReminders(state, now = new Date(), daysAhead = 60) {
+  const s = settingsOf(state, state.me);
+  const limit = addDays(startOfDay(now), daysAhead).getTime();
+  const todayStart = startOfDay(now).getTime();
+  const seen = new Set();
+  const out = [];
+  for (const ev of state.events) {
+    if (ev.end.getTime() <= todayStart || ev.start.getTime() > limit) continue;
+    if (ev.busy) continue;
+    const ref = evRef(ev);
+    const occ = occKeyOf(ref, ev);
+    if (seen.has(occ)) continue;
+    const c = calOf(state, ev);
+    if (ev.owner === state.me && c.show === false) continue;
+    const rem = reminderFor(state, ref, ev);
+    if (!rem || !(rem.times || []).length) continue;
+    seen.add(occ);
+    const fires = fireTimes(rem.times, ev, s.remindAt);
+    if (!fires.length) continue;
+    const doneAt = (rem.done && rem.done[occ]) || 0;
+    const fired = fires.filter((f) => f.at <= now);
+    const lastFired = fired.length ? fired[fired.length - 1].at.getTime() : 0;
+    const next = fires.find((f) => f.at > now) || null;
+    const active = !!lastFired && ev.end > now && doneAt < lastFired;
+    out.push({ ref, occ, ev, rem, fires, next, active, doneAt, title: ev.title || 'Something', note: rem.note || '' });
+  }
+  return out.sort((a, b) => a.ev.start - b.ev.start);
+}
+// Reminder chips in a short sentence: "A week before and on the day"
+export function remindSummary(times) {
+  const labels = REMIND_OPTIONS.filter((o) => (times || []).includes(o.v)).map((o) => o.label.toLowerCase());
+  if (!labels.length) return 'No reminder';
+  const t = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+  return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
 export { DAY_NAMES, fmtHM };

@@ -1,6 +1,6 @@
 // Settings (with its own menu), plus the sign-in and first-time screens.
-import { esc, dayKey, addDays, mondayOf, fmtDate, agoText, WEEKDAY_NAMES, fmtTime, atTime, MONTH_NAMES } from './util.js';
-import { nameOf, settingsOf, shiftFor, SHIFT_ORDER, LAYER_INFO, personColour } from './logic.js';
+import { esc, dayKey, addDays, mondayOf, fmtDate, agoText, WEEKDAY_NAMES, fmtTime, atTime, MONTH_NAMES, fromDayKey } from './util.js';
+import { nameOf, settingsOf, shiftFor, SHIFT_ORDER, LAYER_INFO, personColour, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS } from './logic.js';
 import { icon, avatar, seg, toggleRow, empty } from './ui.js';
 import { ui } from './uistate.js';
 import { APP, FIREBASE } from './config.js';
@@ -41,9 +41,9 @@ function settingsHome(state) {
   const status = {
     calendars: myCals.length ? `${myCals.length} calendar${myCals.length === 1 ? '' : 's'} from ${accounts.size} account${accounts.size === 1 ? '' : 's'}` : 'Not connected yet',
     shifts: shiftPeople.length ? shiftPeople.map((p) => (p === me ? 'Your shifts' : `${nameOf(state, p)}'s shifts`)).join(' and ') : 'No one works shifts',
-    routine: `${s.hasShifts ? 'Shifts' : `Work ${fmtHM(s.workStart)} to ${fmtHM(s.workEnd)}`}. Dinner at ${fmtHM(state.household.dinnerTime || '19:00')}.`,
+    routine: `${s.hasShifts ? 'Shifts' : `Work ${fmtHM(s.workStart)} to ${fmtHM(s.workEnd)}${s.altOff ? `, every other ${WEEKDAY_NAMES[s.altOff.day]} off` : ''}`}. Dinner at ${fmtHM(state.household.dinnerTime || '19:00')}.`,
     requests: `${(state.household.favours || []).length} quick favours`,
-    notifications: hasPush() ? 'On for this phone' : 'Off on this phone',
+    notifications: `${hasPush() ? 'On for this phone' : 'Off on this phone'}. ${reminderCount(state)}`,
     theme: (THEMES[look.theme] || THEMES.classic).name,
     apps: 'E&S Kitchen and E&S Budgie',
     account: [state.me, state.partner].filter(Boolean).map((p) => nameOf(state, p)).join(' and ')
@@ -57,6 +57,10 @@ function settingsHome(state) {
     <p class="small muted pad-x">Settings are saved to your account, so they follow you to a new phone. Your theme is just for this phone.</p>`;
 }
 function fmtHM(hm) { return fmtTime(atTime('2000-01-01', hm || '00:00')); }
+function reminderCount(state) {
+  const n = myReminders(state).length;
+  return n ? `${n} reminder${n === 1 ? '' : 's'} coming up.` : 'No reminders yet.';
+}
 function hasPush() { try { return localStorage.getItem('caledonite.push') === '1' && Notification.permission === 'granted'; } catch (e) { return false; } }
 
 // ---------- calendars ----------
@@ -220,6 +224,7 @@ function secRoutine(state) {
       <div class="field"><label for="w-end">Finish</label><input id="w-end" type="time" value="${esc(s.workEnd)}" data-act="myField" data-f="workEnd"></div></div>
       <span class="b">Working days</span>
       <div class="row-wrap">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<button type="button" class="chip-btn ${s.workDays.includes(d) ? 'on' : ''}" aria-pressed="${s.workDays.includes(d)}" data-act="workDay" data-v="${d}">${WEEKDAY_NAMES[d]}</button>`).join('')}</div>
+      ${altOffBlock(s)}
       <p class="small muted">A day off? Add an all-day event called Holiday or Day off, and that day has no working hours.</p>`}
     </div></section>
     <section class="stack-s"><h2 class="h4">Dinner</h2>
@@ -228,6 +233,30 @@ function secRoutine(state) {
       ${toggleRow({ act: 'hhToggle', on: h.showDinner !== false, label: 'Show dinner on Today', sub: 'When you’re both home at dinner time.', data: 'data-f="showDinner"' })}
       ${toggleRow({ act: 'hhToggle', on: h.moveDinner !== false, label: 'Move dinner earlier before a night shift', sub: 'So you can eat together before they leave.', data: 'data-f="moveDinner"' })}
     </div></section>`;
+}
+
+function altOffBlock(s) {
+  const a = s.altOff;
+  const days = s.workDays.length ? s.workDays : [1, 2, 3, 4, 5];
+  const next = a ? nextAltDaysOff(s, new Date(), 1)[0] : null;
+  const head = toggleRow({
+    act: 'altOffToggle', on: !!a, label: a ? `Every other ${WEEKDAY_NAMES[a.day]} off` : 'A day off every other week',
+    sub: a && next ? `Next one: ${fmtDate(fromDayKey(next))}.` : 'For example, every other Friday.'
+  });
+  if (!a) return `<div class="card flush inset">${head}</div>`;
+  // the next two of that weekday: which one is off?
+  const opts = [];
+  for (let i = 0; i < 14 && opts.length < 2; i++) {
+    const d = addDays(new Date(), i);
+    if ((d.getDay() || 7) === Number(a.day)) opts.push(dayKey(d));
+  }
+  return `<div class="card flush inset">${head}
+    <div class="pad stack-s">
+      <div class="field"><label for="alt-day">Which day</label><select id="alt-day" data-act="altOffDay">${days.map((d) => `<option value="${d}" ${Number(a.day) === d ? 'selected' : ''}>${WEEKDAY_NAMES[d]}</option>`).join('')}</select></div>
+      <span class="b">Which one is your next day off?</span>
+      <div class="row-wrap">${opts.map((k) => `<button type="button" class="chip-btn ${next === k ? 'on' : ''}" aria-pressed="${next === k}" data-act="altOffFrom" data-v="${k}">${esc(fmtDate(fromDayKey(k)))}</button>`).join('')}</div>
+      <p class="small muted">The other ${esc(WEEKDAY_NAMES[a.day])}s are normal working days.</p>
+    </div></div>`;
 }
 
 // ---------- requests ----------
@@ -248,17 +277,38 @@ function secNotifications(state) {
   const s = settingsOf(state, state.me);
   const n = s.notif;
   const on = hasPush();
+  const list = myReminders(state);
+  const bday = s.autoRemind.birthdays || [];
   return `<div class="card stack pad">
       <div class="row">${icon.bell(24)}<span class="grow col"><span class="b">This phone</span><span class="small muted">${on ? 'Notifications are on.' : 'Notifications are off.'}</span></span></div>
-      ${on ? '<button type="button" class="btn sec self-start" data-act="pushOn">Refresh</button>' : '<button type="button" class="btn self-start" data-act="pushOn">Turn on notifications</button>'}
+      <div class="row-wrap">${on ? '<button type="button" class="btn sec" data-act="testPush">Send a test notification</button><button type="button" class="btn sec" data-act="pushOn">Refresh</button>' : '<button type="button" class="btn" data-act="pushOn">Turn on notifications</button>'}</div>
       ${ui.pushMsg ? `<p class="small note-box">${esc(ui.pushMsg)}</p>` : ''}
     </div>
+    <section class="stack-s"><h2 class="h4">Reminders</h2>
+      <p class="small muted">Tap anything on Today or in the Calendar to set a reminder for it.</p>
+      <div class="card flush">
+        ${list.length ? list.slice(0, 12).map((x) => {
+          const day = x.ev.allDay ? (x.ev.startKey || dayKey(x.ev.start)) : dayKey(x.ev.start);
+          return `<button type="button" class="menu-row" data-act="openEv" data-ref="${esc(x.ref)}" data-day="${day}">
+            <span class="grow col"><span class="b">${esc(x.title)}</span><span class="small muted">${esc(fmtDate(fromDayKey(day)))}. ${esc(remindSummary(x.rem.times))}${x.rem.auto ? ' (birthday)' : ''}.</span></span>${icon.next(20)}</button>`;
+        }).join('') : '<p class="pad muted">No reminders coming up.</p>'}
+      </div>
+      <div class="card stack-s pad">
+        <span class="b">Every birthday</span>
+        <span class="small muted">For all-day events with “birthday” in the name, in your calendars.</span>
+        <div class="row-wrap">${REMIND_OPTIONS.filter((o) => !o.timedOnly).map((o) => `<button type="button" class="chip-btn ${bday.includes(o.v) ? 'on' : ''}" aria-pressed="${bday.includes(o.v)}" data-act="autoBday" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
+        <span class="small muted">${bday.length ? esc(remindSummary(bday)) + '. You can change one birthday by tapping it.' : 'Off. Pick one or more to turn it on.'}</span>
+      </div>
+      <div class="card flush"><div class="list-row"><label for="remind-at" class="grow col"><span class="b">Reminder time</span><span class="small muted">When “a week before” or “on the day” reminders arrive.</span></label><input id="remind-at" class="time-sm" type="time" value="${esc(s.remindAt || '09:00')}" data-act="myField" data-f="remindAt"></div></div>
+    </section>
+    <section class="stack-s"><h2 class="h4">What to send to this phone</h2>
     <div class="card flush">
-      ${toggleRow({ act: 'notifToggle', on: n.quiet, label: 'Quiet while I sleep after nights', sub: 'Messages to you wait until you wake.', data: 'data-f="quiet"' })}
+      ${toggleRow({ act: 'notifToggle', on: n.reminders, label: 'Reminders', sub: 'For things you set a reminder on.', data: 'data-f="reminders"' })}
       ${toggleRow({ act: 'notifToggle', on: n.requests, label: 'Requests and answers', sub: 'When you’re asked something, or get an answer.', data: 'data-f="requests"' })}
       ${toggleRow({ act: 'notifToggle', on: n.notes, label: 'Notes', sub: 'When a note is left for you.', data: 'data-f="notes"' })}
-      ${toggleRow({ act: 'notifToggle', on: n.rota, label: 'Rota changes', sub: 'When a shift is added, moved or swapped.', data: 'data-f="rota"' })}
-    </div>`;
+      ${s.hasShifts ? toggleRow({ act: 'notifToggle', on: n.rota, label: 'Rota changes', sub: 'When a shift is added, moved or swapped.', data: 'data-f="rota"' }) : ''}
+      ${s.hasShifts ? toggleRow({ act: 'notifToggle', on: n.quiet, label: 'Quiet while I sleep after nights', sub: 'Messages to you wait until you wake.', data: 'data-f="quiet"' }) : ''}
+    </div></section>`;
 }
 
 // ---------- theme ----------

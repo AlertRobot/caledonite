@@ -95,6 +95,7 @@ export async function createFirebaseBackend() {
     async update(path, patch) { await fs.setDoc(ref(path), patch, { merge: true }); },
     async add(coll, data) { const r = await fs.addDoc(fs.collection(db, `${H}/${coll}`), data); return r.id; },
     async del(path) { await fs.deleteDoc(ref(path)); },
+    async unset(path, field) { await fs.updateDoc(ref(path), { [field]: fs.deleteField() }); },
     async ping() {
       const h = raw.household || {};
       if (!h.pingUrl || !h.pingSecret) return false;

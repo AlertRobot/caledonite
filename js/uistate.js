@@ -15,7 +15,8 @@ export const ui = {
   reqTab: 'for',
   suggestFor: null,
   ask: { type: 'plan', title: '', slot: 0, custom: false, cday: '', cstart: '19:00', cend: '21:00', hold: null, sent: false },
-  add: { kind: 'event', who: 'me', title: '', day: 'today', date: '', start: '', end: '', allDay: false, cal: '', busyOnly: false, shiftType: 'long', shiftWho: null, done: '' },
+  add: { kind: 'event', who: 'me', title: '', day: 'today', date: '', start: '', end: '', allDay: false, cal: '', busyOnly: false, shiftType: 'long', shiftWho: null, done: '', remind: [], note: '' },
+  ev: { ref: null, day: null, back: '#today', noteDraft: null },
   settings: { page: 'home', openCal: null, shiftWeek: 0, shiftPerson: null, editType: null, favDraft: '', partnerEmailDraft: '', linkDraft: '' },
   setup: { myName: '', myShifts: false, partnerName: '', partnerEmail: '', partnerShifts: false },
   toast: null
@@ -26,5 +27,5 @@ export function resetAsk() {
 }
 export function resetAdd() {
   const keep = { kind: ui.add.kind, who: ui.add.who };
-  ui.add = Object.assign({ title: '', day: 'today', date: '', start: '', end: '', allDay: false, cal: '', busyOnly: false, shiftType: 'long', shiftWho: null, done: '' }, keep);
+  ui.add = Object.assign({ title: '', day: 'today', date: '', start: '', end: '', allDay: false, cal: '', busyOnly: false, shiftType: 'long', shiftWho: null, done: '', remind: [], note: '' }, keep);
 }

@@ -2,7 +2,7 @@
 // It behaves like the real thing, including a pretend calendar sync.
 import { dayKey, addDays, startOfDay, atTime, isoWeekday, uid } from './util.js';
 import { setRaw, setPhase, whenLabel } from './store.js';
-import { DEFAULT_SHIFT_TYPES } from './logic.js';
+import { DEFAULT_SHIFT_TYPES, reminderId } from './logic.js';
 
 export function createDemoBackend(me = 'ethan') {
   const T = startOfDay(new Date());
@@ -46,7 +46,8 @@ export function createDemoBackend(me = 'ethan') {
   add('ethan', 'second', 'Band practice', nextWd(4, 7), '19:30', '21:30');
   add('ethan', 'family', 'Sunday lunch', nextWd(7, 1), '13:00', '16:00');
   add('ethan', 'family', 'Christmas market', nextWd(6, 22), '11:00', '15:00');
-  add('ethan', 'family', "Gran's birthday", nextWd(5, 9), null, null);
+  add('ethan', 'family', "Gran's birthday", nextWd(5, 9), null, null, { sid: 'granbday' });
+  add('ethan', 'family', "Dad's birthday", 5, null, null, { sid: 'dadbday' });
   // Sophie's own things
   add('sophie', 'primary', 'Hair appointment', 4, '10:00', '11:00');
   add('sophie', 'friends', "Girls' night", nextWd(5, 9), '19:00', '23:00');
@@ -67,7 +68,13 @@ export function createDemoBackend(me = 'ethan') {
       linked: []
     },
     people: {
-      ethan: { name: 'Ethan', email: 'ethan@example.com', colour: 'blue', settings: { workLabel: 'Working from home', workStart: '09:00', workEnd: '18:00', workDays: [1, 2, 3, 4, 5], hasShifts: false } },
+      ethan: {
+        name: 'Ethan', email: 'ethan@example.com', colour: 'blue',
+        settings: { workLabel: 'Working from home', workStart: '09:00', workEnd: '18:00', workDays: [1, 2, 3, 4, 5], hasShifts: false, altOff: { day: 5, from: k(nextWd(5, 0)) }, autoRemind: { birthdays: ['d0'] } },
+        reminders: {
+          [reminderId('e:ethan:family:dadbday')]: { ref: 'e:ethan:family:dadbday', owner: 'ethan', title: "Dad's birthday", times: ['w1', 'd0'], note: 'Buy a card and a present', created: Date.now() }
+        }
+      },
       sophie: { name: 'Sophie', email: 'sophie@example.com', colour: 'orange', settings: { workLabel: 'Working', workDays: [], hasShifts: true, sleepUntil: '14:00', travelMins: 30 } }
     },
     calendars: {
@@ -167,7 +174,15 @@ export function createDemoBackend(me = 'ethan') {
     demo: true,
     async init() { publish(); },
     async set(path, data) { const { obj, key } = at(path); obj[key] = JSON.parse(JSON.stringify(data)); publish(); },
-    async update(path, patch) { const { obj, key } = at(path); obj[key] = Object.assign({}, obj[key] || {}, JSON.parse(JSON.stringify(patch))); publish(); },
+    async update(path, patch) { const { obj, key } = at(path); obj[key] = deepMerge(obj[key] || {}, JSON.parse(JSON.stringify(patch))); publish(); },
+    async unset(path, field) {
+      const { obj, key } = at(path);
+      const parts = field.split('.');
+      let o = obj[key];
+      for (let i = 0; o && i < parts.length - 1; i++) o = o[parts[i]];
+      if (o) delete o[parts[parts.length - 1]];
+      publish();
+    },
     async add(coll, data) { const id = uid(); raw[coll] = raw[coll] || {}; raw[coll][id] = JSON.parse(JSON.stringify(data)); publish(); return id; },
     async del(path) { const { obj, key } = at(path); delete obj[key]; publish(); },
     ping() { setTimeout(runSync, 700); return Promise.resolve(true); },
@@ -178,4 +193,12 @@ export function createDemoBackend(me = 'ethan') {
   };
   setPhase('loading');
   return backend;
+}
+// Firestore's merge: maps merge, everything else is replaced
+function deepMerge(a, b) {
+  const out = Object.assign({}, a);
+  for (const [k, v] of Object.entries(b)) {
+    out[k] = v && typeof v === 'object' && !Array.isArray(v) && a[k] && typeof a[k] === 'object' && !Array.isArray(a[k]) ? deepMerge(a[k], v) : v;
+  }
+  return out;
 }
