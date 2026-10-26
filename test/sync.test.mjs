@@ -761,3 +761,91 @@ test('connect, stop and the owner-only jobs only ever run as the person themselv
   }
   assert.equal(removed, 0);
 });
+
+test('a reminder on something your account sees twice (your copy, and your partner\'s calendar shared with you) goes once', () => {
+  withDigest();
+  const now = Date.now();
+  const { api } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsGet_ = (path) => (path === 'households/main/people/ethan/private/main' ? { reminders: { r1: { ref: 't:both:tea', owner: 'ethan', times: ['h1'], note: '' } } } : null);
+  const me = { person: 'ethan', email: 'e@x.com', main: true, people: [{ id: 'ethan', data: { settings: {} } }] };
+  const ev = { tag: 'both:tea', t: 'Tea', s: now + 30 * 60e3, e: now + 90 * 60e3 };
+  const seen = ['primary', 'sophiecal'].map((calKey) => ({ calKey, shown: true, share: 'all', doc: { share: 'all' }, ev: Object.assign({ id: calKey }, ev) }));
+  ctx.fireReminders_(me, {}, seen);
+  assert.equal(writes.filter((w) => w.update.fields.kind && w.update.fields.kind.stringValue === 'reminders').length, 1);
+});
+
+test('the same events listed in another order by Google are not written again', () => {
+  withDigest();
+  const s = ctx.localTime_('2026-11-10', '09:00');
+  const a = { id: 'a', t: 'A', s, e: s + 3600e3 }, b = { id: 'b', t: 'B', s: s + 864e5, e: s + 864e5 + 3600e3 };
+  const { api } = fakeProps();
+  const me = { person: 'ethan', email: 'e@x.com' };
+  const first = ctx.feedWrites_(me, { appEmail: 'e@x.com' }, 'k', { share: 'all' }, [a, b], api);
+  api.setProperty(first.key, first.value);
+  const again = ctx.feedWrites_(me, { appEmail: 'e@x.com' }, 'k', { share: 'all' }, [b, a], api);
+  assert.equal(again.writes.length, 0);
+});
+
+test('a very long note still reaches the phone (cut short to fit what Firebase can send)', () => {
+  const sent = [];
+  ctx.UrlFetchApp = { fetch: (url, opt) => { sent.push(opt.payload); return { getResponseCode: () => 200 }; } };
+  const realToken = ctx.saToken_, realProp = ctx.prop_;
+  ctx.saToken_ = () => 't'; ctx.prop_ = () => 'proj';
+  ctx.fsQuery_ = (coll) => (coll === 'notify' ? [{ id: 'n1', data: { to: 'sophie', kind: 'notes', title: 'A note from Ethan '.repeat(40), body: 'Ünïcödé 🙂 '.repeat(1500), sendAfter: 0, sent: false }, updateTime: 't' }] : []);
+  ctx.fsList_ = () => [{ id: 't1', data: { token: 'tok' } }];
+  ctx.fsCommit_ = () => {};
+  ctx.docName_ = (p) => p;
+  ctx.processNotify_({ people: { sophie: { settings: { quiet: { on: false } } } } });
+  ctx.saToken_ = realToken; ctx.prop_ = realProp;
+  assert.equal(sent.length, 1);
+  const data = JSON.parse(sent[0]).message.data;
+  assert.ok(Buffer.byteLength(JSON.stringify(data), 'utf8') < 4000, 'under the 4 KB limit');
+  assert.match(data.body, /…$/);
+});
+
+test('events Google lists without their own calendar id still each have their own reminders', () => {
+  withDigest();
+  const ev = (id, h) => ctx.normApi_({ id, summary: '', start: { dateTime: `2026-11-06T${h}:00:00Z` }, end: { dateTime: `2026-11-06T${h}:30:00Z` } });
+  assert.notEqual(ev('aaa', '10').uid, ev('bbb', '12').uid);
+});
+
+test('renaming one of your calendars to something with "family" in it never shares more of it', () => {
+  withDigest();
+  const calId = 'cal1@group.calendar.google.com';
+  const key = ctx.shortKey_(calId);
+  const { api } = fakeProps({ [`h_${key}`]: '{}' });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => calId, getName: () => 'Family planning', getColor: () => '#1', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'e@x.com' }) };
+  ctx.Calendar = { Events: { list: () => ({ items: [] }) } };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true, people: [] }, { appEmail: 'e@x.com', hh: {}, calDocs: {
+    [key]: { owner: 'ethan', calKey: key, calId, name: 'Gym', color: '#1', canWrite: true, primary: false, account: 'e@x.com', lastSeen: Date.now(), show: true, share: 'busy', role: 'normal', layer: 'own' }
+  } }, []);
+  const masks = writes.filter((w) => w.update && w.update.name.endsWith(`/calendars/ethan__${key}`)).flatMap((w) => w.updateMask.fieldPaths);
+  assert.ok(!masks.includes('share'));
+});
+
+test('the morning summary reads only the jobs still to do, not every job ever done', () => {
+  const asked = [];
+  ctx.fsList_ = (p) => { asked.push(['list', p]); return []; };
+  ctx.fsQuery_ = (coll, eqs) => { asked.push(['query', coll, JSON.stringify(eqs)]); return []; };
+  ctx.digestData_({ person: 'ethan' }, { settings: {}, people: { ethan: {} } });
+  assert.ok(!asked.some((a) => a[0] === 'list' && a[1].endsWith('/jobs')));
+  assert.ok(asked.some((a) => a[1] === 'jobs' && a[2] === '[["done",false]]'));
+});
+
+test('when Google Calendar can only be read the slow way and time is running out, that calendar waits for the next run', () => {
+  const realCal = ctx.Calendar;
+  ctx.Calendar = undefined;
+  ctx.RUN_STARTED_ = Date.now() - 4 * 60e3;
+  const cal = { getEvents: () => { throw new Error('should not start'); } };
+  assert.throws(() => ctx.readEvents_(cal, 'x', new Date(), new Date()), /next run/);
+  ctx.RUN_STARTED_ = 0;
+  ctx.Calendar = realCal;
+});

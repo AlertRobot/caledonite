@@ -32,6 +32,7 @@ var HOUSEHOLD = 'households/main';
 var DAYS_BACK = 14;
 var DAYS_AHEAD = 120;
 var TZ = 'Europe/London';
+var RUN_STARTED_ = 0;   // when this run started (a run is stopped by Google after 6 minutes)
 var WEEKDAYS_ = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 var MONTHS_ = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -241,6 +242,7 @@ function text_(s) { return ContentService.createTextOutput(s).setMimeType(Conten
 // ===================== the sync =====================
 
 function syncAll() {
+  RUN_STARTED_ = Date.now();
   var lock = LockService.getUserLock();
   if (!lock.tryLock(25000)) return 'already running';
   var me = null;
@@ -392,10 +394,11 @@ function syncCalendars_(me, ctx, errors) {
       // written by another of your accounts until now, or not kept up for a while: what this account remembers
       // writing may not be all there is, so start from what's really there (no month is left behind)
       var reseed = !!doc && (String(doc.account || '') !== me.email || !doc.lastSeen || Date.now() - doc.lastSeen > 12 * 3600e3 || props.getProperty('h_' + calKey) === null);
-      // calendars set up before family calendars were recognised
+      // calendars set up before family calendars were recognised, or renamed since: shown as family, but never
+      // shared more than before without you choosing it
       if (doc && !doc.userSet && doc.layer === 'own' && isFamilyCal_(id, meta.name)) {
-        writes.push(upd_(docPath, { layer: 'family', share: 'all' }, ['layer', 'share']));
-        doc = merge_(doc, { layer: 'family', share: 'all' });
+        writes.push(upd_(docPath, { layer: 'family' }, ['layer']));
+        doc = merge_(doc, { layer: 'family' });
       }
       if (!doc) {
         doc = merge_(meta, defaultsFor_(cal, isPrimary, me));
@@ -529,9 +532,13 @@ function readEvents_(cal, id, from, to) {
       Logger.log('Calendar API failed for ' + id + ', using CalendarApp: ' + err.message);
     }
   }
+  // the slow way can take minutes for a busy calendar: never so long that the whole run is stopped (and nothing
+  // it did is saved). This calendar keeps what it had until the next run.
+  var late = function () { if (RUN_STARTED_ && Date.now() - RUN_STARTED_ > 180e3) throw new Error('Not enough time left in this run to read it; trying again next run.'); };
+  late();
   var list = cal.getEvents(from, to);
   var evs = [];
-  for (var k = 0; k < list.length; k++) { var o2 = norm_(list[k]); if (o2) evs.push(o2); }
+  for (var k = 0; k < list.length; k++) { if (k % 25 === 24) late(); var o2 = norm_(list[k]); if (o2) evs.push(o2); }
   return evs;
 }
 // The same shape as norm_, from a Calendar API event
@@ -552,8 +559,10 @@ function normApi_(it) {
     o.s = startMs;
     o.e = new Date(it.end.dateTime).getTime();
   }
-  o.id = shortKey_(it.iCalUID + '|' + startMs);
-  o.uid = shortKey_(it.iCalUID);
+  // (a calendar shared with you as free/busy only may not say an event's iCalUID)
+  var ical = it.iCalUID || it.id || '';
+  o.id = shortKey_(ical + '|' + startMs);
+  o.uid = shortKey_(ical);
   if (it.recurringEventId) o.sid = o.uid;
   // only in your own copy: what the app needs to change or delete this event
   if (it.id) o.gid = it.id;
@@ -608,6 +617,11 @@ function feedWrites_(me, ctx, calKey, doc, events, props, known) {
   if (known) Object.keys(known).forEach(function (path) { if (!(path in old)) old[path] = ''; });
   var next = {};
   var byMonth = {};
+  // in a fixed order, so the same events listed differently by Google are never written again
+  events = events.slice().sort(function (a, b) {
+    var ka = (a.ad ? a.sd : '') + '|' + (a.s || 0) + '|' + a.id, kb = (b.ad ? b.sd : '') + '|' + (b.s || 0) + '|' + b.id;
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
   events.forEach(function (e) {
     var mk = e.ad ? e.sd.slice(0, 7) : Utilities.formatDate(new Date(e.s), TZ, 'yyyy-MM');
     (byMonth[mk] = byMonth[mk] || []).push(e);
@@ -1259,7 +1273,8 @@ function fireReminders_(me, ctx, seen) {
       fireTimes_(rem.times, o, settings.remindAt || '09:00').forEach(function (f) {
         if (f.at > now || now - f.at > 36 * 3600e3) return;
         var key = personId + '|' + occ + '|' + f.code;
-        if (fired[key] || doneAt >= f.at) return;
+        // (newly: the same event seen twice by this account, say in your partner's calendar shared with you)
+        if (fired[key] || newly[key] || doneAt >= f.at) return;
         newly[key] = now;
         var line = (REMIND_MINS_[f.code] && o.l) ? leaveLine_(f.code, o) : reminderLine_(o, now);
         var body = line + (rem.note ? ' ' + String(rem.note).replace(/\.?$/, '.') : '');
@@ -1400,7 +1415,8 @@ function digestData_(me, ctx) {
   };
   var overrides = {};
   fsList_(HOUSEHOLD + '/shifts').forEach(function (d) { if (d.data.person && d.data.day) overrides[d.data.person + '|' + d.data.day] = d.data; });
-  var jobs = fsList_(HOUSEHOLD + '/jobs').map(function (j) { return j.data; });
+  // only the ones still to do (done ones are kept, and there are more of them every week)
+  var jobs = fsQuery_('jobs', [['done', false]]).map(function (j) { return j.data; });
   return {
     me: { id: me.person, name: 'You', settings: ctx.settings || {}, items: feedsFor('privateFeeds', me.person), mine: true },
     partner: partner ? { id: partner.id, name: partner.name || 'Your partner', settings: partner.settings || {}, items: feedsFor('sharedFeeds', partner.id), mine: false } : null,
@@ -1715,7 +1731,8 @@ function processNotify_(ctx) {
     var notif = settings.notif || {};
     if (d.kind && notif[d.kind] === false) return;
     if (!tokensFor[d.to]) tokensFor[d.to] = fsList_(HOUSEHOLD + '/people/' + d.to + '/tokens');
-    var msg = { title: String(d.title || 'Caledonite'), body: String(d.body || ''), link: String(d.link || '#today'), tag: String(n.id), kind: String(d.kind || '') };
+    // Firebase sends at most 4 KB, so a long note is cut short rather than never arriving
+    var msg = { title: cut_(d.title || 'Caledonite', 150), body: cut_(d.body || '', 700), link: cut_(d.link || '#today', 200), tag: String(n.id), kind: String(d.kind || '') };
     if (d.reqId) msg.reqId = String(d.reqId);
     if (d.ask) msg.ask = String(d.ask);
     tokensFor[d.to].forEach(function (t) {
@@ -1724,6 +1741,7 @@ function processNotify_(ctx) {
     });
   });
 }
+function cut_(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 function sendPush_(token, msg) {
   var url = 'https://fcm.googleapis.com/v1/projects/' + prop_('PROJECT_ID') + '/messages:send';
   var res = UrlFetchApp.fetch(url, {
