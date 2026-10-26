@@ -107,7 +107,7 @@ test('adding an event saves the phone time zone with it', async () => {
 });
 
 // ---------- the service worker, run outside a browser with a stand-in for its surroundings ----------
-async function loadSw({ cacheKeys = [], fetchRes = null, fetchFails = false, own = {}, other = {} } = {}) {
+async function loadSw({ cacheKeys = [], fetchRes = null, fetchFails = false, own = {}, other = {}, windows = [], opened = [] } = {}) {
   const { readFileSync } = await import('node:fs');
   const vm = await import('node:vm');
   const handlers = {}; const deleted = []; const puts = [];
@@ -118,7 +118,7 @@ async function loadSw({ cacheKeys = [], fetchRes = null, fetchFails = false, own
     Response: { error: () => 'network error' },
     fetch: async () => { if (fetchFails) throw new TypeError('offline'); return fetchRes; }, location: { origin: 'https://alertrobot.github.io' }
   };
-  sandbox.self = Object.assign(sandbox, { addEventListener: (n, fn) => { handlers[n] = fn; }, clients: { claim: async () => {} }, skipWaiting: () => {}, registration: {} });
+  sandbox.self = Object.assign(sandbox, { addEventListener: (n, fn) => { handlers[n] = fn; }, clients: { claim: async () => {}, matchAll: async () => windows, openWindow: async (u) => { opened.push(u); return null; } }, skipWaiting: () => {}, registration: { scope: 'https://alertrobot.github.io/caledonite/', showNotification: async () => {} } });
   sandbox.importScripts = (p) => vm.runInContext(readFileSync(new URL(`../${p.replace('./', '')}`, import.meta.url), 'utf8'), ctx);
   const ctx = vm.createContext(sandbox);
   vm.runInContext(readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), ctx);
@@ -369,4 +369,52 @@ test('a holiday one of you booked just for themselves is theirs on the calendar,
   it = L.dayList(st, sat).find((x) => x.tag === 'req:lv');
   assert.equal(it.who, 'sophie');
   assert.equal(it.kind, 'event');
+});
+
+// a window on this website, as the service worker sees it. A window belonging to another app's service worker
+// (Peckish) can be focused but not navigated.
+function fakeWindow(url, ours = true) {
+  const w = { url, focused: 0, went: [], focus: async () => { w.focused++; return w; }, navigate: async (u) => { if (!ours) throw new TypeError('not controlled'); w.went.push(u); w.url = u; return w; } };
+  return w;
+}
+test("tapping a notification opens Caledonite, never a Peckish window that's open on the same website", async () => {
+  const tap = async (opts, link) => {
+    const { handlers } = await loadSw(opts);
+    let p; handlers.notificationclick({ action: '', notification: { data: { link }, close() {} }, waitUntil: (x) => { p = x; } });
+    await p;
+  };
+  // only Peckish is open: Caledonite opens in a window of its own
+  const peckish = fakeWindow('https://alertrobot.github.io/es-kitchen/#plan', false);
+  const opened = [];
+  await tap({ windows: [peckish], opened }, '#requests');
+  assert.equal(peckish.focused, 0);
+  assert.deepEqual(peckish.went, []);
+  assert.deepEqual(opened, ['https://alertrobot.github.io/caledonite/#requests']);
+  // Caledonite is open too: that window goes to the link
+  const cal = fakeWindow('https://alertrobot.github.io/caledonite/#today');
+  const opened2 = [];
+  await tap({ windows: [peckish, cal], opened: opened2 }, '#requests');
+  assert.equal(peckish.focused, 0);
+  assert.equal(cal.focused, 1);
+  assert.deepEqual(cal.went, ['https://alertrobot.github.io/caledonite/#requests']);
+  assert.deepEqual(opened2, []);
+  // a Peckish meal reminder: Peckish's window comes up, and Caledonite's isn't taken away from it
+  const cal2 = fakeWindow('https://alertrobot.github.io/caledonite/#today');
+  const pk = fakeWindow('https://alertrobot.github.io/es-kitchen/', false);
+  const opened3 = [];
+  await tap({ windows: [cal2, pk], opened: opened3 }, '../es-kitchen/');
+  assert.deepEqual(cal2.went, []);
+  assert.equal(pk.focused, 1);
+  assert.deepEqual(opened3, []);
+});
+
+test("fonts come from Caledonite's own saved copies, never another app's, and a failed download isn't kept", async () => {
+  const font = 'https://fonts.gstatic.com/s/atkinson/v1/a.woff2';
+  const good = { ok: true, status: 200, type: 'cors', clone() { return this; } };
+  const ask = async (opts) => { const sw = await loadSw(opts); let p; sw.handlers.fetch({ request: { method: 'GET', url: font }, respondWith: (x) => { p = x; } }); return { res: await p, puts: sw.puts }; };
+  assert.equal((await ask({ fetchRes: good, other: { [font]: 'PECKISH COPY' } })).res, good);
+  const bad = { ok: false, status: 500, type: 'cors', clone() { return this; } };
+  const r = await ask({ fetchRes: bad });
+  await new Promise((res) => setTimeout(res, 10));
+  assert.deepEqual(r.puts, []);
 });

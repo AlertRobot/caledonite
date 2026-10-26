@@ -46,13 +46,13 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(caches.open(SDK_CACHE).then((c) => c.match(e.request).then((r) => r || fetch(e.request).then((res) => { if (res.ok) c.put(e.request, res.clone()); return res; }))));
     return;
   }
-  // fonts: cache first
+  // fonts: cache first, from Caledonite's own copies only, and never a failed download (one the page can't
+  // read, "opaque", is kept as there's no telling)
   if (/fonts\.(googleapis|gstatic)\.com$/.test(url.hostname)) {
-    e.respondWith(caches.match(e.request).then((r) => r || fetch(e.request).then((res) => {
-      const copy = res.clone();
-      caches.open(VERSION).then((c) => c.put(e.request, copy));
+    e.respondWith(caches.open(VERSION).then((c) => c.match(e.request).then((r) => r || fetch(e.request).then((res) => {
+      if (res.ok || res.type === 'opaque') c.put(e.request, res.clone());
       return res;
-    })));
+    }))));
   }
 });
 
@@ -88,11 +88,17 @@ self.addEventListener('notificationclick', (e) => {
   }
   e.waitUntil(openApp(data.link || '#today'));
 });
+// Peckish (and anything else on this website) has windows of its own: only ever bring up the app the link is for.
+// A Caledonite window goes to the link; one of another app's (a Peckish meal reminder) is just brought up.
 function openApp(hash) {
-  const link = new URL('./' + hash, self.registration.scope).href;
+  const scope = self.registration.scope;
+  const link = new URL('./' + hash, scope).href;
+  const base = link.startsWith(scope) ? scope : new URL('./', link).href;
   return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-    for (const c of list) { if ('focus' in c) { c.navigate(link); return c.focus(); } }
-    return self.clients.openWindow(link);
+    const win = list.find((c) => 'focus' in c && String(c.url || '').startsWith(base));
+    if (!win) return self.clients.openWindow(link);
+    return win.focus().then(() => (base === scope && win.url !== link ? win.navigate(link) : null))
+      .catch(() => (base === scope ? self.clients.openWindow(link) : null));
   });
 }
 
