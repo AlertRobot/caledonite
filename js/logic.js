@@ -812,10 +812,16 @@ export function nextJobDay(job, todayK) {
   const r = job.repeat;
   let d = fromDayKey(job.day || todayK);
   const today = fromDayKey(todayK);
+  // monthly: the same day of the month, or the last day of a shorter month (31 January, then 28 February, not 3 March)
+  const dom = d.getDate(); const y0 = d.getFullYear(); const m0 = d.getMonth(); let months = 0;
   const step = () => {
     if (r.unit === 'day') d = addDays(d, r.every || 1);
     else if (r.unit === 'week') d = addDays(d, 7 * (r.every || 1));
-    else d = new Date(d.getFullYear(), d.getMonth() + (r.every || 1), d.getDate());
+    else {
+      months += r.every || 1;
+      const last = new Date(y0, m0 + months + 1, 0).getDate();
+      d = new Date(y0, m0 + months, Math.min(dom, last));
+    }
   };
   step();
   while (d <= today) step();
