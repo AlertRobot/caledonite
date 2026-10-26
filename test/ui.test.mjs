@@ -209,3 +209,21 @@ test("a shift your partner saved with HTML in its kind can't add anything to the
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
+
+test('an odd record in a shared list (a request, job or shift) can’t break your screens', async () => {
+  const page = await open('ethan');
+  await mods(page, (store) => {
+    const d = new Date(); const dk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return store.store.backend.commit([
+      { type: 'set', path: 'requests/odd', data: { from: 'sophie', to: 'ethan', type: 'plan', title: 7, when: { day: dk, start: 7, end: { a: 1 } }, status: 'waiting', hold: true, created: Date.now() } },
+      { type: 'add', path: 'jobs', data: { title: 5, who: 'ethan', day: dk, time: 9, done: false } },
+      { type: 'set', path: 'shifts/sophie_odd', data: { person: 'sophie', day: dk, type: 'long', start: 7 } }
+    ]);
+  });
+  await page.waitForTimeout(200);
+  for (const h of ['#today', '#calendar', '#requests', '#jobs', '#settings/shifts']) {
+    await go(page, h);
+    assert.doesNotMatch(await page.textContent('main'), /Something went wrong/, h);
+  }
+  await page.context().close();
+});

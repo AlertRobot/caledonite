@@ -32,6 +32,25 @@ const ROLES = ['normal', 'work', 'rota'];
 const SHARES = ['all', 'busy', 'none', 'hours'];
 const SHIFT_TYPES = ['long', 'night', 'early', 'late', 'off', 'leave'];
 const pick = (v, list, d) => (list.includes(v) ? v : d);
+// Shared lists either of you can write to: only the shapes the screens draw, so one odd record can't break them
+const isDay = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const isHM = (v) => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v);
+const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+function cleanWhen(w) {
+  if (!w || typeof w !== 'object' || !isDay(w.day)) return null;
+  const out = { day: w.day, start: isHM(w.start) ? w.start : null, end: isHM(w.end) ? w.end : null, allDay: !!w.allDay, label: str(w.label) };
+  if (isDay(w.endDay) && w.endDay >= w.day) out.endDay = w.endDay;
+  return out;
+}
+function cleanRequest(r) {
+  const out = Object.assign({}, r, { title: str(r.title), note: str(r.note), status: str(r.status), type: str(r.type), when: cleanWhen(r.when), counter: cleanWhen(r.counter) });
+  if (out.days && typeof out.days !== 'object') out.days = null;
+  if (out.people && !Array.isArray(out.people)) out.people = null;
+  return out;
+}
+function cleanJob(j) {
+  return Object.assign({}, j, { title: str(j.title), day: isDay(j.day) ? j.day : null, time: isHM(j.time) ? j.time : null, who: str(j.who) });
+}
 const safeColour = (c) => (typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c) ? c : '');
 
 // Raw backend data -> tidy state
@@ -97,12 +116,15 @@ export function setRaw(raw, extra = {}) {
   s.shifts = {};
   // either of you can change the other's shifts, so only the known kinds (they end up in class names)
   for (const sh of Object.values(raw.shifts || {})) {
-    if (sh && sh.person && sh.day && SHIFT_TYPES.includes(sh.type)) s.shifts[`${sh.person}|${sh.day}`] = sh;
+    if (!sh || !sh.person || !isDay(sh.day) || !SHIFT_TYPES.includes(sh.type)) continue;
+    const c = Object.assign({}, sh);
+    for (const f of ['start', 'end']) if (c[f] != null && !isHM(c[f])) delete c[f];
+    s.shifts[`${sh.person}|${sh.day}`] = c;
   }
-  s.requests = Object.entries(raw.requests || {}).map(([id, r]) => Object.assign({ id }, r)).sort((a, b) => (b.created || 0) - (a.created || 0));
-  s.notes = Object.entries(raw.notes || {}).map(([id, x]) => Object.assign({ id }, x)).sort((a, b) => (b.created || 0) - (a.created || 0));
+  s.requests = Object.entries(raw.requests || {}).filter(([, r]) => r && typeof r === 'object').map(([id, r]) => Object.assign({ id }, cleanRequest(r))).sort((a, b) => (b.created || 0) - (a.created || 0));
+  s.notes = Object.entries(raw.notes || {}).filter(([, x]) => x && typeof x === 'object').map(([id, x]) => Object.assign({ id }, x, { text: str(x.text) })).sort((a, b) => (b.created || 0) - (a.created || 0));
   s.outbox = Object.entries(raw.outbox || {}).map(([id, o]) => Object.assign({ id }, o)).filter((o) => !o.done);
-  s.jobs = Object.entries(raw.jobs || {}).map(([id, j]) => Object.assign({ id }, j));
+  s.jobs = Object.entries(raw.jobs || {}).filter(([, j]) => j && typeof j === 'object').map(([id, j]) => Object.assign({ id }, cleanJob(j)));
   s.ideas = Object.entries(raw.ideas || {}).map(([id, i]) => Object.assign({ id }, i)).sort((a, b) => (a.title || '').localeCompare(b.title || ''));
   s.tokens = raw.tokens === undefined ? null : Object.keys(raw.tokens || {});
   s.status = raw.status || {};
