@@ -91,6 +91,10 @@ export function setRaw(raw, extra = {}) {
       reminders: Object.assign({}, p.reminders || {}, raw.private.reminders || {}),
       countdowns: Object.assign({}, p.countdowns || {}, raw.private.countdowns || {})
     });
+    // your rota link too: it gives your whole rota, whatever you share of it
+    if (typeof raw.private.rotaUrl === 'string') {
+      s.people[s.me].settings = Object.assign({}, s.people[s.me].settings || {}, { rotaUrl: raw.private.rotaUrl });
+    }
   }
   s.partner = Object.keys(s.people).find((pid) => pid !== s.me) || null;
   s.calendars = {};
@@ -332,10 +336,18 @@ export const actions = {
   async updateMySettings(patch) {
     const st = store.state;
     // only what changed: it merges into what's saved, so a change made on your other phone isn't undone
-    await commit([
-      { type: 'update', path: `people/${st.me}`, data: { settings: patch } },
-      { type: 'update', path: '', data: { settingsRev: now() } }
-    ], false);
+    const ops = [];
+    let rest = patch;
+    // your rota link goes where only you can read it (it gives your whole rota, whatever you share of it)
+    if (patch && 'rotaUrl' in patch) {
+      rest = Object.assign({}, patch);
+      delete rest.rotaUrl;
+      ops.push({ type: 'update', path: privatePath(), data: { rotaUrl: String(patch.rotaUrl || '') } });
+      ops.push({ type: 'unset', path: `people/${st.me}`, field: 'settings.rotaUrl' });
+    }
+    if (Object.keys(rest || {}).length) ops.push({ type: 'update', path: `people/${st.me}`, data: { settings: rest } });
+    ops.push({ type: 'update', path: '', data: { settingsRev: now() } });
+    await commit(ops, false);
   },
   async updatePersonSettings(pid, patch) {
     const st = store.state;
@@ -423,11 +435,15 @@ export const actions = {
     const priv = (store.raw && store.raw.private) || {};
     const rems = mine.reminders || {};
     const cds = Object.entries(mine.countdowns || {}).filter(([, c]) => c && c.shared === false);
-    if (!Object.keys(rems).length && !cds.length) return;
+    const rota = mine.settings && typeof mine.settings === 'object' && 'rotaUrl' in mine.settings;
+    if (!Object.keys(rems).length && !cds.length && !rota) return;
     const move = { reminders: {}, countdowns: {} };
     for (const [id, r] of Object.entries(rems)) if (!(priv.reminders || {})[id]) move.reminders[id] = r;
     for (const [id, c] of cds) if (!(priv.countdowns || {})[id]) move.countdowns[id] = c;
+    // the rota link, unless one has already been saved in the private place
+    if (rota && typeof priv.rotaUrl !== 'string') move.rotaUrl = String(mine.settings.rotaUrl || '');
     const ops = [{ type: 'update', path: privatePath(), data: move }];
+    if (rota) ops.push({ type: 'unset', path: `people/${st.me}`, field: 'settings.rotaUrl' });
     if (Object.keys(rems).length) ops.push({ type: 'unset', path: `people/${st.me}`, field: 'reminders' });
     for (const [id] of cds) ops.push({ type: 'unset', path: `people/${st.me}`, field: `countdowns.${id}` });
     await commit(ops, false);

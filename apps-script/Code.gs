@@ -33,6 +33,9 @@ var DAYS_BACK = 14;
 var DAYS_AHEAD = 120;
 var TZ = 'Europe/London';
 var RUN_STARTED_ = 0;   // when this run started (a run is stopped by Google after 6 minutes)
+var OUTBOX_BUDGET_ = 200e3;   // no new change to Google Calendar is started after this long into a run
+var NOTIFY_BUDGET_ = 300e3;   // nor a new notification after this
+function timeUsed_() { return RUN_STARTED_ ? Date.now() - RUN_STARTED_ : 0; }
 var WEEKDAYS_ = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 var MONTHS_ = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -234,14 +237,15 @@ function doPost(e) {
   cache.put('last_ping', String(Date.now()), 45);
   // the owner's account stopped syncing: a ping doesn't start it again
   if (!hasTrigger_()) return text_('not connected');
-  try { syncAll(); } catch (err) { return text_('error: ' + err.message); }
+  try { syncAll({ fromPing: true }); } catch (err) { return text_('error: ' + err.message); }
   return text_('ok');
 }
 function text_(s) { return ContentService.createTextOutput(s).setMimeType(ContentService.MimeType.TEXT); }
 
 // ===================== the sync =====================
 
-function syncAll() {
+// opts: { fromPing: true } from the ping (a time-driven run is handed Google's own event instead)
+function syncAll(opts) {
   RUN_STARTED_ = Date.now();
   var lock = LockService.getUserLock();
   if (!lock.tryLock(25000)) return 'already running';
@@ -254,6 +258,8 @@ function syncAll() {
     // the ping deployment, running as Ethan for no one in particular, gets)
     claim = claimRun_();
     if (!claim) return 'already running';
+    // "Stop syncing" may have finished while this ping waited its turn: never write the copies back
+    if (opts && opts.fromPing === true && !hasTrigger_()) return 'not connected';
     try { me = whoAmI_(); } catch (err) {
       // taken out of Caledonite (Settings, Account): take its calendars out too, and stop
       if (err && err.notMember) forgetThisAccount_(err.email);
@@ -271,8 +277,7 @@ function syncAll() {
     var seen = [];
     var cal = stage('calendars', function () { return syncCalendars_(me, ctx, errors); });
     if (cal) { n = cal.count; seen = cal.seen; }
-    if (me.main && ctx.settings.rotaUrl) stage('rota link', function () { syncRotaLink_(me, ctx); });
-    else if (me.main) stage('rota link', function () { dropRotaLink_(me); });
+    if (me.main) stage('rota link', function () { var url = rotaUrlOf_(me, ctx); if (url) syncRotaLink_(me, ctx, url); else dropRotaLink_(me); });
     var changed = stage('outbox', function () { return processOutbox_(me, ctx); });
     if (changed) {
       // let the feeds catch up straight away
@@ -316,6 +321,18 @@ function isCreator_(me, ctx) {
 function whoAmI_() {
   var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
   if (!email) throw new Error('Could not tell which Google account this is.');
+  var notOne = function (taken) {
+    var e = new Error(email + ' is not part of Caledonite. Add it in Caledonite: Settings, Account, then connect it again.');
+    e.notMember = taken;
+    e.email = email;
+    return e;
+  };
+  // found not to be one of you a moment ago: no reading the household again (someone who isn't one of you,
+  // opening the connect page over and over, can't use up the day's free database reads)
+  var nmKey = 'nm_' + email.replace(/[^a-z0-9]+/g, '_');
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (err) { cache = null; }
+  if (cache && cache.get(nmKey)) throw notOne(false);
   var people = fsList_(HOUSEHOLD + '/people');
   // Each account belongs to exactly one of you. If two records claim it, sync nothing: syncing it as the wrong
   // person would copy that account's whole calendar into the other person's private copy.
@@ -334,10 +351,9 @@ function whoAmI_() {
   (hh.linked || []).forEach(function (x) { if (String(x.email || '').toLowerCase() === email && x.person) claims.push(x.person); });
   found = one(claims, false);
   if (found) return found;
-  var e = new Error(email + ' is not part of Caledonite. Add it in Caledonite: Settings, Account, then connect it again.');
   // only when the household could be read: a passing problem must never look like being taken out
-  e.notMember = people.length > 0;
-  e.email = email;
+  var e = notOne(people.length > 0);
+  if (e.notMember && cache) { try { cache.put(nmKey, '1', 120); } catch (err) { /* it's only a saving */ } }
   throw e;
 }
 
@@ -346,6 +362,12 @@ function loadCtx_(me) {
   var people = {};
   me.people.forEach(function (p) { people[p.id] = p.data; });
   var person = people[me.person] || {};
+  // the email whose copies these are must be this person's alone, or another of your accounts could be written
+  // as readable by someone else
+  var appEmail = String(person.email || '').toLowerCase();
+  if (appEmail && me.people.some(function (p) { return p.id !== me.person && String(p.data.email || '').toLowerCase() === appEmail; })) {
+    throw new Error(appEmail + ' is listed for more than one person in Caledonite, so nothing is synced. Correct it in Settings, Account.');
+  }
   return { hh: hh, people: people, person: person, settings: person.settings || {}, appEmail: String(person.email || '').toLowerCase(), calDocs: loadCalDocs_(me) };
 }
 function loadCalDocs_(me) {
@@ -409,13 +431,15 @@ function syncCalendars_(me, ctx, errors) {
       }
       count++;
       var events = [];
-      if (doc.show !== false || (doc.share && doc.share !== 'none')) events = readEvents_(cal, id, from, to);
+      var read = doc.show !== false || (doc.share && doc.share !== 'none');
+      if (read) events = readEvents_(cal, id, from, to);
       var d2 = doc;
       events.forEach(function (o) { seen.push({ calKey: calKey, shown: d2.show !== false, share: d2.share || 'busy', doc: d2, ev: o }); });
       var fw = feedWrites_(me, ctx, calKey, doc, events, props, reseed ? copiesOf_(me.person, calKey) : null);
       writes = writes.concat(fw.writes);
       pending[fw.key] = fw.value;
-      if (doc.role === 'rota') rotaChanged_(me, ctx, calKey, events, props, doc);
+      // (not when it wasn't read at all: no shifts isn't news, and turning it back on mustn't look like all new ones)
+      if (doc.role === 'rota' && read) rotaChanged_(me, ctx, calKey, events, props, doc);
     } catch (err) {
       var msg = 'calendar ' + ((cal && safeName_(cal)) || id) + ': ' + String(err && err.message || err);
       Logger.log(msg);
@@ -669,12 +693,29 @@ function shareFilter_(doc, list) {
 
 // ===================== rota link (for example from Loop) =====================
 
-function syncRotaLink_(me, ctx) {
-  var url = String(ctx.settings.rotaUrl || '').replace(/^webcal:/i, 'https:');
+// What only this person can read (people/{id}/private/main), read once a run
+function privateOf_(ctx, pid) {
+  ctx.priv = ctx.priv || {};
+  if (!(pid in ctx.priv)) ctx.priv[pid] = fsGet_(HOUSEHOLD + '/people/' + pid + '/private/main') || {};
+  return ctx.priv[pid];
+}
+// The rota link is kept where only its owner can read it (it gives the whole rota, whatever is shared of it);
+// on their record until the app has moved it
+function rotaUrlOf_(me, ctx) {
+  var priv = privateOf_(ctx, me.person);
+  return String(typeof priv.rotaUrl === 'string' ? priv.rotaUrl : ((ctx.settings || {}).rotaUrl || ''));
+}
+
+function syncRotaLink_(me, ctx, rotaUrl) {
+  var url = String(rotaUrl || '').replace(/^webcal:/i, 'https:');
   if (!/^https:\/\//i.test(url)) return;
   var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
   if (res.getResponseCode() >= 300) throw new Error('The rota link returned an error (' + res.getResponseCode() + ').');
-  var events = parseIcs_(res.getContentText());
+  var text = res.getContentText();
+  // a sign-in or error page (or nothing) instead of a calendar is never "no shifts": the ones there stay,
+  // and your partner isn't told they've all gone
+  if (!/BEGIN:VCALENDAR/i.test(String(text || ''))) throw new Error('The rota link did not send a calendar this time. Trying again next run.');
+  var events = parseIcs_(text);
   var calKey = 'rotalink';
   var path = HOUSEHOLD + '/calendars/' + me.person + '__' + calKey;
   var doc = ctx.calDocs[calKey];
@@ -898,8 +939,16 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     var k = evStartKey_(e);
     while (map[k]) k += '+';
     // a shift marked Private or #busy is never named, not even by a change to its name
-    map[k] = [s, en, e.pb ? '' : (e.t || 'Shift')];
+    map[k] = [s, en, e.pb ? '' : String(e.t || 'Shift').slice(0, 40)];
   });
+  // a saved value can't be bigger than about 9 KB: a very full calendar keeps the nearest days only
+  // (and says so, so the days past them are never compared)
+  var order = Object.keys(map).sort(function (a, b) { return map[a][0] - map[b][0]; });
+  while (order.length && JSON.stringify({ from: win.from, to: win.to, map: map }).length > 8000) {
+    var last = order.pop();
+    win.to = Math.min(win.to, map[last][0] - 1);
+    delete map[last];
+  }
   var key = 'rota_' + calKey;
   var before = null;
   try { before = JSON.parse(props.getProperty(key) || 'null'); } catch (err) { before = null; }
@@ -959,7 +1008,11 @@ function processOutbox_(me, ctx) {
     return (ta && tb && ta !== tb ? (ta < tb ? -1 : 1) : 0) || ((a.data.created || 0) - (b.data.created || 0)) || ((a.data.seq || 0) - (b.data.seq || 0));
   });
   var stuck = {};
+  var outOfTime = false;
   items.forEach(function (it) {
+    // a long list (an account that hasn't run for a while): leave the rest for the next run, so this one is never
+    // stopped by Google part way, before any of it is marked done, again and again
+    if (outOfTime || timeUsed_() > OUTBOX_BUDGET_) { outOfTime = true; return; }
     var o = it.data;
     var own = !!ctx.appEmail && String(o.byEmail || '').toLowerCase() === ctx.appEmail;
     var result = {};
@@ -1024,15 +1077,22 @@ function findByTag_(rs, tag) {
   var timeMin = new Date(Date.now() - DAYS_BACK * 864e5 - 864e5).toISOString();
   var timeMax = new Date(Date.now() + (DAYS_AHEAD + 365) * 864e5).toISOString();
   var marker = '[caledonite:' + tag + ']';
+  // every page: Google can hand back a page with fewer matches than asked for, or none, and more to come
+  var each = function (calId, q, fn) {
+    var token = null, guard = 0;
+    do {
+      var res = Calendar.Events.list(calId, merge_(q, { timeMin: timeMin, timeMax: timeMax, singleEvents: false, showDeleted: false, maxResults: 250, pageToken: token || undefined }));
+      (res.items || []).forEach(fn);
+      token = res.nextPageToken;
+    } while (token && ++guard < 20);
+  };
   Object.keys(owned).forEach(function (calId) {
-    var res = Calendar.Events.list(calId, { privateExtendedProperty: 'caledonite=' + tag, timeMin: timeMin, timeMax: timeMax, singleEvents: false, showDeleted: false, maxResults: 50, fields: 'items(id,status)' });
-    (res.items || []).forEach(function (x) { if (x.status !== 'cancelled') found.push({ calId: calId, eventId: x.id }); });
+    each(calId, { privateExtendedProperty: 'caledonite=' + tag, fields: 'nextPageToken,items(id,status,recurrence)' }, function (x) { if (x.status !== 'cancelled') found.push({ calId: calId, eventId: x.id, series: !!(x.recurrence && x.recurrence.length) }); });
   });
   if (!found.length) {
     // older events, made before the tag was stored as a property, only have it in the description
     Object.keys(owned).forEach(function (calId) {
-      var res = Calendar.Events.list(calId, { q: tag, timeMin: timeMin, timeMax: timeMax, singleEvents: false, showDeleted: false, maxResults: 50, fields: 'items(id,status,description)' });
-      (res.items || []).forEach(function (x) { if (x.status !== 'cancelled' && String(x.description || '').indexOf(marker) >= 0) found.push({ calId: calId, eventId: x.id }); });
+      each(calId, { q: tag, fields: 'nextPageToken,items(id,status,description,recurrence)' }, function (x) { if (x.status !== 'cancelled' && String(x.description || '').indexOf(marker) >= 0) found.push({ calId: calId, eventId: x.id, series: !!(x.recurrence && x.recurrence.length) }); });
     });
   }
   // never something this run has just deleted (Google's search can take a moment to catch up)
@@ -1071,7 +1131,7 @@ function createEvent_(me, ctx, o, own, rs) {
   var rule = rrule_(ev.repeat);
   if (rule) resource.recurrence = [rule];
   var created = Calendar.Events.insert(resource, calId);
-  rs.tagMap[tag] = [{ calId: calId, eventId: created.id }];
+  rs.tagMap[tag] = [{ calId: calId, eventId: created.id, series: !!resource.recurrence }];
   return { eventId: created.id, calId: calId };
 }
 function rrule_(rep) {
@@ -1083,27 +1143,36 @@ function rrule_(rep) {
 
 // update or delete: every copy carrying the tag. With o.inst (when it first started, as Google writes it in an
 // occurrence's id: 20261030T180000Z, or 20261030 for all day), just that occurrence of something that repeats.
+// A changed time of something repeating (an exception: "series_20261113T190000Z", or "series_20261113" all day).
+// A series split in Google Calendar ("this and following") is a series of its own: "series_R20261113T190000".
+var EXCEPTION_RE_ = /_\d{8}(T\d{6}Z)?$/;
 function changeByTag_(o, rs) {
   if (!o.tag) return { refused: 'no tag' };
   var inst = /^\d{8}(T\d{6}Z)?$/.test(String(o.inst || '')) ? String(o.inst) : '';
   var owned = ownedCals_(rs);
-  var targets = findByTag_(rs, o.tag).filter(function (t) { return owned[t.calId] && (!inst || String(t.eventId).indexOf('_') < 0); });
-  // Google lists a time of a series that was changed on its own (an exception, "series_20261113T190000Z")
-  // next to the series itself
+  var isExc = function (id) { return EXCEPTION_RE_.test(String(id)); };
+  var found = findByTag_(rs, o.tag).filter(function (t) { return owned[t.calId]; });
+  // Google lists a changed time of a series next to the series itself
   var series = {};
-  targets.forEach(function (t) { if (String(t.eventId).indexOf('_') < 0) series[t.calId + '|' + t.eventId] = true; });
+  found.forEach(function (t) { if (!isExc(t.eventId)) series[t.calId + '|' + t.eventId] = true; });
+  // one occurrence: it's in one of the series (a split one has the later times)
+  var targets = inst ? found.filter(function (t) { return !isExc(t.eventId); }) : found;
+  var several = !!inst && targets.length > 1;
   var n = 0;
   targets.forEach(function (t) {
     var id = inst ? t.eventId + '_' + inst : t.eventId;
-    var exception = !inst && String(t.eventId).indexOf('_') > 0;
+    var exception = !inst && isExc(t.eventId);
     // deleting the series takes its changed times with it
-    if (exception && o.op === 'delete' && series[t.calId + '|' + String(t.eventId).split('_')[0]]) return;
+    if (exception && o.op === 'delete' && series[t.calId + '|' + String(t.eventId).replace(EXCEPTION_RE_, '')]) return;
     try {
+      // in more than one series: only the one that really has that time (not one ended before it)
+      if (several) { var cur = Calendar.Events.get(t.calId, id); if (!cur || cur.status === 'cancelled') return; }
       if (o.op === 'delete') { Calendar.Events.remove(t.calId, id); rs.removed[t.calId + '|' + id] = true; n++; return; }
       var changes = o.changes || {};
       if (o.event && o.event.title && !changes.title) changes = merge_(changes, { title: o.event.title });
-      // a changed time keeps its own day and time when every time is changed: just the new name
-      if (exception) changes = changes.title ? { title: changes.title } : {};
+      // a changed time keeps its own day and time when every time is changed: just the new name. And every time of
+      // a series is only ever renamed: moving it to one day would take all the earlier times away
+      if (exception || (!inst && t.series)) changes = changes.title ? { title: changes.title } : {};
       var patch = patchFor_(changes, t.calId, id, tzOf_(o));
       if (Object.keys(patch).length) { Calendar.Events.patch(patch, t.calId, id); n++; }
     } catch (err) {
@@ -1290,15 +1359,17 @@ function fireReminders_(me, ctx, seen) {
   }
 
   me.people.forEach(function (p) {
-    var priv = fsGet_(HOUSEHOLD + '/people/' + p.id + '/private/main') || {};
+    var priv = privateOf_(ctx, p.id);
     var rems = merge_(p.data.reminders || {}, priv.reminders || {});
     var settings = p.data.settings || {};
     var bdays = (settings.autoRemind && settings.autoRemind.birthdays) || [];
+    if (!Array.isArray(bdays)) bdays = [];
     Object.keys(rems).forEach(function (id) {
       var r = rems[id];
       if (!r || r.owner !== me.person || !r.ref) return;
       var times = r.auto ? bdays : r.times;
-      if (!times || !times.length) return;
+      // (one odd value never stops everyone's reminders)
+      if (!Array.isArray(times) || !times.length) return;
       consider(p.id, settings, r.ref, merge_(r, { times: times }), byRef[r.ref]);
     });
     // every birthday in your own calendars, unless you've set that one yourself
@@ -1418,7 +1489,9 @@ function digestData_(me, ctx) {
     return list;
   };
   var overrides = {};
-  fsList_(HOUSEHOLD + '/shifts').forEach(function (d) { if (d.data.person && d.data.day) overrides[d.data.person + '|' + d.data.day] = d.data; });
+  // from yesterday on (the summaries look at today and the week ahead): not every shift ever put in by hand
+  var since = keyPlus_(Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), -1);
+  fsQuery_('shifts', [['day', since, '>=']]).forEach(function (d) { if (d.data.person && d.data.day) overrides[d.data.person + '|' + d.data.day] = d.data; });
   // only the ones still to do (done ones are kept, and there are more of them every week)
   var jobs = fsQuery_('jobs', [['done', false]]).map(function (j) { return j.data; });
   return {
@@ -1711,11 +1784,14 @@ function processNotify_(ctx) {
   var due = fsQuery_('notify', [['sent', false]]).filter(function (n) { return (n.data.sendAfter || 0) <= now; });
   if (!due.length) return;
   var tokensFor = {};
+  var outOfTime = false;
   due.forEach(function (n) {
+    // the rest wait for the next run (still unsent), rather than this run being stopped part way
+    if (outOfTime || timeUsed_() > NOTIFY_BUDGET_) { outOfTime = true; return; }
     var d = n.data;
     // only ever one of the two of you (its address builds the path to their phones)
     if (!Object.prototype.hasOwnProperty.call(ctx.people, String(d.to))) {
-      try { fsCommit_([upd_(HOUSEHOLD + '/notify/' + n.id, { sent: true, sentAt: now, error: 'not for anyone here' }, ['sent', 'sentAt', 'error'])]); } catch (e) { /* the next run tries again */ }
+      try { fsCommit_([ifSame_(upd_(HOUSEHOLD + '/notify/' + n.id, { sent: true, sentAt: now, error: 'not for anyone here' }, ['sent', 'sentAt', 'error']), n)]); } catch (e) { /* the next run tries again */ }
       return;
     }
     var who = ctx.people[d.to] || {};
@@ -1724,7 +1800,8 @@ function processNotify_(ctx) {
     if (d.kind !== 'test') {
       var until = Math.max(quietUntil_(settings, now), asleepUntil_(d.to, who, ctx, now));
       if (until > now) {
-        try { fsCommit_([upd_(HOUSEHOLD + '/notify/' + n.id, { sendAfter: until }, ['sendAfter'])]); } catch (e) { /* the next run tries again */ }
+        // only if it's as it was read: one Peckish has just taken back (or changed) is never made again as a stub
+        try { fsCommit_([ifSame_(upd_(HOUSEHOLD + '/notify/' + n.id, { sendAfter: until }, ['sendAfter']), n)]); } catch (e) { /* the next run tries again */ }
         return;
       }
     }
@@ -1734,16 +1811,42 @@ function processNotify_(ctx) {
     } catch (err) { return; }
     var notif = settings.notif || {};
     if (d.kind && notif[d.kind] === false) return;
-    if (!tokensFor[d.to]) tokensFor[d.to] = fsList_(HOUSEHOLD + '/people/' + d.to + '/tokens');
     // Firebase sends at most 4 KB, so a long note is cut short rather than never arriving
     var msg = { title: cut_(d.title || 'Caledonite', 150), body: cut_(d.body || '', 700), link: cut_(d.link || '#today', 200), tag: String(n.id), kind: String(d.kind || '') };
     if (d.reqId) msg.reqId = String(d.reqId);
     if (d.ask) msg.ask = String(d.ask);
-    tokensFor[d.to].forEach(function (t) {
-      var code = sendPush_(t.data.token, msg);
-      if (code === 404 || code === 410) fsCommit_([{ 'delete': docName_(HOUSEHOLD + '/people/' + d.to + '/tokens/' + t.id) }]);
+    var delivered = 0, again = false;
+    try {
+      if (!tokensFor[d.to]) tokensFor[d.to] = fsList_(HOUSEHOLD + '/people/' + d.to + '/tokens');
+    } catch (err) { again = true; }
+    (tokensFor[d.to] || []).forEach(function (t) {
+      var code = 0;
+      try { code = sendPush_(t.data.token, msg); } catch (err) { code = 0; }
+      if (code >= 200 && code < 300) delivered++;
+      else if (code === 404 || code === 410) { try { fsCommit_([{ 'delete': docName_(HOUSEHOLD + '/people/' + d.to + '/tokens/' + t.id) }]); } catch (err) { /* next time */ } }
+      else if (!code || code === 429 || code >= 500) again = true;
     });
+    // Firebase (or the network) having a moment, and it reached none of their phones: tried again in a few minutes,
+    // a couple of times, rather than lost. Never when one phone has it (it would arrive twice there).
+    if (!delivered && again) unclaim_(n.id, now);
   });
+}
+// Back to waiting, as it was before it was claimed (no fields of its own added, so Peckish can still keep its ones
+// up to date). How many times is kept in the script's cache, shared by every account's run.
+function unclaim_(id, now) {
+  var cache = CacheService.getScriptCache();
+  var key = 'push_retry_' + id;
+  var n = (+cache.get(key) || 0) + 1;
+  if (n > 3) return;
+  cache.put(key, String(n), 21600);
+  try {
+    fsCommit_([{ update: { name: docName_(HOUSEHOLD + '/notify/' + id), fields: toFields_({ sent: false, sendAfter: now + n * 5 * 60e3 }) }, updateMask: { fieldPaths: ['sent', 'sendAfter', 'sentAt'] }, currentDocument: { exists: true } }]);
+  } catch (err) { Logger.log('notify retry: ' + err.message); }
+}
+// A write that only goes through if the document is still exactly as it was read
+function ifSame_(w, doc) {
+  if (doc && doc.updateTime) w.currentDocument = { updateTime: doc.updateTime };
+  return w;
 }
 function cut_(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 function sendPush_(token, msg) {
@@ -1817,8 +1920,10 @@ function fsList_(coll) {
   } while (token);
   return out;
 }
+// eqs: [field, value] (equal), or [field, value, '>='] for from that value on
 function fsQuery_(collId, eqs) {
-  var filters = eqs.map(function (f) { return { fieldFilter: { field: { fieldPath: f[0] }, op: 'EQUAL', value: toValue_(f[1]) } }; });
+  var ops = { '>=': 'GREATER_THAN_OR_EQUAL' };
+  var filters = eqs.map(function (f) { return { fieldFilter: { field: { fieldPath: f[0] }, op: ops[f[2]] || 'EQUAL', value: toValue_(f[1]) } }; });
   var where = filters.length === 1 ? filters[0] : { compositeFilter: { op: 'AND', filters: filters } };
   var r = call_('post', base_() + '/' + HOUSEHOLD + ':runQuery', { structuredQuery: { from: [{ collectionId: collId }], where: where, limit: 500 } });
   var out = [];

@@ -217,7 +217,22 @@ test('taking the rota link out removes its shifts', () => {
   ctx.dropRotaLink_({ person: 'sophie' });
   assert.equal(writes.length, 0, 'nothing to do the next time');
   // and the sync calls it when there's no link
-  assert.match(ctx.syncAll.toString(), /else if \(me\.main\) stage\('rota link', function \(\) \{ dropRotaLink_\(me\); \}\)/);
+  assert.match(ctx.syncAll.toString(), /if \(me\.main\) stage\('rota link', function \(\) \{ var url = rotaUrlOf_\(me, ctx\); if \(url\) syncRotaLink_\(me, ctx, url\); else dropRotaLink_\(me\); \}\)/);
+});
+
+test('the rota link is read from where only its owner can read it, and from their record until it has moved', () => {
+  const me = { person: 'sophie', main: true };
+  const priv = (p) => { ctx.fsGet_ = (path) => (path === 'households/main/people/sophie/private/main' ? p : null); };
+  priv({ rotaUrl: 'https://loop.example/new.ics' });
+  assert.equal(ctx.rotaUrlOf_(me, { settings: { rotaUrl: 'https://loop.example/old.ics' } }), 'https://loop.example/new.ics');
+  // taken out (saved empty in the private place): not the old one on the record
+  priv({ rotaUrl: '' });
+  assert.equal(ctx.rotaUrlOf_(me, { settings: { rotaUrl: 'https://loop.example/old.ics' } }), '');
+  // not moved yet
+  priv(null);
+  assert.equal(ctx.rotaUrlOf_(me, { settings: { rotaUrl: 'https://loop.example/old.ics' } }), 'https://loop.example/old.ics');
+  priv({ reminders: {} });
+  assert.equal(ctx.rotaUrlOf_(me, { settings: {} }), '');
 });
 
 test("a calendar that's gone from Google leaves Settings after a couple of days", () => {
@@ -837,6 +852,10 @@ test('the morning summary reads only the jobs still to do, not every job ever do
   ctx.fsQuery_ = (coll, eqs) => { asked.push(['query', coll, JSON.stringify(eqs)]); return []; };
   ctx.digestData_({ person: 'ethan' }, { settings: {}, people: { ethan: {} } });
   assert.ok(!asked.some((a) => a[0] === 'list' && a[1].endsWith('/jobs')));
+  // nor every shift ever put in by hand: from yesterday on
+  assert.ok(!asked.some((a) => a[0] === 'list' && a[1].endsWith('/shifts')));
+  const sh = asked.find((a) => a[1] === 'shifts');
+  assert.ok(sh && JSON.parse(sh[2])[0][2] === '>=', 'shifts from a day on');
   assert.ok(asked.some((a) => a[1] === 'jobs' && a[2] === '[["done",false]]'));
 });
 
@@ -877,4 +896,254 @@ test("yes to the other time: the agreed event is added even if Google's search s
   ], { calendar });
   assert.ok(gone.has('hold1'));
   assert.ok(calendar.events.some((e) => e.summary === 'Walk'), 'the agreed one was added');
+});
+
+// ---------- round 6 checks ----------
+test('finding an event by its tag reads every page Google hands back, even an empty first one', () => {
+  // Google may return a page with no matches and a nextPageToken, with the match on the next page
+  const calls = [];
+  const calendar = { Events: {
+    list(calId, q) {
+      calls.push(q.pageToken || null);
+      if (q.privateExtendedProperty && !q.pageToken) return { items: [], nextPageToken: 'p2' };
+      if (q.privateExtendedProperty && q.pageToken === 'p2') return { items: [{ id: 'ev1', status: 'confirmed' }] };
+      return { items: [] };
+    },
+    insert() { throw new Error('should not add a second copy'); },
+    remove() {}, patch() {}, get() { return {}; }
+  } };
+  const writes = runOutbox([{ person: 'ethan', op: 'create', tag: 'add:x1', byEmail: 'e@x.com', done: false, created: 1, event: { title: 'Gym', day: '2026-11-07', start: '10:00', end: '11:00' } }], { calendar });
+  assert.ok(calls.includes('p2'), 'the second page was read');
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+  assert.equal(writes[0].update.fields.result.mapValue.fields.eventId.stringValue, 'ev1');
+});
+
+test('a rota link that sends a sign-in page instead of a calendar leaves the shifts as they were', () => {
+  withDigest();
+  const { store, api } = fakeProps({ h_rotalink: JSON.stringify({ 'households/main/privateFeeds/sophie__rotalink__2026-11': 'h' }) });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  for (const body of ['<html><body>Please sign in</body></html>', '']) {
+    ctx.UrlFetchApp = { fetch: () => ({ getResponseCode: () => 200, getContentText: () => body }) };
+    assert.throws(() => ctx.syncRotaLink_({ person: 'sophie', email: 's@x.com', main: true }, { calDocs: { rotalink: { share: 'all', role: 'rota', lastSeen: Date.now() } }, people: { sophie: {}, ethan: {} }, appEmail: 's@x.com' }, 'https://loop.example/r.ics'), /did not send a calendar/);
+  }
+  assert.equal(writes.length, 0, 'nothing deleted, no notification');
+  assert.ok(store.h_rotalink.includes('2026-11'));
+  // an empty calendar is a real answer
+  ctx.UrlFetchApp = { fetch: () => ({ getResponseCode: () => 200, getContentText: () => 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n' }) };
+  ctx.syncRotaLink_({ person: 'sophie', email: 's@x.com', main: true }, { calDocs: { rotalink: { share: 'all', role: 'rota', lastSeen: Date.now() } }, people: { sophie: {}, ethan: {} }, appEmail: 's@x.com' }, 'https://loop.example/r.ics');
+  assert.ok(writes.some((w) => w.delete === 'households/main/privateFeeds/sophie__rotalink__2026-11'));
+});
+
+test('a long list of changes is left for the next run once time is short, and what was done is marked done', () => {
+  const calendar = fakeCalendar([]);
+  let clock = Date.now();
+  // each change takes 30 seconds of a run that started just now
+  const insert = calendar.Events.insert;
+  calendar.Events.insert = (res, calId) => { clock += 30e3; return insert(res, calId); };
+  ctx.Date = class extends Date { static now() { return clock; } };
+  ctx.RUN_STARTED_ = clock;
+  const items = Array.from({ length: 20 }, (_, i) => ({ person: 'ethan', op: 'create', tag: `add:n${i}`, byEmail: 'e@x.com', done: false, created: i, event: { title: `E${i}`, day: '2026-11-07', start: '10:00', end: '11:00' } }));
+  const writes = runOutbox(items, { calendar });
+  delete ctx.Date; ctx.RUN_STARTED_ = 0;
+  const done = writes.filter((w) => w.update.fields.done && w.update.fields.done.booleanValue);
+  assert.ok(done.length > 0 && done.length < 20, `some done (${done.length}), the rest left`);
+  assert.equal(calendar.events.length, done.length);
+});
+
+test('notifications are left unsent for the next run once time is short', () => {
+  const sent = [];
+  ctx.UrlFetchApp = { fetch: (url, opt) => { sent.push(opt.payload); return { getResponseCode: () => 200 }; } };
+  const realToken = ctx.saToken_, realProp = ctx.prop_;
+  ctx.saToken_ = () => 't'; ctx.prop_ = () => 'proj';
+  ctx.fsQuery_ = (coll) => (coll === 'notify' ? [{ id: 'n1', data: { to: 'sophie', kind: 'notes', title: 'x', sendAfter: 0, sent: false }, updateTime: 't' }] : []);
+  ctx.fsList_ = () => [{ id: 't1', data: { token: 'tok' } }];
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.RUN_STARTED_ = Date.now() - 5.5 * 60e3;
+  ctx.processNotify_({ people: { sophie: { settings: { quiet: { on: false } } } } });
+  ctx.RUN_STARTED_ = 0;
+  ctx.saToken_ = realToken; ctx.prop_ = realProp;
+  assert.equal(sent.length, 0);
+  assert.equal(writes.length, 0, 'not claimed either');
+});
+
+test('something repeating split in Google Calendar ("this and following"): every time, and just one time, reach the later part too', () => {
+  // the original series ends before 13 November; from then on it's a series of its own, with one time changed
+  const evs = [
+    { id: 'abc', calId: 'primary@x', tag: 'both:wk', recurrence: ['RRULE:FREQ=WEEKLY;UNTIL=20261112T235959Z'] },
+    { id: 'abc_R20261113T190000', calId: 'primary@x', tag: 'both:wk', recurrence: ['RRULE:FREQ=WEEKLY'] },
+    { id: 'abc_R20261113T190000_20261127T190000Z', calId: 'primary@x', tag: 'both:wk' }
+  ];
+  const has = (id) => id === 'abc_20261106T190000Z' || id.startsWith('abc_R20261113T190000_') || evs.some((e) => e.id === id);
+  const removed = [], patched = [];
+  const calendar = { Events: {
+    list: (calId, q) => ({ items: evs.filter((e) => q.privateExtendedProperty === 'caledonite=' + e.tag).map((e) => ({ id: e.id, status: 'confirmed', recurrence: e.recurrence })) }),
+    get: (calId, id) => { if (!has(id)) throw new Error('API call to calendar.events.get failed with error: Not Found'); return { status: 'confirmed', start: { dateTime: '2026-11-20T19:00:00Z' }, end: { dateTime: '2026-11-20T21:00:00Z' } }; },
+    remove: (calId, id) => { if (!has(id)) throw new Error('API call to calendar.events.delete failed with error: Not Found'); removed.push(id); },
+    patch: (p, calId, id) => { patched.push([id, Object.keys(p)]); }
+  } };
+  // just the time on 20 November (in the later part)
+  runOutbox([{ person: 'ethan', op: 'delete', tag: 'both:wk', inst: '20261120T190000Z', byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
+  assert.deepEqual(removed, ['abc_R20261113T190000_20261120T190000Z']);
+  // every time: both parts go (and the changed time with its own part)
+  removed.length = 0;
+  runOutbox([{ person: 'ethan', op: 'delete', tag: 'both:wk', byEmail: 'e@x.com', done: false, created: 2 }], { calendar });
+  assert.deepEqual(removed.sort(), ['abc', 'abc_R20261113T190000']);
+});
+
+test('a new time sent for every time of something repeating only renames it, never moves the whole series to one day', () => {
+  const patched = [];
+  const calendar = { Events: {
+    list: () => ({ items: [{ id: 'ser1', status: 'confirmed', recurrence: ['RRULE:FREQ=WEEKLY'] }] }),
+    get: () => ({ start: { dateTime: '2026-11-06T19:00:00Z' }, end: { dateTime: '2026-11-06T21:00:00Z' } }),
+    patch: (p, calId, id) => { patched.push([id, p]); }, remove() {}
+  } };
+  runOutbox([{ person: 'ethan', op: 'update', tag: 'both:wk', changes: { title: 'Film night', day: '2026-11-20', start: '20:00', end: '22:00' }, byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
+  assert.equal(JSON.stringify(patched), JSON.stringify([['ser1', { summary: 'Film night' }]]));
+  // something that doesn't repeat still moves
+  patched.length = 0;
+  calendar.Events.list = () => ({ items: [{ id: 'one1', status: 'confirmed' }] });
+  runOutbox([{ person: 'ethan', op: 'update', tag: 'add:x', changes: { day: '2026-11-20', start: '20:00', end: '22:00' }, byEmail: 'e@x.com', done: false, created: 2 }], { calendar });
+  assert.equal(patched[0][1].start.dateTime, '2026-11-20T20:00:00');
+});
+
+function notifyHarness(codeFor) {
+  const cache = fakeCache();
+  const sent = [];
+  ctx.UrlFetchApp = { fetch: (url, opt) => { const c = codeFor(sent.length); sent.push(opt.payload); if (c === 'throw') throw new Error('Address unavailable'); return { getResponseCode: () => c }; } };
+  ctx.saToken_ = () => 't'; ctx.prop_ = () => 'proj';
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  return { cache, sent, writes };
+}
+test('a notification Firebase could not take (or the network failed) is tried again, not lost', () => {
+  const realToken = ctx.saToken_, realProp = ctx.prop_;
+  for (const fail of [503, 429, 'throw']) {
+    const { writes } = notifyHarness(() => fail);
+    ctx.fsQuery_ = (coll) => (coll === 'notify' ? [{ id: 'pk-n1', data: { to: 'sophie', kind: 'reminders', title: 'Dinner', sendAfter: 0, sent: false, created: 1 }, updateTime: 't' }] : []);
+    ctx.fsList_ = () => [{ id: 't1', data: { token: 'tok' } }];
+    ctx.processNotify_({ people: { sophie: { settings: { quiet: { on: false } } } } });
+    const back = writes.find((w) => w.update && w.update.fields.sent && w.update.fields.sent.booleanValue === false);
+    assert.ok(back, `put back to wait (${fail})`);
+    assert.deepEqual([...back.updateMask.fieldPaths], ['sent', 'sendAfter', 'sentAt'], 'nothing of its own added');
+    assert.equal(JSON.stringify(back.currentDocument), '{"exists":true}');
+  }
+  // one phone has it: never sent again
+  const { writes } = notifyHarness((i) => (i === 0 ? 200 : 503));
+  ctx.fsList_ = () => [{ id: 't1', data: { token: 'a' } }, { id: 't2', data: { token: 'b' } }];
+  ctx.processNotify_({ people: { sophie: { settings: { quiet: { on: false } } } } });
+  assert.ok(!writes.some((w) => w.update && w.update.fields.sent && w.update.fields.sent.booleanValue === false));
+  ctx.saToken_ = realToken; ctx.prop_ = realProp;
+});
+test('holding a notification for quiet hours never makes again one that was just taken back', () => {
+  const writes = [];
+  ctx.fsQuery_ = (coll) => (coll === 'notify' ? [{ id: 'pk-n2', data: { to: 'sophie', kind: 'reminders', title: 'x', sendAfter: 0, sent: false }, updateTime: '2026-10-26T10:00:00.1Z' }] : []);
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const realQuiet = ctx.quietUntil_;
+  ctx.quietUntil_ = () => Date.now() + 3600e3;
+  ctx.processNotify_({ people: { sophie: { settings: {} } } });
+  ctx.quietUntil_ = realQuiet;
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].currentDocument.updateTime, '2026-10-26T10:00:00.1Z');
+});
+
+test('a very full rota calendar with long names still remembers its shifts (a saved value is at most 9 KB)', () => {
+  const now = Date.now();
+  const { store, api } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  const evs = (name) => Array.from({ length: 120 }, (_, i) => ({ t: name + ' '.repeat(10) + 'x'.repeat(200), s: now + 3600e3 + i * 4 * 3600e3, e: now + 2 * 3600e3 + i * 4 * 3600e3 }));
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs('Ward'), api, { share: 'all' });
+  assert.ok(store.rota_rota && store.rota_rota.length <= 9216, 'saved');
+  // the same again: nothing to tell
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs('Ward'), api, { share: 'all' });
+  assert.equal(writes.length, 0);
+});
+
+test("a rota calendar that isn't read (not shown, shared as Nothing) doesn't forget its shifts", () => {
+  withDigest();
+  const calId = 'rota@group.calendar.google.com';
+  const key = ctx.shortKey_(calId);
+  const { store, api } = fakeProps({ [`h_${key}`]: '{}', [`rota_${key}`]: '{"from":1,"to":2,"map":{"2026-11-10":[1,2,"Long day"]}}' });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => calId, getName: () => 'Rota', getColor: () => '#1', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'e@x.com' }) };
+  ctx.Calendar = { Events: { list: () => { throw new Error('should not be read'); } } };
+  ctx.fsCommit_ = () => {};
+  ctx.docName_ = (p) => p;
+  ctx.syncCalendars_({ email: 's@x.com', person: 'sophie', main: true, people: [] }, { appEmail: 's@x.com', hh: {}, people: {}, calDocs: {
+    [key]: { owner: 'sophie', calKey: key, calId, name: 'Rota', color: '#1', canWrite: true, primary: false, account: 's@x.com', lastSeen: Date.now(), show: false, share: 'none', role: 'rota', layer: 'own' }
+  } }, []);
+  assert.match(store[`rota_${key}`], /Long day/);
+});
+
+test('a "from this day on" query asks Firestore for just that', () => {
+  // a fresh copy of the script (other checks stand in for fsQuery_ itself)
+  const c2 = vm.createContext({ Utilities, Logger: { log() {} } });
+  vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8'), c2);
+  let body = null;
+  c2.call_ = (m, url, b) => { body = b; return []; };
+  c2.prop_ = () => 'proj';
+  c2.fsQuery_('shifts', [['day', '2026-10-25', '>=']]);
+  assert.equal(body.structuredQuery.where.fieldFilter.op, 'GREATER_THAN_OR_EQUAL');
+  assert.equal(body.structuredQuery.where.fieldFilter.value.stringValue, '2026-10-25');
+});
+
+test('a ping that waited while "Stop syncing" finished writes nothing back', () => {
+  asUser('e@x.com');
+  fakeCache();
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.ScriptApp = { getProjectTriggers: () => [] };
+  let read = 0;
+  ctx.fsList_ = () => { read++; return [{ id: 'ethan', data: { email: 'e@x.com' } }]; };
+  assert.equal(ctx.syncAll({ fromPing: true }), 'not connected');
+  assert.equal(read, 0);
+});
+
+test('reminder times that are not a list never stop the reminders', () => {
+  const now = Date.now();
+  const { api } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsGet_ = (path) => (path === 'households/main/people/ethan/private/main'
+    ? { reminders: { bad: { ref: 'e:ethan:primary:u0', owner: 'ethan', times: 'h1' }, r1: { ref: 'e:ethan:primary:u1', owner: 'ethan', times: ['h1'] } } } : null);
+  const me = { person: 'ethan', email: 'e@x.com', main: true, people: [{ id: 'ethan', data: { settings: { autoRemind: { birthdays: 'd0' } } } }] };
+  const ev = (uid) => ({ calKey: 'primary', shown: true, share: 'all', doc: { share: 'all' }, ev: { id: uid, uid, t: 'Dentist ' + uid, ad: 0, s: now + 30 * 60e3, e: now + 90 * 60e3 } });
+  ctx.fireReminders_(me, {}, [ev('u0'), ev('u1')]);
+  assert.equal(writes.length, 1);
+});
+
+test("an extra account isn't synced while its person's email is also someone else's", () => {
+  ctx.fsGet_ = () => ({});
+  ctx.fsQuery_ = () => [];
+  const people = [{ id: 'ethan', data: { email: 'e@x.com' } }, { id: 'sophie', data: { email: 'E@x.com', linked: ['s.work@x.com'] } }];
+  assert.throws(() => ctx.loadCtx_({ email: 's.work@x.com', person: 'sophie', main: false, people }), /more than one person/);
+  people[1].data.email = 's@x.com';
+  assert.equal(ctx.loadCtx_({ email: 's.work@x.com', person: 'sophie', main: false, people }).appEmail, 's@x.com');
+});
+
+test("someone who isn't one of you, trying again and again, reads the household once every couple of minutes at most", () => {
+  fakeCache();
+  let reads = 0;
+  ctx.fsList_ = () => { reads++; return [{ id: 'ethan', data: { email: 'e@x.com' } }]; };
+  ctx.fsGet_ = () => ({});
+  asUser('stranger@x.com');
+  for (let i = 0; i < 5; i++) assert.throws(() => ctx.whoAmI_(), /not part of Caledonite/);
+  assert.equal(reads, 1);
+  // and only the first one can count as "taken out" (so tidying up happens once)
+  let err; try { ctx.whoAmI_(); } catch (e) { err = e; }
+  assert.equal(err.notMember, false);
+  // a member is never held back by it
+  asUser('e@x.com');
+  assert.equal(ctx.whoAmI_().person, 'ethan');
 });
