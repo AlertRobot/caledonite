@@ -1,15 +1,17 @@
 // Caledonite: start-up, screens, taps and typing.
-import { store, actions, setPhase } from './store.js';
+import { store, actions, setPhase, setLinked } from './store.js';
 import { ui, resetAsk, resetAdd } from './uistate.js';
 import { viewToday, viewCalendar, waitingForMe } from './views-main.js';
-import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey } from './views-requests.js';
+import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey, leaveWhen } from './views-requests.js';
 import { viewSettings, viewSignedOut, viewSetup, viewNotMember, viewLoading } from './views-settings.js';
 import { viewEvent, findEvent } from './views-event.js';
+import { viewJobs, viewJar, STARTER_IDEAS, pickIdea, jarBudget } from './views-extra.js';
+import { loadLinked } from './linked.js';
 import { applyLook, setLook } from './theme.js';
 import { FIREBASE, APP } from './config.js';
 import { icon } from './ui.js';
 import { dayKey, addDays, fromDayKey, mondayOf, esc, minutesOf, pad } from './util.js';
-import { freeSlots, settingsOf, shiftFor, SHIFT_ORDER, nameOf, reminderFor } from './logic.js';
+import { freeSlots, settingsOf, shiftFor, SHIFT_ORDER, nameOf, reminderFor, reminderId, quietNight, repeatOf, leaveDaysFor, nextBothFree } from './logic.js';
 import { whenLabel } from './store.js';
 
 const root = document.getElementById('app');
@@ -29,7 +31,7 @@ function isEditing() {
 function navBar(state, r) {
   const n = waitingForMe(state).length;
   const tab = (href, key, label, ic, extra = '') => {
-    const on = r === key || (key === 'requests' && r === 'ask') || (r === 'event' && ui.ev.back && ui.ev.back.startsWith('#' + key));
+    const on = r === key || (key === 'requests' && r === 'ask') || (key === 'today' && (r === 'jobs' || r === 'jar')) || (r === 'event' && ui.ev.back && ui.ev.back.startsWith('#' + key));
     return `<a href="#${href}" class="nav-item ${on ? 'on' : ''}" ${on ? 'aria-current="page"' : ''}><span class="nav-ic">${ic}${extra}</span>${label}</a>`;
   };
   return `<nav class="bottom-nav" aria-label="Main">
@@ -55,7 +57,7 @@ export function render() {
   else {
     nav = true;
     if (r === 'settings') ui.settings.page = sub || 'home';
-    const view = { today: viewToday, calendar: viewCalendar, requests: viewRequests, ask: viewAsk, add: viewAdd, settings: viewSettings, event: viewEvent }[r] || viewToday;
+    const view = { today: viewToday, calendar: viewCalendar, requests: viewRequests, ask: viewAsk, add: viewAdd, settings: viewSettings, event: viewEvent, jobs: viewJobs, jar: viewJar }[r] || viewToday;
     try { html = view(st); } catch (e) {
       console.error(e);
       html = `<div class="welcome"><h1 class="h2">Something went wrong</h1><p class="muted">${esc(e && e.message)}</p><a class="btn" href="#today">Back to Today</a></div>`;
@@ -80,6 +82,7 @@ function go(hash) {
   if (location.hash === hash) render();
   else location.hash = hash;
 }
+function hhmmOf(d) { return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 // the next Monday (1) ... Sunday (7), counting today
 function nextWeekday(iso) {
   for (let i = 0; i < 7; i++) { const d = addDays(new Date(), i); if ((d.getDay() || 7) === iso) return dayKey(d); }
@@ -173,6 +176,135 @@ const H = {
   },
   addRemind: (el) => { const v = el.dataset.v; ui.add.remind = ui.add.remind.includes(v) ? ui.add.remind.filter((x) => x !== v) : [...ui.add.remind, v]; render(); },
   addNotePick: (el) => { ui.add.note = ui.add.note === el.dataset.v ? '' : el.dataset.v; render(); },
+  // ----- quiet hours, summaries, countdowns, holidays -----
+  quietTonight: (el) => {
+    const s = settingsOf(store.state, store.state.me);
+    const skip = el.dataset.v === 'off' ? quietNight(s, new Date()) : null;
+    run(actions.updateMySettings({ quiet: Object.assign({}, s.quiet, { skip }) }), skip ? 'No quiet hours tonight.' : 'Quiet hours are back on tonight.');
+  },
+  quietToggle: () => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ quiet: Object.assign({}, s.quiet, { on: !s.quiet.on, skip: null }) })); },
+  summaryToggle: (el) => { const s = settingsOf(store.state, store.state.me); const f = el.dataset.f; run(actions.updateMySettings({ [f]: Object.assign({}, s[f], { on: !s[f].on }) })); },
+  myToggle: (el) => { const s = settingsOf(store.state, store.state.me); const f = el.dataset.f; run(actions.updateMySettings({ [f]: s[f] === false })); },
+  leaveToggle: () => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ leave: Object.assign({}, s.leave, { bankHolsCount: !s.leave.bankHolsCount }) })); },
+  linkedReload: async () => { setLinked(await loadLinked()); toast('Checked.'); },
+  // ----- jobs -----
+  addJobNew: () => { resetAdd(); ui.add.kind = 'job'; },
+  addJobWho: (el) => { ui.add.jobWho = el.dataset.v; render(); },
+  addJobSave: async () => {
+    const a = ui.add; const st = store.state;
+    if (!a.title.trim()) { ui.focus = 'job-title'; return toast('Add what needs doing first.'); }
+    const who = a.jobWho === 'both' ? 'both' : a.jobWho === 'partner' ? st.partner : st.me;
+    const day = addDayKey();
+    try {
+      await actions.addJob({ title: a.title, who, day, time: a.start || null, repeat: repeatOf(a.jobRepeat) });
+      ui.add.done = `Job added: ${a.title.trim()}, ${whenLabel({ day, allDay: true }).replace(', all day', '')}.`;
+      render();
+    } catch (e) { console.error(e); toast('That didn’t save. Check your connection and try again.'); }
+  },
+  jobDone: (el) => {
+    const j = store.state.jobs.find((x) => x.id === el.dataset.id);
+    if (!j) return;
+    if (j.done) return run(actions.updateJob(j.id, { done: false }));
+    run(actions.jobDone(j), j.repeat ? 'Done. See you next time.' : 'Done.');
+  },
+  jobDelete: (el) => run(actions.deleteJob(el.dataset.id), 'Job removed.'),
+  // ----- holidays -----
+  addLeaveSave: async () => {
+    const st = store.state; const a = ui.add;
+    const from = a.lfrom || dayKey(addDays(new Date(), 14));
+    const to = a.lto && a.lto >= from ? a.lto : from;
+    const when = { day: from, endDay: to, allDay: true };
+    when.label = whenLabel(when);
+    try {
+      await actions.bookOwnLeave({ title: a.title, when, days: { [st.me]: leaveDaysFor(st, st.me, from, to) } });
+      ui.add.done = `Booked: ${a.title.trim() || 'Holiday'} (${when.label}). It goes in your calendar within a few minutes.`;
+      render();
+    } catch (e) { console.error(e); toast('That didn’t save. Check your connection and try again.'); }
+  },
+  // ----- ideas jar -----
+  jarSeed: () => run(actions.seedIdeas(STARTER_IDEAS), 'The jar is full.'),
+  jarFilter: (el) => { ui.jar.filter = el.dataset.v; ui.jar.pick = null; render(); },
+  jarPick: () => {
+    const st = store.state;
+    const fun = jarBudget(st);
+    const idea = pickIdea(st, fun ? Math.floor(fun.left) : null, ui.jar.filter);
+    ui.jar.pickNone = !idea;
+    ui.jar.pick = idea ? idea.id : null;
+    render();
+  },
+  jarPlan: (el) => {
+    const idea = store.state.ideas.find((i) => i.id === el.dataset.id);
+    resetAsk();
+    ui.ask.type = 'plan';
+    ui.ask.title = idea ? idea.title : '';
+    const nf = nextBothFree(store.state, new Date());
+    if (nf) {
+      const slots = freeSlots(store.state, new Date(), 4);
+      const i = slots.findIndex((x) => x.key === nf.key);
+      if (i >= 0) ui.ask.slot = i;
+    }
+    if (idea) run(actions.updateIdea(idea.id, { used: (idea.used || 0) + 1, lastUsed: Date.now() }));
+  },
+  jarFromAsk: () => { ui.jar.pick = null; },
+  jarAdd: () => {
+    const d = ui.jar.draft;
+    if (!d.title.trim()) { ui.focus = 'idea-title'; return toast('Write the idea first.'); }
+    ui.jar.draft = { title: '', cost: '', where: d.where };
+    run(actions.addIdea(d), 'Added to the jar.');
+  },
+  jarRemove: (el) => run(actions.deleteIdea(el.dataset.id)),
+  // ----- changing or deleting an event -----
+  evEdit: () => { ui.ev.editing = true; ui.ev.confirmDelete = false; ui.ev.draft = {}; ui.ev.scope = 'one'; render(); },
+  evEditCancel: () => { ui.ev.editing = false; ui.ev.draft = null; render(); },
+  evScope: (el) => { ui.ev.scope = el.dataset.v; render(); },
+  evDeleteAsk: () => { ui.ev.confirmDelete = true; ui.ev.editing = false; ui.ev.scope = 'one'; render(); },
+  evDeleteCancel: () => { ui.ev.confirmDelete = false; render(); },
+  evSave: async () => {
+    const st = store.state;
+    const { it, ev } = findEvent(st, ui.ev.ref, ui.ev.day);
+    const src = ev || (it && it.src);
+    if (!src) return;
+    const d = ui.ev.draft || {};
+    const changes = {};
+    if (d.title !== undefined && d.title.trim() && d.title.trim() !== src.title) changes.title = d.title.trim();
+    if (ui.ev.scope !== 'all') {
+      if (d.day) changes.day = d.day;
+      if (!src.allDay && (d.start || d.end || d.day)) {
+        changes.start = d.start || hhmmOf(src.start);
+        changes.end = d.end || hhmmOf(src.end);
+        changes.day = changes.day || dayKey(src.start);
+        if (changes.end <= changes.start) return toast('The end needs to be after the start.');
+      }
+      if (src.allDay && d.day) changes.allDay = true;
+    }
+    if (!Object.keys(changes).length) { ui.ev.editing = false; render(); return; }
+    try {
+      await actions.editEvent({ ev: src, changes, scope: ui.ev.scope });
+      ui.ev.editing = false; ui.ev.draft = null;
+      toast('Saving the change to Google Calendar.');
+    } catch (e) { console.error(e); toast('That didn’t save. Check your connection and try again.'); }
+  },
+  evDelete: async () => {
+    const st = store.state;
+    const { it, ev } = findEvent(st, ui.ev.ref, ui.ev.day);
+    const src = ev || (it && it.src);
+    if (!src) return;
+    try {
+      await actions.removeEvent({ ev: src, scope: ui.ev.scope });
+      ui.ev.confirmDelete = false;
+      toast('Deleting it from Google Calendar.');
+      go(ui.ev.back || '#today');
+    } catch (e) { console.error(e); toast('That didn’t delete. Check your connection and try again.'); }
+  },
+  evCountdown: (el) => {
+    const st = store.state;
+    const { it, ev } = findEvent(st, ui.ev.ref, ui.ev.day);
+    const src = ev || (it && it.src) || it;
+    const id = reminderId(ui.ev.ref);
+    if (el.dataset.v === 'off') return run(actions.removeCountdown(id), 'Countdown removed.');
+    const date = src.allDay ? (src.startKey || dayKey(src.start)) : dayKey(src.start);
+    run(actions.setCountdown({ id, title: (it && it.title) || src.title, date, ref: ui.ev.ref }), 'It counts down on Today now.');
+  },
   // ----- every other Friday off -----
   altOffToggle: () => {
     const s = settingsOf(store.state, store.state.me);
@@ -200,12 +332,14 @@ const H = {
   askHold: () => { const def = store.state.household.pencilDefault !== false; ui.ask.hold = !(ui.ask.hold === null ? def : ui.ask.hold); render(); },
   askSend: async () => {
     const a = ui.ask;
-    if (!a.title.trim()) { ui.focus = 'ask-title'; return toast('Add what it is first.'); }
-    const when = askWhen(store.state);
-    const def = store.state.household.pencilDefault !== false;
+    if (!a.title.trim() && a.type !== 'leave') { ui.focus = 'ask-title'; return toast('Add what it is first.'); }
+    const st = store.state;
+    const when = askWhen(st);
+    const def = st.household.pencilDefault !== false;
     const hold = (a.type === 'plan' || a.type === 'free') && (a.hold === null ? def : a.hold);
+    const extra = a.type === 'leave' ? { days: { [st.me]: leaveDaysFor(st, st.me, when.day, when.endDay), [st.partner]: leaveDaysFor(st, st.partner, when.day, when.endDay) }, people: [st.me, st.partner] } : {};
     try {
-      await actions.createRequest({ type: a.type, title: a.title, when, hold });
+      await actions.createRequest(Object.assign({ type: a.type, title: a.title, when, hold }, extra));
       ui.ask.sent = true; ui.ask.heldNote = hold;
       render();
     } catch (e) { console.error(e); toast('That didn’t send. Check your connection and try again.'); }
@@ -237,7 +371,8 @@ const H = {
     const cals = Object.values(st.calendars).filter((c) => c.owner === st.me && c.canWrite && c.role !== 'rota');
     const calKey = a.cal || (cals.find((c) => c.primary) || cals[0] || {}).calKey || null;
     try {
-      const tag = await actions.addEvent({ who: a.who, title: a.title, day, start: a.allDay ? null : a.start, end: a.allDay ? null : end, allDay: a.allDay, calKey, busyOnly: a.busyOnly });
+      const rep = a.who !== 'partner' && a.repeat ? { freq: a.repeat.split(':')[0], interval: Number(a.repeat.split(':')[1]) || 1 } : null;
+      const tag = await actions.addEvent({ who: a.who, title: a.title, day, start: a.allDay ? null : a.start, end: a.allDay ? null : end, allDay: a.allDay, calKey, busyOnly: a.busyOnly, repeat: rep });
       if (a.who !== 'partner' && a.remind.length && tag) await actions.setReminder({ ref: `t:${tag}`, owner: st.me, title: a.title.trim(), times: a.remind, note: a.note.trim() });
       const when = whenLabel({ day, start: a.start, end, allDay: a.allDay });
       ui.add.done = a.who === 'partner' ? `Sent to ${nameOf(st, st.partner)}: ${a.title} (${when}). It goes in their calendar when they say yes.`
@@ -305,20 +440,20 @@ const H = {
     const st = store.state;
     const v = (ui.settings.partnerEmailDraft || '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return toast('That doesn’t look like an email.');
-    const myEmail = (st.people[st.me].email || '').toLowerCase();
-    run(Promise.all([actions.updatePerson(st.partner, { email: v }), actions.updateHousehold({ emails: [myEmail, v] })]), 'Saved.');
+    run(actions.setPartnerEmail(v), 'Saved.');
   },
   linkAcc: () => {
     const st = store.state;
     const v = (ui.settings.linkDraft || '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return toast('That doesn’t look like an email.');
     ui.settings.linkDraft = '';
-    const linked = (st.household.linked || []).filter((x) => x.email !== v);
-    run(actions.updateHousehold({ linked: [...linked, { email: v, person: st.me }] }), 'Added. Now run connectMe in the sync script while signed in to that account.');
+    const linked = ((st.people[st.me] && st.people[st.me].linked) || []).filter((x) => x !== v);
+    run(actions.setLinkedAccounts([...linked, v]), 'Added. Now open the connect page while signed in to that account.');
   },
   unlinkAcc: (el) => {
-    const linked = (store.state.household.linked || []).filter((x) => x.email !== el.dataset.v);
-    run(actions.updateHousehold({ linked }));
+    const st = store.state;
+    const linked = ((st.people[st.me] && st.people[st.me].linked) || []).filter((x) => x !== el.dataset.v);
+    run(actions.setLinkedAccounts(linked));
   },
   syncNow: async () => { const ok = await actions.syncNow(); toast(ok ? 'Syncing now.' : 'The sync script isn’t set up yet.'); },
   signOut: () => { if (store.state.demo) location.href = './'; else actions.signOut(); },
@@ -374,6 +509,16 @@ const C = {
     run(actions.updateMySettings({ altOff: { day, from: nextWeekday(day) } }));
   },
   addNote: (el) => { ui.add.note = el.value; },
+  quietField: (el) => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ quiet: Object.assign({}, s.quiet, { [el.dataset.f]: el.value }) })); },
+  summaryField: (el) => { const s = settingsOf(store.state, store.state.me); const f = el.dataset.f; run(actions.updateMySettings({ [f]: Object.assign({}, s[f], { [el.dataset.k]: el.dataset.k === 'day' ? Number(el.value) : el.value }) })); },
+  leaveField: (el) => {
+    const s = settingsOf(store.state, store.state.me);
+    const v = el.dataset.f === 'allowance' ? Math.max(0, Math.min(60, Number(el.value) || 0)) : (el.value || '').slice(5);
+    if (el.dataset.f === 'yearStart' && !/^\d{2}-\d{2}$/.test(v)) return;
+    run(actions.updateMySettings({ leave: Object.assign({}, s.leave, { [el.dataset.f]: v }) }));
+  },
+  askLeaveDate: () => render(),
+  addLeaveDate: () => render(),
   hhField: (el) => run(actions.updateHousehold({ [el.dataset.f]: el.dataset.f === 'nudgeHours' ? Number(el.value) : el.value }))
 };
 
@@ -407,6 +552,20 @@ root.addEventListener('keydown', (e) => {
   if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); H[el.dataset.act] && H[el.dataset.act](el, e); }
 });
 
+// Peckish and Budgie data on this phone (at most once a minute)
+let linkedAt = 0;
+async function refreshLinked() {
+  if (Date.now() - linkedAt < 60000) return;
+  linkedAt = Date.now();
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.get('demo')) {
+      const { demoLinked } = await import('./demo.js');
+      setLinked(demoLinked());
+    } else setLinked(await loadLinked());
+  } catch (e) { console.warn('linked', e); }
+}
+
 // ---------- start ----------
 async function boot() {
   applyLook();
@@ -414,7 +573,19 @@ async function boot() {
   store.subscribe(() => render());
   window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); });
   setInterval(() => { if (!document.hidden && !isEditing()) { store.state = Object.assign({}, store.state, { rev: store.state.rev + 1 }); render(); } }, 60000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && store.backend && store.state.phase === 'ready') store.backend.ping(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    if (store.backend && store.state.phase === 'ready') store.backend.ping();
+    refreshLinked();
+  });
+  refreshLinked();
+  // first sign-in: mark yourself as joined
+  let joinedChecked = false;
+  store.subscribe((st) => {
+    if (joinedChecked || st.phase !== 'ready' || !st.me || st.demo) return;
+    joinedChecked = true;
+    actions.markJoined().catch((e) => console.warn('joined', e));
+  });
   const params = new URLSearchParams(location.search);
   const demo = params.get('demo');
   if (demo) {

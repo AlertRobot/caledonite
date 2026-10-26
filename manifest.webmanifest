@@ -9,8 +9,95 @@
   "background_color": "#F3F5F8",
   "theme_color": "#F3F5F8",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Add something",
+      "short_name": "Add",
+      "description": "Add to your calendar, a job or a holiday",
+      "url": "./#add",
+      "icons": [
+        {
+          "src": "icons/sc-add-96.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        },
+        {
+          "src": "icons/sc-add-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Ask something",
+      "short_name": "Ask",
+      "description": "Ask your partner something",
+      "url": "./#ask",
+      "icons": [
+        {
+          "src": "icons/sc-ask-96.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        },
+        {
+          "src": "icons/sc-ask-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "short_name": "Jobs",
+      "description": "Today's jobs",
+      "url": "./#jobs",
+      "icons": [
+        {
+          "src": "icons/sc-jobs-96.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        },
+        {
+          "src": "icons/sc-jobs-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Ideas jar",
+      "short_name": "Ideas",
+      "description": "Pick something to do together",
+      "url": "./#jar",
+      "icons": [
+        {
+          "src": "icons/sc-jar-96.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        },
+        {
+          "src": "icons/sc-jar-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
   ]
 }

@@ -26,8 +26,9 @@ export async function createFirebaseBackend() {
   let listening = false;
   let user = null;
   let timer = null;
+  let lastPing = 0;
   function fresh() {
-    return { household: {}, people: {}, calendars: {}, feeds: [], shifts: {}, requests: {}, notes: {}, outbox: {}, status: {}, _priv: {}, _shared: {} };
+    return { household: {}, people: {}, calendars: {}, feeds: [], shifts: {}, requests: {}, notes: {}, outbox: {}, status: {}, jobs: {}, ideas: {}, tokens: undefined, _priv: {}, _shared: {} };
   }
   function publish() {
     clearTimeout(timer);
@@ -71,15 +72,54 @@ export async function createFirebaseBackend() {
   }
   function listenAll() {
     const c = (name) => fs.collection(db, `${H}/${name}`);
+    const email = user.email.toLowerCase();
+    // only what's still relevant, so reads don't grow forever
+    const since = (days) => Date.now() - days * 864e5;
     mapColl('people', c('people'), 'people');
     mapColl('calendars', c('calendars'), 'calendars');
-    mapColl('shifts', c('shifts'), 'shifts');
-    mapColl('requests', c('requests'), 'requests');
-    mapColl('notes', c('notes'), 'notes');
+    mapColl('shifts', fs.query(c('shifts'), fs.where('day', '>=', dayKeyOf(since(30)))), 'shifts');
+    // a year and a bit: holiday bookings count towards the year's allowance
+    mapColl('requests', fs.query(c('requests'), fs.where('created', '>=', since(400))), 'requests');
+    mapColl('notes', fs.query(c('notes'), fs.where('created', '>=', since(30))), 'notes');
     mapColl('outbox', fs.query(c('outbox'), fs.where('done', '==', false)), 'outbox');
     mapColl('status', c('status'), 'status');
-    mapColl('sharedFeeds', c('sharedFeeds'), '_shared', (d) => ({ owner: d.owner, calKey: d.calKey, private: false, events: d.events || [] }));
-    mapColl('privateFeeds', fs.query(c('privateFeeds'), fs.where('ownerEmail', '==', user.email.toLowerCase())), '_priv', (d) => ({ owner: d.owner, calKey: d.calKey, private: true, events: d.events || [] }));
+    mapColl('jobs', c('jobs'), 'jobs');
+    mapColl('ideas', c('ideas'), 'ideas');
+    mapColl('sharedFeeds', fs.query(c('sharedFeeds'), fs.where('ownerEmail', '!=', email)), '_shared', (d) => ({ owner: d.owner, calKey: d.calKey, private: false, events: d.events || [] }));
+    mapColl('privateFeeds', fs.query(c('privateFeeds'), fs.where('ownerEmail', '==', email)), '_priv', (d) => ({ owner: d.owner, calKey: d.calKey, private: true, events: d.events || [] }));
+    listenTokens();
+  }
+  // this person's phones (to spot a phone that has stopped getting notifications)
+  let tokenUnsub = null;
+  function listenTokens() {
+    const people = raw.people || {};
+    const me = Object.keys(people).find((pid) => (people[pid].email || '').toLowerCase() === user.email.toLowerCase());
+    if (!me) { setTimeout(() => { if (listening) listenTokens(); }, 1500); return; }
+    if (tokenUnsub) tokenUnsub();
+    tokenUnsub = fs.onSnapshot(fs.collection(db, `${H}/people/${me}/tokens`), (snap) => {
+      const obj = {};
+      snap.forEach((d) => { obj[d.id] = true; });
+      raw.tokens = obj;
+      publish();
+      refreshPush(me, obj);
+    }, (err) => console.warn('tokens', err));
+    unsubs.push(() => { if (tokenUnsub) tokenUnsub(); tokenUnsub = null; });
+  }
+  // Notification addresses change now and then. Each time the app opens, make sure this phone's is saved.
+  let pushChecked = false;
+  async function refreshPush(me, have) {
+    if (pushChecked) return;
+    pushChecked = true;
+    try {
+      if (!('Notification' in window) || Notification.permission !== 'granted' || localStorage.getItem('caledonite.push') !== '1') return;
+      const fm = await import(`${SDK}/firebase-messaging.js`);
+      if (!(await fm.isSupported())) return;
+      const reg = await navigator.serviceWorker.ready;
+      const token = await fm.getToken(fm.getMessaging(app), { vapidKey: FIREBASE.vapidKey, serviceWorkerRegistration: reg });
+      const id = await sha1(token);
+      localStorage.setItem('caledonite.pushId', id);
+      if (!have[id]) await fs.setDoc(ref(`people/${me}/tokens/${id}`), { token, ua: navigator.userAgent.slice(0, 200), created: Date.now() });
+    } catch (e) { console.warn('push refresh', e); }
   }
 
   fa.onAuthStateChanged(auth, (u) => {
@@ -95,10 +135,27 @@ export async function createFirebaseBackend() {
     async update(path, patch) { await fs.setDoc(ref(path), patch, { merge: true }); },
     async add(coll, data) { const r = await fs.addDoc(fs.collection(db, `${H}/${coll}`), data); return r.id; },
     async del(path) { await fs.deleteDoc(ref(path)); },
+    // Several changes, saved together. Saved on the phone straight away; sent when online.
+    async commit(ops) {
+      const b = fs.writeBatch(db);
+      for (const o of ops) {
+        if (o.type === 'set') b.set(ref(o.path), o.data);
+        else if (o.type === 'update') b.set(ref(o.path), o.data, { merge: true });
+        else if (o.type === 'add') b.set(fs.doc(fs.collection(db, `${H}/${o.path}`)), o.data);
+        else if (o.type === 'delete') b.delete(ref(o.path));
+        else if (o.type === 'unset') b.update(ref(o.path), { [o.field]: fs.deleteField() });
+      }
+      const p = b.commit();
+      // offline the server never answers; the change is already saved on the phone
+      return Promise.race([p, new Promise((res) => setTimeout(res, 1200))]);
+    },
     async unset(path, field) { await fs.updateDoc(ref(path), { [field]: fs.deleteField() }); },
-    async ping() {
+    async ping(force) {
       const h = raw.household || {};
       if (!h.pingUrl || !h.pingSecret) return false;
+      // at most one quick sync every 2 minutes, unless asked for
+      if (!force && Date.now() - lastPing < 120000) return true;
+      lastPing = Date.now();
       try {
         await fetch(h.pingUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ secret: h.pingSecret, action: 'ping' }) });
         return true;
@@ -116,7 +173,7 @@ export async function createFirebaseBackend() {
       const me = store.state.me;
       const id = await sha1(token);
       await fs.setDoc(ref(`people/${me}/tokens/${id}`), { token, ua: navigator.userAgent.slice(0, 200), created: Date.now() });
-      try { localStorage.setItem('caledonite.push', '1'); } catch (e) { /* ignore */ }
+      try { localStorage.setItem('caledonite.push', '1'); localStorage.setItem('caledonite.pushId', id); } catch (e) { /* ignore */ }
       return { ok: true };
     },
     async signIn() {
@@ -136,21 +193,25 @@ export async function createFirebaseBackend() {
       if (a === b) b = b + '2';
       const settingsFor = (shifts) => shifts
         ? { workLabel: 'Working', workDays: [], hasShifts: true, sleepUntil: '14:00', travelMins: 30 }
-        : { workLabel: 'Working', workStart: '09:00', workEnd: '17:30', workDays: [1, 2, 3, 4, 5], hasShifts: false };
+        : { workLabel: 'Working', workStart: '09:00', workEnd: '18:00', workDays: [1, 2, 3, 4, 5], hasShifts: false };
       const secret = Array.from(crypto.getRandomValues(new Uint8Array(18))).map((x) => x.toString(16).padStart(2, '0')).join('');
       const emails = [myEmail, (partnerEmail || '').toLowerCase().trim()].filter(Boolean);
       await fs.setDoc(ref(''), {
         emails, created: Date.now(), dinnerTime: '19:00', moveDinner: true, pencilDefault: true, nudgeHours: 24,
         favours: ['Put the bins out', 'Pick up some shopping', 'Give me a lift', 'Book a table somewhere'],
-        pingSecret: secret, pingUrl: '', linked: [], settingsRev: Date.now()
+        pingSecret: secret, pingUrl: '', settingsRev: Date.now()
       });
-      await fs.setDoc(ref(`people/${a}`), { name: myName.trim(), email: myEmail, colour: 'blue', settings: settingsFor(myShifts) });
+      await fs.setDoc(ref(`people/${a}`), { name: myName.trim(), email: myEmail, colour: 'blue', joined: true, settings: settingsFor(myShifts) });
       await fs.setDoc(ref(`people/${b}`), { name: partnerName.trim(), email: emails[1] || '', colour: 'orange', settings: settingsFor(partnerShifts) });
     }
   };
   return backend;
 }
 
+function dayKeyOf(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 async function sha1(s) {
   const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(s));
   return Array.from(new Uint8Array(buf)).map((x) => x.toString(16).padStart(2, '0')).join('');

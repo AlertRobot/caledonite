@@ -28,7 +28,12 @@ export const DEFAULT_SETTINGS = {
   rotaUrl: '',
   remindAt: '09:00',
   autoRemind: { birthdays: [] },
-  notif: { quiet: true, requests: true, rota: true, notes: true, reminders: true }
+  quiet: { on: true, from: '23:00', to: '07:00', skip: null },
+  morning: { on: true, at: '07:30' },
+  weekAhead: { on: true, day: 7, at: '18:00' },
+  christmas: true,
+  leave: { allowance: 25, yearStart: '01-01', bankHolsCount: false },
+  notif: { quiet: true, requests: true, rota: true, notes: true, reminders: true, jobs: true, summary: true }
 };
 
 export const LAYER_INFO = {
@@ -46,6 +51,7 @@ export function settingsOf(state, pid) {
   s.shiftTypes = Object.assign({}, DEFAULT_SHIFT_TYPES, (p.settings && p.settings.shiftTypes) || {});
   s.notif = Object.assign({}, DEFAULT_SETTINGS.notif, (p.settings && p.settings.notif) || {});
   s.autoRemind = Object.assign({}, DEFAULT_SETTINGS.autoRemind, (p.settings && p.settings.autoRemind) || {});
+  for (const k of ['quiet', 'morning', 'weekAhead', 'leave']) s[k] = Object.assign({}, DEFAULT_SETTINGS[k], (p.settings && p.settings[k]) || {});
   return s;
 }
 export function nameOf(state, pid) {
@@ -226,6 +232,30 @@ function dinnerFor(state, key, persons) {
   }
   return { kind: 'together', who: 'both', auto: true, title: 'Dinner together', start: dinner, end: addMinutes(dinner, 45), sub: 'Your usual dinner time.' };
 }
+// Tonight's meal from Peckish, and a nudge to cook extra before a long shift
+function withPeckish(state, key, din) {
+  const pk = state.linked && state.linked.peckish;
+  const meal = pk && pk.days && pk.days[key];
+  if (!din && !meal) return din;
+  const out = din ? Object.assign({}, din) : null;
+  if (out && meal) {
+    out.title = meal.takeaway ? 'Takeaway night' : `Dinner: ${meal.title}`;
+    out.meal = meal;
+  }
+  // a long day, early or night shift tomorrow: make extra for a packed lunch
+  const tomorrow = dayKey(addDays(fromDayKey(key), 1));
+  const lunch = [state.me, state.partner].filter(Boolean).find((pid) => {
+    const sh = shiftFor(state, pid, tomorrow);
+    return isWorkingShift(sh) && (sh.end - sh.start) >= 9 * 3600000;
+  });
+  if (out && lunch && meal && !meal.takeaway) {
+    out.lunchFor = lunch;
+    out.sub = `${lunch === state.me ? 'You have' : nameOf(state, lunch) + ' has'} a long shift tomorrow: make extra for a packed lunch.`;
+  } else if (out && meal) {
+    out.sub = meal.time ? `${meal.time} minutes, from Peckish.` : 'From Peckish.';
+  }
+  return out;
+}
 
 // ---------- one whole day ----------
 const cache = new Map();
@@ -298,7 +328,7 @@ export function buildDay(state, key, now = new Date()) {
       const it = {
         kind: 'event', who: pid, title: ev.busy ? 'Busy' : (ev.title || 'Busy'), sub: c.role === 'work' ? 'Work' : '',
         start: ev.start, end: ev.end, allDay: ev.allDay, calName: c.name, location: ev.location || '', busyOnly: !!ev.busy,
-        ref: evRef(ev), owner: ev.owner, repeats: !!ev.sid
+        ref: evRef(ev), owner: ev.owner, repeats: !!ev.sid, src: ev
       };
       if (c.layer && c.layer !== 'own') {
         const lk = layerKey(pid, c.layer);
@@ -308,6 +338,12 @@ export function buildDay(state, key, now = new Date()) {
       }
       items.push(it);
       if (!ev.allDay) busy.push([ev.start.getTime(), ev.end.getTime()]);
+    }
+    // paydays and bills from Budgie, on this phone only
+    if (pid === state.me && state.linked && state.linked.budgie && state.linked.budgie.days) {
+      for (const m of state.linked.budgie.days[key] || []) {
+        items.push({ kind: 'money', who: pid, title: m.name, sub: m.sub || '', allDay: true, start: new Date(dayStart), end: new Date(dayEnd), money: m });
+      }
     }
     persons[pid] = { items, busy, shift, sleep, work, settings: s };
   }
@@ -328,7 +364,7 @@ export function buildDay(state, key, now = new Date()) {
     const it = {
       kind: hold ? 'hold' : (both ? 'together' : 'event'), who, title, start: ev.start, end: ev.end, allDay: ev.allDay,
       sub: hold ? `Pencilled in, waiting for ${req ? nameOf(state, req.to) : 'an answer'}` : (req && req.type === 'favour' ? `${nameOf(state, req.from)} asked` : ''),
-      tag, ref: hold ? null : evRef(mine), owner: mine.owner, calName: (calOf(state, mine) || {}).name
+      tag, ref: hold ? null : evRef(mine), owner: mine.owner, calName: (calOf(state, mine) || {}).name, src: mine
     };
     if (who === 'both') together.push(it);
     else if (persons[who]) persons[who].items.push(it);
@@ -372,7 +408,7 @@ export function buildDay(state, key, now = new Date()) {
   }
   // dinner
   if (ids.length === 2) {
-    const din = dinnerFor(state, key, persons);
+    const din = withPeckish(state, key, dinnerFor(state, key, persons));
     if (din) together.push(din);
   }
 
@@ -634,14 +670,16 @@ export const REMIND_OPTIONS = [
   { v: 'w1', label: 'A week before', days: 7 },
   { v: 'd1', label: 'The day before', days: 1 },
   { v: 'd0', label: 'On the day', days: 0 },
-  { v: 'h1', label: 'An hour before', mins: 60, timedOnly: true }
+  { v: 'h1', label: 'An hour before', mins: 60, timedOnly: true },
+  { v: 'm30', label: '30 minutes before', mins: 30, timedOnly: true }
 ];
 export const REMIND_NOTES = ['Buy a card and a present', 'Send a message', 'Book a table', 'Get something ready'];
 const BIRTHDAY_RE = /\bbirthday\b|\bbday\b|\bb-day\b/i;
 
 export function evRef(ev) {
   if (ev.tag) return `t:${ev.tag}`;
-  return `e:${ev.owner}:${ev.calKey}:${ev.sid || ev.id}`;
+  // tied to the event itself, not its time, so moving it keeps the reminder
+  return `e:${ev.owner}:${ev.calKey}:${ev.uid || ev.sid || ev.id}`;
 }
 export function reminderId(ref) {
   let h = 5381;
@@ -733,6 +771,173 @@ export function remindSummary(times) {
   if (!labels.length) return 'No reminder';
   const t = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
   return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+// ---------- jobs ----------
+export const JOB_REPEATS = [
+  { v: '', label: 'Just once' },
+  { v: 'week:1', label: 'Every week' },
+  { v: 'week:2', label: 'Every 2 weeks' },
+  { v: 'month:1', label: 'Every month' },
+  { v: 'day:1', label: 'Every day' }
+];
+export function repeatOf(v) {
+  if (!v) return null;
+  const [unit, every] = v.split(':');
+  return { unit, every: Number(every) || 1 };
+}
+export function repeatValue(r) { return r ? `${r.unit}:${r.every || 1}` : ''; }
+export function repeatLabel(r) {
+  const o = JOB_REPEATS.find((x) => x.v === repeatValue(r));
+  return o ? o.label : 'Just once';
+}
+// the next time a repeating job is due, after it's been done today
+export function nextJobDay(job, todayK) {
+  const r = job.repeat;
+  let d = fromDayKey(job.day || todayK);
+  const today = fromDayKey(todayK);
+  const step = () => {
+    if (r.unit === 'day') d = addDays(d, r.every || 1);
+    else if (r.unit === 'week') d = addDays(d, 7 * (r.every || 1));
+    else d = new Date(d.getFullYear(), d.getMonth() + (r.every || 1), d.getDate());
+  };
+  step();
+  while (d <= today) step();
+  return dayKey(d);
+}
+// jobs for someone on a day (today also shows anything overdue)
+export function jobsOn(state, key, who) {
+  const todayK = dayKey(new Date());
+  return state.jobs.filter((j) => !j.done && j.day && (j.day === key || (key === todayK && j.day < todayK)) && (!who || j.who === who || j.who === 'both'))
+    .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : (a.time || '99') < (b.time || '99') ? -1 : 1));
+}
+export function jobWho(state, j) {
+  if (j.who === 'both') return 'Both of you';
+  return j.who === state.me ? 'You' : nameOf(state, j.who);
+}
+
+// ---------- holidays and allowances ----------
+// Bank holidays in England and Wales
+export const BANK_HOLIDAYS = [
+  '2026-01-01', '2026-04-03', '2026-04-06', '2026-05-04', '2026-05-25', '2026-08-31', '2026-12-25', '2026-12-28',
+  '2027-01-01', '2027-03-26', '2027-03-29', '2027-05-03', '2027-05-31', '2027-08-30', '2027-12-27', '2027-12-28',
+  '2028-01-03', '2028-04-14', '2028-04-17', '2028-05-01', '2028-05-29', '2028-08-28', '2028-12-25', '2028-12-26'
+];
+// The working days a holiday takes from someone's allowance
+export function leaveDaysFor(state, pid, fromK, toK) {
+  const s = settingsOf(state, pid);
+  let n = 0;
+  for (let d = fromDayKey(fromK); dayKey(d) <= toK; d = addDays(d, 1)) {
+    const k = dayKey(d);
+    const wd = isoWeekday(d);
+    if (!s.leave.bankHolsCount && BANK_HOLIDAYS.includes(k)) continue;
+    if (s.hasShifts) {
+      // a shift worker: the days they'd be on shift, or weekdays when the rota isn't known yet
+      const sh = shiftFor(state, pid, k);
+      if (sh ? isWorkingShift(sh) || sh.type === 'leave' : wd <= 5) n++;
+      continue;
+    }
+    if (!s.workDays.includes(wd) || isAltDayOff(s, k)) continue;
+    n++;
+  }
+  return n;
+}
+function leaveYear(s, now = new Date()) {
+  const [mm, dd] = (s.leave.yearStart || '01-01').split('-').map(Number);
+  let start = new Date(now.getFullYear(), mm - 1, dd);
+  if (start > now) start = new Date(now.getFullYear() - 1, mm - 1, dd);
+  const end = new Date(start.getFullYear() + 1, mm - 1, dd);
+  return { start: dayKey(start), end: dayKey(addDays(end, -1)) };
+}
+// Holidays booked this leave year (requests that were agreed), and what's left
+export function leaveSummary(state, pid, now = new Date()) {
+  const s = settingsOf(state, pid);
+  const yr = leaveYear(s, now);
+  const todayK = dayKey(now);
+  const list = [];
+  let used = 0; let booked = 0;
+  for (const r of state.requests) {
+    if (r.type !== 'leave' || r.status !== 'yes' || !r.when || !r.when.day) continue;
+    const people = r.people || [r.from, r.to];
+    if (!people.includes(pid)) continue;
+    const from = r.when.day; const to = r.when.endDay || r.when.day;
+    if (to < yr.start || from > yr.end) continue;
+    const days = r.days && typeof r.days[pid] === 'number' ? r.days[pid] : leaveDaysFor(state, pid, from, to);
+    if (from <= todayK) used += days; else booked += days;
+    list.push({ id: r.id, title: r.title || 'Holiday', from, to, days, past: to < todayK, together: people.length > 1 });
+  }
+  list.sort((a, b) => (a.from < b.from ? -1 : 1));
+  const allowance = Number(s.leave.allowance) || 0;
+  return { allowance, used, booked, left: allowance - used - booked, year: yr, list };
+}
+
+// ---------- countdowns ----------
+export function countdowns(state, now = new Date()) {
+  const out = [];
+  const today = startOfDay(now);
+  const add = (id, title, dateK, who, mine) => {
+    const days = Math.round((fromDayKey(dateK) - today) / 86400000);
+    if (days < 0 || days > 400) return;
+    out.push({ id, title, date: dateK, days, who, mine });
+  };
+  for (const pid of [state.me, state.partner].filter(Boolean)) {
+    const p = state.people[pid] || {};
+    for (const [id, c] of Object.entries(p.countdowns || {})) {
+      if (!c || !c.date) continue;
+      if (pid !== state.me && c.shared === false) continue;
+      add(`${pid}:${id}`, c.title, c.date, pid, pid === state.me);
+    }
+  }
+  const s = settingsOf(state, state.me);
+  if (s.christmas !== false) {
+    let y = now.getFullYear();
+    if (dayKey(now) > `${y}-12-25`) y++;
+    add('christmas', 'Christmas', `${y}-12-25`, 'both', false);
+  }
+  const ann = state.household.anniversary;
+  if (ann && /^\d{4}-\d{2}-\d{2}$/.test(ann)) {
+    let y = now.getFullYear();
+    let k = `${y}${ann.slice(4)}`;
+    if (k < dayKey(now)) k = `${y + 1}${ann.slice(4)}`;
+    const years = Number(k.slice(0, 4)) - Number(ann.slice(0, 4));
+    add('anniversary', years > 0 ? `Your anniversary (${years} ${years === 1 ? 'year' : 'years'})` : 'Your anniversary', k, 'both', false);
+  }
+  // holidays you've booked together count down by themselves
+  for (const r of state.requests) {
+    if (r.type !== 'leave' || r.status !== 'yes' || !r.when) continue;
+    add(`leave:${r.id}`, r.title ? `Holiday: ${r.title}` : 'Holiday', r.when.day, (r.people || []).length === 1 ? r.from : 'both', false);
+  }
+  const seen = new Set();
+  return out.filter((c) => { const k = `${c.title}|${c.date}`; if (seen.has(k)) return false; seen.add(k); return true; })
+    .sort((a, b) => a.days - b.days);
+}
+export function countdownText(c) {
+  if (c.days === 0) return `${c.title} is today`;
+  if (c.days === 1) return `${c.title} is tomorrow`;
+  if (c.days < 7) return `${c.title} in ${c.days} days`;
+  const w = Math.floor(c.days / 7);
+  if (c.days >= 14 && c.days % 7 === 0) return `${c.title} in ${w} weeks`;
+  return `${c.title} in ${c.days} days`;
+}
+
+// ---------- quiet hours ----------
+export function inQuietHours(s, now = new Date()) {
+  const q = s.quiet;
+  if (!q || !q.on) return false;
+  const m = now.getHours() * 60 + now.getMinutes();
+  const a = minutesOf(q.from || '23:00'); const b = minutesOf(q.to || '07:00');
+  const inside = a <= b ? (m >= a && m < b) : (m >= a || m < b);
+  if (!inside) return false;
+  // "not tonight": the quiet night that starts on the skipped date
+  const nightStart = a > b && m < b ? dayKey(addDays(now, -1)) : dayKey(now);
+  return q.skip !== nightStart;
+}
+// the date the coming (or current) quiet night starts on, for "not tonight"
+export function quietNight(s, now = new Date()) {
+  const q = s.quiet;
+  const m = now.getHours() * 60 + now.getMinutes();
+  const a = minutesOf(q.from || '23:00'); const b = minutesOf(q.to || '07:00');
+  return a > b && m < b ? dayKey(addDays(now, -1)) : dayKey(now);
 }
 
 export { DAY_NAMES, fmtHM };

@@ -1,12 +1,13 @@
 // Requests, asking something, and adding something.
 import { esc, dayKey, addDays, fromDayKey, fmtTime, agoText, relDay, atTime } from './util.js';
-import { nameOf, freeSlots, sleepingUntil, settingsOf, personColour, SHIFT_ORDER, REMIND_OPTIONS, REMIND_NOTES } from './logic.js';
+import { nameOf, freeSlots, sleepingUntil, settingsOf, personColour, SHIFT_ORDER, REMIND_OPTIONS, REMIND_NOTES, leaveDaysFor, leaveSummary, JOB_REPEATS } from './logic.js';
 import { whenLabel } from './store.js';
 import { icon, avatar, seg, toggleRow, empty } from './ui.js';
 import { ui } from './uistate.js';
 import { pageHeader } from './views-main.js';
 
-const TYPE_LABEL = { plan: 'Plan together', favour: 'Favour', free: 'Keep time free', heads: 'Heads up', add: 'Added for you' };
+const TYPE_LABEL = { plan: 'Plan together', favour: 'Favour', free: 'Keep time free', heads: 'Heads up', add: 'Added for you', leave: 'Holiday' };
+const EVENT_REPEATS = [['', 'Doesn’t repeat'], ['WEEKLY:1', 'Every week'], ['WEEKLY:2', 'Every 2 weeks'], ['MONTHLY:1', 'Every month'], ['YEARLY:1', 'Every year']];
 
 // ---------------- REQUESTS ----------------
 export function viewRequests(state) {
@@ -45,8 +46,8 @@ function reqCard(state, r) {
       } else if (r.type === 'favour') {
         body = `${maybeNote}<div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="yes" data-id="${id}">Yes, I'll do it</button><button type="button" class="btn sec" data-act="answer" data-a="no" data-id="${id}">I can't</button></div>`;
       } else {
-        body = `${maybeNote}<div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="yes" data-id="${id}">${r.type === 'add' ? 'Yes, add it' : 'Yes, add it'}</button>
-          ${r.when ? `<button type="button" class="btn sec" data-act="suggestOpen" data-id="${id}">Another time</button>` : ''}
+        body = `${maybeNote}<div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="yes" data-id="${id}">${r.type === 'leave' ? 'Yes, book it' : 'Yes, add it'}</button>
+          ${r.when && r.type !== 'leave' ? `<button type="button" class="btn sec" data-act="suggestOpen" data-id="${id}">Another time</button>` : ''}
           ${r.status === 'waiting' ? `<button type="button" class="btn link-btn" data-act="answer" data-a="maybe" data-id="${id}">Not sure yet</button>` : ''}
           <button type="button" class="btn link-btn" data-act="answer" data-a="no" data-id="${id}">Not this time</button></div>`;
       }
@@ -70,7 +71,17 @@ function reqCard(state, r) {
       body = `<p class="small muted">Sent. No answer needed.</p>`;
     } else body = resultLine(state, r, true);
   }
-  return `<article class="card stack ${isOpen(r) ? '' : 'faded'}">${head}<h3 class="h3">${esc(r.title)}</h3>${when}${body}</article>`;
+  const title = r.type === 'leave' ? (r.title ? `Holiday: ${r.title}` : 'Holiday') : r.title;
+  const days = r.type === 'leave' && r.days ? `<p class="small muted">${esc(leaveDaysLine(state, r))}</p>` : '';
+  return `<article class="card stack ${isOpen(r) ? '' : 'faded'}">${head}<h3 class="h3">${esc(title)}</h3>${when}${days}${body}</article>`;
+}
+function leaveDaysLine(state, r) {
+  const bits = [];
+  for (const pid of r.people || [r.from, r.to]) {
+    if (typeof r.days[pid] !== 'number') continue;
+    bits.push(`${pid === state.me ? 'you' : nameOf(state, pid)}: ${r.days[pid]} day${r.days[pid] === 1 ? '' : 's'}`);
+  }
+  return bits.length ? `Holiday allowance it takes. ${bits.join(', ').replace(/^y/, 'Y')}.` : '';
 }
 function resultLine(state, r, mine) {
   const on = nameOf(state, mine ? r.to : r.from);
@@ -89,7 +100,8 @@ const TYPES = [
   ['plan', 'Plan something together', 'A date, a trip, seeing people'],
   ['favour', 'Ask a favour', 'Can you do something for me?'],
   ['free', 'Keep time free', 'Please don’t book anything then'],
-  ['heads', 'Heads up', 'Just so you know. No answer needed']
+  ['heads', 'Heads up', 'Just so you know. No answer needed'],
+  ['leave', 'Book a holiday', 'Time off together, from your allowances']
 ];
 export function viewAsk(state) {
   const P = state.partner;
@@ -111,8 +123,8 @@ export function viewAsk(state) {
   const holdDefault = state.household.pencilDefault !== false;
   const hold = a.hold === null ? holdDefault : a.hold;
   const favours = state.household.favours || [];
-  const needsWhen = a.type !== 'heads';
-  const placeholder = { plan: 'Cinema, then food', favour: 'Pick up a parcel', free: 'My friends are visiting', heads: "I'll be home late" }[a.type];
+  const needsWhen = a.type !== 'heads' && a.type !== 'leave';
+  const placeholder = { plan: 'Cinema, then food', favour: 'Pick up a parcel', free: 'My friends are visiting', heads: "I'll be home late", leave: 'Spain' }[a.type];
   return `<a href="#requests" class="back-link">${icon.back(20)}Requests</a>
     <h1 class="h1">Ask ${esc(pn)}</h1>
     <section class="stack">
@@ -120,7 +132,8 @@ export function viewAsk(state) {
       <div class="grid2">${TYPES.map(([v, t, d]) => `<button type="button" class="type-card ${a.type === v ? 'on' : ''}" aria-pressed="${a.type === v}" data-act="askType" data-v="${v}"><span class="b">${t}</span><span class="small muted">${d}</span></button>`).join('')}</div>
     </section>
     <section class="stack-s">
-      <label for="ask-title" class="h4">What is it?</label>
+      <label for="ask-title" class="h4">${a.type === 'leave' ? 'Where or what? (optional)' : 'What is it?'}</label>
+      ${a.type === 'plan' ? `<a href="#jar" class="b small-link" data-act="jarFromAsk">${icon.heart(18)} Pick something from the ideas jar</a>` : ''}
       ${a.type === 'favour' && favours.length ? `<div class="row-wrap">${favours.map((f) => `<button type="button" class="chip-btn" data-act="askFav" data-v="${esc(f)}">${esc(f)}</button>`).join('')}</div>` : ''}
       <input id="ask-title" type="text" data-bind="ask.title" value="${esc(a.title)}" placeholder="For example: ${esc(placeholder)}" autocomplete="off">
     </section>
@@ -135,12 +148,38 @@ export function viewAsk(state) {
         <div class="field"><label for="ask-end">To</label><input id="ask-end" type="time" data-bind="ask.cend" value="${esc(a.cend)}"></div>
       </div>` : ''}
     </section>` : ''}
+    ${a.type === 'leave' ? leavePicker(state) : ''}
     ${a.type === 'plan' || a.type === 'free' ? `<div class="card flush">${toggleRow({ act: 'askHold', on: hold, label: 'Pencil it in while I wait', sub: 'Shows in both calendars as "Pencilled in", so nothing else gets booked.' })}</div>` : ''}
     <button type="button" class="btn big-btn" data-act="askSend">${a.type === 'heads' ? 'Send heads up' : `Send to ${esc(pn)}`}</button>`;
+}
+// The dates of a holiday, and what it takes from each allowance
+function leavePicker(state) {
+  const a = ui.ask;
+  const from = a.lfrom || dayKey(addDays(new Date(), 14));
+  const to = a.lto && a.lto >= from ? a.lto : from;
+  const rows = [state.me, state.partner].map((pid) => {
+    const n = leaveDaysFor(state, pid, from, to);
+    const sum = leaveSummary(state, pid);
+    return `<div class="row"><span class="grow">${pid === state.me ? 'You' : esc(nameOf(state, pid))}</span><span class="b">${n} day${n === 1 ? '' : 's'}</span><span class="small muted">${esc(String(sum.left - n))} left after</span></div>`;
+  }).join('');
+  return `<section class="stack-s"><h2 class="h4">When?</h2>
+    <div class="grid2"><div class="field"><label for="lv-from">First day off</label><input id="lv-from" type="date" data-bind="ask.lfrom" data-act="askLeaveDate" value="${esc(from)}"></div>
+    <div class="field"><label for="lv-to">Last day off</label><input id="lv-to" type="date" data-bind="ask.lto" data-act="askLeaveDate" value="${esc(to)}"></div></div>
+    <div class="card stack-s pad">${rows}<span class="small muted">Working days only. Weekends, bank holidays and days you'd be off anyway don't count.</span></div>
+  </section>`;
+}
+export function leaveWhen() {
+  const a = ui.ask;
+  const from = a.lfrom || dayKey(addDays(new Date(), 14));
+  const to = a.lto && a.lto >= from ? a.lto : from;
+  const w = { day: from, endDay: to, allDay: true, start: null, end: null };
+  w.label = whenLabel(w);
+  return w;
 }
 export function askWhen(state) {
   const a = ui.ask;
   if (a.type === 'heads') return null;
+  if (a.type === 'leave') return leaveWhen();
   const slots = freeSlots(state, new Date(), 4);
   if (!a.custom && slots[a.slot]) {
     const s = slots[a.slot];
@@ -166,9 +205,11 @@ export function viewAdd(state) {
       <div class="row-wrap"><button type="button" class="btn" data-act="addAgain">Add another</button><a href="#calendar" class="btn sec">See the calendar</a></div></section>`);
     return out.join('');
   }
-  if (meShifts || paShifts) {
-    out.push(seg([{ v: 'event', label: 'Something on', on: a.kind === 'event' }, { v: 'shift', label: 'A shift', on: a.kind === 'shift' }], { act: 'addKind', label: 'What are you adding?', cls: 'seg-full' }));
-  }
+  const kinds = [{ v: 'event', label: 'Event' }, { v: 'job', label: 'Job' }, { v: 'leave', label: 'Holiday' }];
+  if (meShifts || paShifts) kinds.push({ v: 'shift', label: 'Shift' });
+  out.push(seg(kinds.map((k) => Object.assign(k, { on: a.kind === k.v })), { act: 'addKind', label: 'What are you adding?', cls: 'seg-full' }));
+  if (a.kind === 'job') { out.push(addJobForm(state)); return out.join(''); }
+  if (a.kind === 'leave') { out.push(addLeaveForm(state)); return out.join(''); }
   if (a.kind === 'shift') {
     const who = a.shiftWho || (meShifts ? me : P);
     const types = settingsOf(state, who).shiftTypes;
@@ -195,7 +236,8 @@ export function viewAdd(state) {
     ${a.allDay ? '' : `<div class="grid2">
       <div class="field"><label for="add-start">Starts</label><input id="add-start" type="time" data-bind="add.start" value="${esc(a.start)}"></div>
       <div class="field"><label for="add-end">Ends</label><input id="add-end" type="time" data-bind="add.end" value="${esc(a.end)}"></div></div>`}
-    <label class="check"><input type="checkbox" data-act="addAllDay" ${a.allDay ? 'checked' : ''}> All day</label></section>`);
+    <label class="check"><input type="checkbox" data-act="addAllDay" ${a.allDay ? 'checked' : ''}> All day</label>
+    ${a.who !== 'partner' ? `<div class="field"><label for="add-repeat">Repeats</label><select id="add-repeat" data-bind="add.repeat">${EVENT_REPEATS.map(([v, l]) => `<option value="${v}" ${(a.repeat || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}</section>`);
   if (a.who === 'me') {
     const cals = Object.values(state.calendars).filter((c) => c.owner === me && c.canWrite && c.role !== 'rota');
     if (cals.length > 1) {
@@ -217,6 +259,37 @@ export function viewAdd(state) {
   return out.join('');
 }
 function fmtHMs(hm) { return fmtTime(atTime('2000-01-01', hm)); }
+function addJobForm(state) {
+  const a = ui.add;
+  const P = state.partner;
+  const whos = [['me', 'Me'], ...(P ? [['partner', nameOf(state, P)], ['both', 'Together']] : [])];
+  return `<section class="stack-s"><label for="job-title" class="h4">What needs doing?</label>
+      <input id="job-title" type="text" data-bind="add.title" value="${esc(a.title)}" placeholder="For example: Food shop" autocomplete="off"></section>
+    <section class="stack-s"><h2 class="h4">Who's doing it?</h2>
+      ${seg(whos.map(([v, l]) => ({ v, label: l, on: (a.jobWho || 'me') === v })), { act: 'addJobWho', label: 'Who is doing it', cls: 'seg-full' })}
+      ${(a.jobWho || 'me') === 'both' ? '<p class="small muted">A job you do together, like the food shop. You both get the reminder.</p>' : ''}</section>
+    ${dayPicker(a)}
+    <section class="stack-s"><div class="grid2">
+      <div class="field"><label for="job-time">Time (optional)</label><input id="job-time" type="time" data-bind="add.start" value="${esc(a.start)}"></div>
+      <div class="field"><label for="job-repeat">Repeats</label><select id="job-repeat" data-bind="add.jobRepeat">${JOB_REPEATS.map((o) => `<option value="${o.v}" ${(a.jobRepeat || '') === o.v ? 'selected' : ''}>${o.label}</option>`).join('')}</select></div></div>
+      <span class="small muted">It shows on Today and in the morning summary, with a reminder on the day.</span></section>
+    <button type="button" class="btn big-btn" data-act="addJobSave">Add the job</button>`;
+}
+function addLeaveForm(state) {
+  const a = ui.add;
+  const from = a.lfrom || dayKey(addDays(new Date(), 14));
+  const to = a.lto && a.lto >= from ? a.lto : from;
+  const n = leaveDaysFor(state, state.me, from, to);
+  const sum = leaveSummary(state, state.me);
+  return `<p class="note-box">Holiday just for you. To book time off together, ask ${esc(nameOf(state, state.partner) || 'your partner')} from Requests.</p>
+    <section class="stack-s"><label for="lv-title" class="h4">Where or what? (optional)</label>
+      <input id="lv-title" type="text" data-bind="add.title" value="${esc(a.title)}" placeholder="For example: Lads' trip" autocomplete="off"></section>
+    <section class="stack-s"><h2 class="h4">When?</h2>
+      <div class="grid2"><div class="field"><label for="al-from">First day off</label><input id="al-from" type="date" data-bind="add.lfrom" data-act="addLeaveDate" value="${esc(from)}"></div>
+      <div class="field"><label for="al-to">Last day off</label><input id="al-to" type="date" data-bind="add.lto" data-act="addLeaveDate" value="${esc(to)}"></div></div>
+      <div class="card row pad"><span class="grow">From your allowance</span><span class="b">${n} day${n === 1 ? '' : 's'}</span><span class="small muted">${sum.left - n} left after</span></div></section>
+    <button type="button" class="btn big-btn" data-act="addLeaveSave">Book it</button>`;
+}
 function whoNote(state, who) {
   const P = state.partner;
   if (who === 'me') return 'Saves to your Google Calendar.';

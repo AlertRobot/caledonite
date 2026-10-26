@@ -1,6 +1,6 @@
 // Settings (with its own menu), plus the sign-in and first-time screens.
 import { esc, dayKey, addDays, mondayOf, fmtDate, agoText, WEEKDAY_NAMES, fmtTime, atTime, MONTH_NAMES, fromDayKey } from './util.js';
-import { nameOf, settingsOf, shiftFor, SHIFT_ORDER, LAYER_INFO, personColour, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS } from './logic.js';
+import { nameOf, settingsOf, shiftFor, SHIFT_ORDER, LAYER_INFO, personColour, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours } from './logic.js';
 import { icon, avatar, seg, toggleRow, empty } from './ui.js';
 import { ui } from './uistate.js';
 import { APP, FIREBASE } from './config.js';
@@ -12,6 +12,7 @@ export const SECTIONS = [
   ['routine', 'Our routine', 'R'],
   ['requests', 'Requests', 'Q'],
   ['notifications', 'Notifications', 'N'],
+  ['holidays', 'Holidays', 'H'],
   ['theme', 'Theme', 'T'],
   ['apps', 'Linked apps', 'L'],
   ['account', 'Account', 'A']
@@ -22,7 +23,7 @@ export function viewSettings(state) {
   if (page === 'home') return settingsHome(state);
   const title = (SECTIONS.find((s) => s[0] === page) || [0, 'Settings'])[1];
   const body = {
-    calendars: secCalendars, shifts: secShifts, routine: secRoutine, requests: secRequests,
+    calendars: secCalendars, shifts: secShifts, routine: secRoutine, requests: secRequests, holidays: secHolidays,
     notifications: secNotifications, theme: secTheme, apps: secApps, account: secAccount
   }[page] || (() => '');
   return `<button type="button" class="back-link" data-act="setPage" data-v="home">${icon.back(20)}All settings</button>
@@ -43,12 +44,13 @@ function settingsHome(state) {
     shifts: shiftPeople.length ? shiftPeople.map((p) => (p === me ? 'Your shifts' : `${nameOf(state, p)}'s shifts`)).join(' and ') : 'No one works shifts',
     routine: `${s.hasShifts ? 'Shifts' : `Work ${fmtHM(s.workStart)} to ${fmtHM(s.workEnd)}${s.altOff ? `, every other ${WEEKDAY_NAMES[s.altOff.day]} off` : ''}`}. Dinner at ${fmtHM(state.household.dinnerTime || '19:00')}.`,
     requests: `${(state.household.favours || []).length} quick favours`,
-    notifications: `${hasPush() ? 'On for this phone' : 'Off on this phone'}. ${reminderCount(state)}`,
+    notifications: `${hasPush() ? 'On for this phone' : 'Off on this phone'}. ${s.quiet.on ? `Quiet ${fmtHM(s.quiet.from)} to ${fmtHM(s.quiet.to)}` : 'No quiet hours'}.`,
+    holidays: holidayStatus(state),
     theme: (THEMES[look.theme] || THEMES.classic).name,
-    apps: 'E&S Kitchen and E&S Budgie',
+    apps: linkedStatus(state),
     account: [state.me, state.partner].filter(Boolean).map((p) => nameOf(state, p)).join(' and ')
   };
-  const tint = { calendars: 'blue', shifts: 'orange', routine: 'tog', requests: 'grey', notifications: 'grey', theme: 'family', apps: 'tog', account: 'blue' };
+  const tint = { calendars: 'blue', shifts: 'orange', routine: 'tog', requests: 'grey', notifications: 'grey', holidays: 'orange', theme: 'family', apps: 'tog', account: 'blue' };
   return `<a href="#today" class="back-link">${icon.back(20)}Today</a>
     <h1 class="h1">Settings</h1>
     <div class="card flush menu">${SECTIONS.map(([k, l, letter]) => `<button type="button" class="menu-row" data-act="setPage" data-v="${k}">
@@ -57,6 +59,17 @@ function settingsHome(state) {
     <p class="small muted pad-x">Settings are saved to your account, so they follow you to a new phone. Your theme is just for this phone.</p>`;
 }
 function fmtHM(hm) { return fmtTime(atTime('2000-01-01', hm || '00:00')); }
+function holidayStatus(state) {
+  const l = leaveSummary(state, state.me);
+  return `${l.left} of ${l.allowance} days left this year`;
+}
+function linkedStatus(state) {
+  const L = state.linked || {};
+  const names = [];
+  if (L.peckish && L.peckish.found) names.push('Peckish');
+  if (L.budgie && L.budgie.found) names.push('Budgie');
+  return names.length ? `${names.join(' and ')} found on this phone` : 'Peckish and Budgie';
+}
 function reminderCount(state) {
   const n = myReminders(state).length;
   return n ? `${n} reminder${n === 1 ? '' : 's'} coming up.` : 'No reminders yet.';
@@ -139,18 +152,20 @@ function calRow(state, c) {
   </div>`;
 }
 function connectGuide(state) {
-  const url = state.household.scriptUrl || '';
+  const url = state.household.connectUrl || '';
   return `<div class="card stack">
     <span class="h3">Connect your Google Calendar</span>
     <p class="muted">Caledonite reads your calendars with a small Google script that runs on your own account. It takes about two minutes, once.</p>
     <ol class="steps">
-      <li>${url ? `Open <a href="${esc(url)}" target="_blank" rel="noopener">the Caledonite sync script</a>` : 'Open the Caledonite sync script (Ethan can share the link)'} while signed in to your Google account.</li>
-      <li>At the top, pick <b>connectMe</b> in the list, then press <b>Run</b>.</li>
-      <li>Google asks for permission. Choose your account, then <b>Advanced</b>, then <b>Go to Caledonite sync</b>, then <b>Allow</b>.</li>
+      <li>${url ? `Open <a href="${esc(safeUrl(url))}" target="_blank" rel="noopener">the Caledonite connect page</a>` : 'Open the Caledonite connect page (Ethan can share the link)'} while signed in to your Google account.</li>
+      <li>Google asks for permission. Choose your account. If it says the app isn't verified, tap <b>Advanced</b>, then <b>Go to Caledonite sync</b>. Then tap <b>Allow</b>.</li>
+      <li>Tap <b>Connect my calendar</b>.</li>
       <li>Come back here. Your calendars appear within a minute.</li>
     </ol>
   </div>`;
 }
+// only ever link to Google's script pages
+function safeUrl(u) { return /^https:\/\/script\.google\.com\//.test(u || '') ? u : '#'; }
 
 // ---------- shifts ----------
 function secShifts(state) {
@@ -227,6 +242,12 @@ function secRoutine(state) {
       ${altOffBlock(s)}
       <p class="small muted">A day off? Add an all-day event called Holiday or Day off, and that day has no working hours.</p>`}
     </div></section>
+    <section class="stack-s"><h2 class="h4">Countdowns on Today</h2>
+    <div class="card flush">
+      ${toggleRow({ act: 'myToggle', on: s.christmas !== false, label: 'Count down to Christmas', data: 'data-f="christmas"' })}
+      <div class="list-row"><label for="anniv" class="grow col"><span class="b">Your anniversary</span><span class="small muted">The date you got together. It counts down every year, for you both.</span></label><input id="anniv" type="date" class="time-sm" value="${esc(h.anniversary || '')}" data-act="hhField" data-f="anniversary"></div>
+      <p class="pad small muted">To count down to anything else, like a holiday, tap it in the calendar and choose “Count down to this”. Holidays you book together count down by themselves.</p>
+    </div></section>
     <section class="stack-s"><h2 class="h4">Dinner</h2>
     <div class="card flush">
       <div class="list-row"><label for="dinner" class="grow b">Usual dinner time</label><input id="dinner" class="time-sm" type="time" value="${esc(h.dinnerTime || '19:00')}" data-act="hhField" data-f="dinnerTime"></div>
@@ -284,6 +305,24 @@ function secNotifications(state) {
       <div class="row-wrap">${on ? '<button type="button" class="btn sec" data-act="testPush">Send a test notification</button><button type="button" class="btn sec" data-act="pushOn">Refresh</button>' : '<button type="button" class="btn" data-act="pushOn">Turn on notifications</button>'}</div>
       ${ui.pushMsg ? `<p class="small note-box">${esc(ui.pushMsg)}</p>` : ''}
     </div>
+    <section class="stack-s"><h2 class="h4">Quiet hours</h2>
+      <div class="card flush">
+        ${toggleRow({ act: 'quietToggle', on: s.quiet.on, label: s.quiet.on ? `Quiet from ${fmtHM(s.quiet.from)} to ${fmtHM(s.quiet.to)}` : 'Quiet hours are off', sub: 'Notifications wait until the morning. Turn off for a night shift or a late night.' })}
+        ${s.quiet.on ? `<div class="pad stack-s"><div class="grid2"><div class="field"><label for="q-from">Quiet from</label><input id="q-from" type="time" value="${esc(s.quiet.from)}" data-act="quietField" data-f="from"></div>
+          <div class="field"><label for="q-to">Until</label><input id="q-to" type="time" value="${esc(s.quiet.to)}" data-act="quietField" data-f="to"></div></div></div>
+          ${s.quiet.skip ? `<p class="pad small note-box">Quiet hours are off for one night (${esc(fmtDate(new Date(s.quiet.skip + 'T12:00')))}).</p>` : ''}` : ''}
+        ${s.hasShifts ? toggleRow({ act: 'notifToggle', on: s.notif.quiet, label: 'Also quiet while I sleep after nights', sub: 'Messages to you wait until you wake.', data: 'data-f="quiet"' }) : ''}
+      </div>
+      <p class="small muted">${inQuietHours(s) ? 'Quiet hours are on now.' : ''} Today shows a “Not tonight” button in the evening too.</p>
+    </section>
+    <section class="stack-s"><h2 class="h4">Summaries</h2>
+      <div class="card flush">
+        ${toggleRow({ act: 'summaryToggle', on: s.morning.on, label: 'Morning summary', sub: 'Your day and your partner’s day, in one notification.', data: 'data-f="morning"' })}
+        ${s.morning.on ? `<div class="list-row"><label for="m-at" class="grow b">Send it at</label><input id="m-at" class="time-sm" type="time" value="${esc(s.morning.at)}" data-act="summaryField" data-f="morning" data-k="at"></div>` : ''}
+        ${toggleRow({ act: 'summaryToggle', on: s.weekAhead.on, label: 'Week ahead', sub: 'Next week’s shifts, days off and evenings you’re both free.', data: 'data-f="weekAhead"' })}
+        ${s.weekAhead.on ? `<div class="pad stack-s"><div class="grid2"><div class="field"><label for="w-day">Send it on</label><select id="w-day" data-act="summaryField" data-f="weekAhead" data-k="day">${[[7, 'Sunday'], [6, 'Saturday'], [1, 'Monday']].map(([v, l]) => `<option value="${v}" ${Number(s.weekAhead.day) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+          <div class="field"><label for="w-at">At</label><input id="w-at" type="time" value="${esc(s.weekAhead.at)}" data-act="summaryField" data-f="weekAhead" data-k="at"></div></div></div>` : ''}
+      </div></section>
     <section class="stack-s"><h2 class="h4">Reminders</h2>
       <p class="small muted">Tap anything on Today or in the Calendar to set a reminder for it.</p>
       <div class="card flush">
@@ -304,10 +343,11 @@ function secNotifications(state) {
     <section class="stack-s"><h2 class="h4">What to send to this phone</h2>
     <div class="card flush">
       ${toggleRow({ act: 'notifToggle', on: n.reminders, label: 'Reminders', sub: 'For things you set a reminder on.', data: 'data-f="reminders"' })}
+      ${toggleRow({ act: 'notifToggle', on: n.jobs, label: 'Jobs', sub: 'On the day a job is due.', data: 'data-f="jobs"' })}
+      ${toggleRow({ act: 'notifToggle', on: n.summary, label: 'Summaries', sub: 'The morning summary and the week ahead.', data: 'data-f="summary"' })}
       ${toggleRow({ act: 'notifToggle', on: n.requests, label: 'Requests and answers', sub: 'When you’re asked something, or get an answer.', data: 'data-f="requests"' })}
       ${toggleRow({ act: 'notifToggle', on: n.notes, label: 'Notes', sub: 'When a note is left for you.', data: 'data-f="notes"' })}
       ${s.hasShifts ? toggleRow({ act: 'notifToggle', on: n.rota, label: 'Rota changes', sub: 'When a shift is added, moved or swapped.', data: 'data-f="rota"' }) : ''}
-      ${s.hasShifts ? toggleRow({ act: 'notifToggle', on: n.quiet, label: 'Quiet while I sleep after nights', sub: 'Messages to you wait until you wake.', data: 'data-f="quiet"' }) : ''}
     </div></section>`;
 }
 
@@ -325,9 +365,47 @@ function secTheme(state) {
 }
 
 // ---------- linked apps ----------
-function secApps() {
-  return `<div class="card stack pad"><div class="row"><span class="grow h3">E&amp;S Kitchen</span><span class="pill">Coming later</span></div><p class="small muted">Tonight's dinner and who's cooking on Today, and long shifts sent to the meal planner so you get quick dinners and packed lunches.</p></div>
-    <div class="card stack pad"><div class="row"><span class="grow h3">E&amp;S Budgie</span><span class="pill">Coming later</span></div><p class="small muted">Paydays and big bills in the calendar.</p></div>`;
+function secApps(state) {
+  const L = state.linked || {};
+  const pk = L.peckish || {}; const bg = L.budgie || {};
+  return `<p class="muted">Peckish and Budgie are on the same website as Caledonite. On a phone where you use them, Caledonite reads what they've saved on that phone. Nothing is sent anywhere.</p>
+    <div class="card stack pad"><div class="row"><span class="grow h3">Peckish</span><span class="pill ${pk.found ? 'ok' : ''}">${pk.found ? 'Found on this phone' : 'Not on this phone'}</span></div>
+      <p class="small muted">${pk.found ? 'Tonight\u2019s dinner shows on Today. Before a long shift, it reminds you to make extra for a packed lunch.' : 'Open Peckish on this phone once, and tonight\u2019s dinner shows on Today.'}</p>
+      <a class="b small" href="../es-kitchen/" target="_blank" rel="noopener">Open Peckish</a></div>
+    <div class="card stack pad"><div class="row"><span class="grow h3">Budgie</span><span class="pill ${bg.found && !bg.error ? 'ok' : ''}">${bg.found ? (bg.error ? 'Problem' : 'Found on this phone') : 'Not on this phone'}</span></div>
+      <p class="small muted">${bg.error ? esc(bg.error) : bg.found ? 'Your paydays and bills show in your calendar, only on this phone. The ideas jar knows what\u2019s left for fun until payday.' : 'Open Budgie on this phone once, and your paydays and bills show in your calendar.'}</p>
+      ${bg.fun ? `<p class="small">Left for fun: <b>£${esc(String(Math.floor(bg.fun.left)))}</b> (${esc(bg.fun.names.join(', '))}).</p>` : ''}
+      <a class="b small" href="../budgie/" target="_blank" rel="noopener">Open Budgie</a></div>
+    <button type="button" class="btn sec self-start" data-act="linkedReload">Check again</button>`;
+}
+
+// ---------- holidays ----------
+function secHolidays(state) {
+  const me = state.me; const P = state.partner;
+  const s = settingsOf(state, me);
+  const people = [me, P].filter(Boolean);
+  const cards = people.map((pid) => {
+    const l = leaveSummary(state, pid);
+    const pct = l.allowance ? Math.min(100, Math.round((l.used + l.booked) / l.allowance * 100)) : 0;
+    return `<div class="card stack-s pad"><div class="row"><span class="grow h3">${pid === me ? 'You' : esc(nameOf(state, pid))}</span><span class="b">${l.left} of ${l.allowance} days left</span></div>
+      <div class="meter" role="img" aria-label="${l.used} used, ${l.booked} booked, ${l.left} left"><span style="width:${pct}%"></span></div>
+      <span class="small muted">${l.used} used, ${l.booked} booked. Year from ${esc(fmtDate(new Date(l.year.start + 'T12:00')))}.</span>
+      ${l.list.length ? `<div class="stack-s">${l.list.map((x) => `<div class="row small"><span class="grow">${esc(x.title)}${x.together ? ' (together)' : ''}</span><span class="muted">${esc(shortRange(x.from, x.to))}, ${x.days} day${x.days === 1 ? '' : 's'}</span></div>`).join('')}</div>` : ''}
+    </div>`;
+  }).join('');
+  return `<p class="muted">Book time off together from Requests, then Ask, then Book a holiday. Once you both say yes, it's in both your calendars and counted here.</p>
+    ${cards}
+    <section class="stack-s"><h2 class="h4">Your allowance</h2>
+    <div class="card flush">
+      <div class="list-row"><label for="lv-allow" class="grow b">Days a year</label><input id="lv-allow" class="time-sm" type="number" inputmode="numeric" min="0" max="60" value="${esc(String(s.leave.allowance))}" data-act="leaveField" data-f="allowance"></div>
+      <div class="list-row"><label for="lv-start" class="grow col"><span class="b">Holiday year starts</span><span class="small muted">Often 1 January or 1 April.</span></label><input id="lv-start" class="time-sm" type="date" value="${esc(`${new Date().getFullYear()}-${s.leave.yearStart}`)}" data-act="leaveField" data-f="yearStart"></div>
+      ${toggleRow({ act: 'leaveToggle', on: !!s.leave.bankHolsCount, label: 'Bank holidays come out of my allowance', sub: 'Usual for some NHS and shift jobs.' })}
+    </div></section>
+    <p class="small muted">Days off are counted from your working pattern: working days only, and every other Friday when that's set. ${settingsOf(state, P || me).hasShifts || s.hasShifts ? 'For shifts, it counts the days you’d be on shift, or weekdays when the rota isn’t in yet.' : ''}</p>`;
+}
+function shortRange(a, b) {
+  const f = (k) => { const d = new Date(k + 'T12:00'); return `${d.getDate()} ${MONTH_NAMES[d.getMonth()].slice(0, 3)}`; };
+  return a === b ? f(a) : `${f(a)} to ${f(b)}`;
 }
 
 // ---------- account ----------
@@ -339,17 +417,19 @@ function secAccount(state) {
     <div class="list-row">${avatar(state, me, 44)}<span class="grow col"><span class="b">${esc(nameOf(state, me))}</span><span class="small muted">${esc(state.user ? state.user.email : '')}</span></span></div>
     ${P ? `<div class="list-row">${avatar(state, P, 44)}<span class="grow col"><span class="b">${esc(nameOf(state, P))}</span><span class="small muted">${esc(state.people[P].email || 'No Google email added yet')}</span></span></div>` : ''}
   </div>`);
-  if (P) {
+  if (P && (state.people[P].joined || h.emailsLocked)) {
+    out.push(`<div class="card stack-s pad"><span class="b">${esc(nameOf(state, P))}'s Google email</span><span class="small muted">${esc(state.people[P].email || '')}. Fixed now ${esc(nameOf(state, P))} has joined, so neither of you can lock the other out.</span></div>`);
+  } else if (P) {
     out.push(`<div class="card stack-s pad"><label for="p-email" class="b">${esc(nameOf(state, P))}'s Google email</label>
       <p class="small muted">${esc(nameOf(state, P))} signs in with this. Only the two of you can open Caledonite.</p>
       <div class="row"><input id="p-email" class="grow" type="email" data-bind="settings.partnerEmailDraft" value="${esc(ui.settings.partnerEmailDraft || state.people[P].email || '')}" placeholder="name@gmail.com"><button type="button" class="btn" data-act="savePartnerEmail">Save</button></div></div>`);
   }
-  const linked = (h.linked || []).filter((x) => x.person === me);
+  const linked = ((state.people[me] && state.people[me].linked) || []).map((email) => ({ email })).concat((h.linked || []).filter((x) => x.person === me));
   out.push(`<div class="card stack-s pad"><span class="b">Your other Google accounts</span>
-    <p class="small muted">Add another Gmail or a work Google account, then open the sync script while signed in to it and run <b>connectMe</b>. Its calendars join yours.</p>
+    <p class="small muted">Add another Gmail or a work Google account, then open the connect page while signed in to it and tap Connect my calendar. Its calendars join yours.</p>
     ${linked.map((x) => `<div class="row"><span class="grow">${esc(x.email)}</span><button type="button" class="icon-btn plain" aria-label="Remove ${esc(x.email)}" data-act="unlinkAcc" data-v="${esc(x.email)}">${icon.close(20)}</button></div>`).join('')}
     <div class="row"><label class="sr" for="link-acc">Another account's email</label><input id="link-acc" class="grow" type="email" placeholder="you@work.com" data-bind="settings.linkDraft" value="${esc(ui.settings.linkDraft)}"><button type="button" class="btn" data-act="linkAcc">Add</button></div>
-    ${h.scriptUrl ? `<a href="${esc(h.scriptUrl)}" target="_blank" rel="noopener" class="b">Open the sync script</a>` : ''}</div>`);
+    ${h.connectUrl ? `<a href="${esc(safeUrl(h.connectUrl))}" target="_blank" rel="noopener" class="b">Open the connect page</a>` : ''}</div>`);
   const sts = Object.values(state.status || {});
   out.push(`<div class="card stack-s pad"><div class="row"><span class="grow b">Calendar sync</span><button type="button" class="btn sec sm" data-act="syncNow">${icon.sync(18)} Sync now</button></div>
     ${sts.length ? sts.map((s) => `<div class="row small"><span class="grow">${esc(nameOf(state, s.person))}: ${esc(s.account || 'Google')}</span><span class="${s.ok === false ? 'ink-bad b' : 'muted'}">${s.ok === false ? 'Problem' : esc(agoText(s.lastRun))}</span></div>`).join('') : '<p class="small muted">No syncs yet.</p>'}</div>`);

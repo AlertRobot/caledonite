@@ -1,17 +1,25 @@
 rules_version = '2';
-// Caledonite: only the two people listed in the household can read or write.
-// The calendar sync script writes the calendar copies with a service account, which these rules don't apply to.
+// Caledonite: only the two people listed in the household can read or write, and each of you
+// can only change your own record. The calendar sync script writes the calendar copies with a
+// service account, which these rules don't apply to.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null && request.auth.token.email_verified == true; }
     function myEmail() { return request.auth.token.email.lower(); }
     function household() { return get(/databases/$(database)/documents/households/main).data; }
     function member() { return signedIn() && myEmail() in household().emails; }
+    function personEmail(pid) { return get(/databases/$(database)/documents/households/main/people/$(pid)).data.email.lower(); }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
 
     match /households/main {
       allow read: if signedIn() && (resource == null || myEmail() in resource.data.emails);
       allow create: if signedIn() && myEmail() in request.resource.data.emails && request.resource.data.emails.size() <= 2;
-      allow update: if member() && request.resource.data.emails.size() <= 2 && myEmail() in request.resource.data.emails;
+      // the sync's addresses and secret are set by the script; the two emails are fixed once you've both joined
+      allow update: if member()
+        && request.resource.data.emails.size() <= 2 && myEmail() in request.resource.data.emails
+        && !changed().hasAny(['pingSecret', 'pingUrl', 'scriptUrl', 'connectUrl', 'linked'])
+        && (!changed().hasAny(['emails']) || resource.data.get('emailsLocked', false) != true)
+        && (!changed().hasAny(['emailsLocked']) || request.resource.data.emailsLocked == true);
       allow delete: if false;
 
       // each person's own full calendar copy
@@ -31,15 +39,42 @@ service cloud.firestore {
       match /calendars/{id} {
         allow read: if member();
         // only the owner of a calendar decides what's shared from it
-        allow update: if member() && get(/databases/$(database)/documents/households/main/people/$(resource.data.owner)).data.email.lower() == myEmail();
+        allow update: if member() && personEmail(resource.data.owner) == myEmail();
         allow create, delete: if false;
       }
       match /people/{pid} {
-        allow read, write: if member();
-        match /tokens/{t} { allow read, write: if member(); }
+        allow read: if member();
+        allow create: if member();
+        // your own record: anything but your email.
+        // your partner's: only their shift times, and their email until they've joined.
+        allow update: if member() && (
+          (resource.data.email.lower() == myEmail() && request.resource.data.email == resource.data.email)
+          || (resource.data.email.lower() != myEmail()
+              && changed().hasOnly(['settings', 'email'])
+              && (request.resource.data.email == resource.data.email
+                  || (resource.data.get('joined', false) != true && household().get('emailsLocked', false) != true))
+              && (!changed().hasAny(['settings'])
+                  || request.resource.data.get('settings', {}).diff(resource.data.get('settings', {})).affectedKeys().hasOnly(['shiftTypes', 'sleepUntil', 'travelMins'])))
+        );
+        allow delete: if false;
+        // phone notification addresses: only your own
+        match /tokens/{t} {
+          allow read, write: if member() && personEmail(pid) == myEmail();
+        }
+      }
+      // asks to add, change or remove things in Google Calendar: always signed with who asked
+      match /outbox/{id} {
+        allow read: if member();
+        allow create: if member() && request.resource.data.byEmail == myEmail() && request.resource.data.done == false;
+        allow update, delete: if false;
+      }
+      // notifications waiting to be sent: write-only
+      match /notify/{id} {
+        allow create: if member();
+        allow read, update, delete: if false;
       }
       match /{coll}/{id} {
-        allow read, write: if member() && coll in ['requests', 'notes', 'shifts', 'outbox', 'notify'];
+        allow read, write: if member() && coll in ['requests', 'notes', 'shifts', 'jobs', 'ideas'];
       }
     }
   }

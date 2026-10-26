@@ -1,10 +1,10 @@
 // One event: what it is, and the reminder you want for it.
-import { esc, fmtDate, fromDayKey, dayKey, fmtTime } from './util.js';
+import { esc, fmtDate, fromDayKey, dayKey, fmtTime, hhmm } from './util.js';
 import {
-  dayList, itemTime, itemTitle, itemSub, nameOf, settingsOf, reminderFor, fireTimes, evRef,
+  dayList, itemTime, itemTitle, itemSub, nameOf, settingsOf, reminderFor, fireTimes, evRef, calOf, reminderId,
   REMIND_OPTIONS, REMIND_NOTES, isBirthday
 } from './logic.js';
-import { icon, whoChip } from './ui.js';
+import { icon, whoChip, seg } from './ui.js';
 import { ui } from './uistate.js';
 
 // The thing that was tapped, as shown on that day, plus the calendar event behind it.
@@ -44,15 +44,28 @@ export function viewEvent(state) {
     whenText = 'It saves to Google Calendar first. The reminder starts working once it has synced.';
   }
   const partnerSync = owner !== state.me && !Object.values(state.status || {}).some((x) => x.person === owner);
+  const src = ev || item.src || null;
+  const cal = src ? calOf(state, src) : {};
+  // someone else's event you only see as "Busy": no reminders (it would show the private name)
+  const canRemind = owner === state.me || (cal.share === 'all' && !(src && src.busy) && !item.busyOnly);
   const out = [];
   out.push(back);
   out.push(`<h1 class="h1">${esc(itemTitle(state, item))}</h1>`);
+  const location = (src && src.location) || item.location || '';
   out.push(`<div class="card stack-s pad">
     <div class="row">${icon.clock(22)}<span class="grow b">${esc(fmtDate(date))}, ${esc(item.allDay ? 'all day' : itemTime(item, day || dayKey(item.start)).replace(/^All day$/, 'all day'))}</span></div>
     <div class="row-wrap">${whoChip(state, item.who)}${item.calName ? `<span class="small muted">${esc(item.calName)}</span>` : ''}</div>
-    ${sub ? `<p class="small muted">${esc(sub)}</p>` : ''}
+    ${location ? `<div class="row small-gap">${icon.home(20)}<span class="grow">${esc(location)}</span><a class="btn sec sm" href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(location)}" target="_blank" rel="noopener">Directions</a></div>` : ''}
+    ${sub && sub !== location ? `<p class="small muted">${esc(sub)}</p>` : ''}
     ${base.sid || item.repeats ? '<p class="small">This repeats, so the reminder repeats too.</p>' : ''}
+    ${pendingFor(state, src) ? '<p class="small note-box">Saving your change to Google Calendar. It shows here within a few minutes.</p>' : ''}
   </div>`);
+  out.push(changeBlock(state, item, src, cal));
+  if (!canRemind) {
+    out.push(`<p class="small note-box">${esc(nameOf(state, owner))} shares this as “Busy”, so you can't set a reminder on it.</p>`);
+    out.push(countdownBlock(state, ref, item, date));
+    return `<div class="stack-l">${out.join('')}</div>`;
+  }
   out.push(`<section class="stack-s"><h2 class="h4">Remind me</h2>
     <div class="row-wrap">${opts.map((o) => `<button type="button" class="chip-btn ${times.includes(o.v) ? 'on' : ''}" aria-pressed="${times.includes(o.v)}" data-act="evTime" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
     <p class="small muted">${esc(whenText)}</p>
@@ -67,8 +80,50 @@ export function viewEvent(state) {
     </section>`);
     if (!(rem && rem.auto)) out.push(`<button type="button" class="btn sec self-start" data-act="evRemOff">No reminder for this</button>`);
   }
+  out.push(countdownBlock(state, ref, item, date));
   if (!hasPush()) out.push(`<p class="small note-box">Notifications are off on this phone. <a href="#settings/notifications">Turn them on</a> to get reminders on your phone. They always show on Today.</p>`);
   if (isBirthday(base) && !(s.autoRemind.birthdays || []).length) out.push(`<p class="small muted">Tip: you can have a reminder for every birthday, in <a href="#settings/notifications">Settings, Notifications</a>.</p>`);
   return `<div class="stack-l">${out.join('')}</div>`;
+}
+// Things made in this app, or your own events in a calendar you can edit
+export function canChange(state, src, cal) {
+  if (!src) return false;
+  if (src.tag) return src.owner === state.me || (src.tag.startsWith('both:') || src.tag.startsWith('req:'));
+  return src.owner === state.me && !!src.gid && cal.canWrite !== false && cal.role !== 'rota';
+}
+function pendingFor(state, src) {
+  if (!src) return false;
+  return state.outbox.some((o) => !o.done && ((src.tag && o.tag === src.tag && (o.op === 'update' || o.op === 'delete')) || (src.gid && o.gid === src.gid)));
+}
+function changeBlock(state, item, src, cal) {
+  if (!canChange(state, src, cal)) return '';
+  const e = ui.ev;
+  const recurring = !!(src.rid);
+  if (e.confirmDelete) {
+    return `<section class="card stack-s pad warn-card"><span class="b">Delete “${esc(src.title)}”?</span>
+      ${src.tag && (src.tag.startsWith('both:') || src.tag.startsWith('req:')) ? `<span class="small">It comes out of both your calendars, and ${esc(nameOf(state, state.partner))} gets a notification.</span>` : '<span class="small">It comes out of your Google Calendar.</span>'}
+      ${recurring ? seg([{ v: 'one', label: 'Just this one', on: e.scope !== 'all' }, { v: 'all', label: 'Every time', on: e.scope === 'all' }], { act: 'evScope', label: 'Which ones', cls: 'seg-full' }) : ''}
+      <div class="row-wrap"><button type="button" class="btn danger-btn" data-act="evDelete">Yes, delete</button><button type="button" class="btn sec" data-act="evDeleteCancel">Keep it</button></div></section>`;
+  }
+  if (!e.editing) {
+    return `<div class="row-wrap"><button type="button" class="btn sec" data-act="evEdit">Change</button><button type="button" class="btn link-btn" data-act="evDeleteAsk">Delete</button></div>`;
+  }
+  const d = e.draft || {};
+  const titleOnly = recurring && e.scope === 'all';
+  return `<section class="card stack-s pad"><h2 class="h4">Change it</h2>
+    ${recurring ? seg([{ v: 'one', label: 'Just this one', on: e.scope !== 'all' }, { v: 'all', label: 'Every time', on: e.scope === 'all' }], { act: 'evScope', label: 'Which ones', cls: 'seg-full' }) : ''}
+    <div class="field"><label for="ed-title">Name</label><input id="ed-title" type="text" data-bind="ev.draft.title" value="${esc(d.title ?? src.title)}"></div>
+    ${titleOnly ? '<p class="small muted">For every time, only the name can be changed here. Change times one at a time.</p>' : `
+    <div class="field"><label for="ed-day">Date</label><input id="ed-day" type="date" data-bind="ev.draft.day" value="${esc(d.day ?? (src.allDay ? (src.startKey || dayKey(src.start)) : dayKey(src.start)))}"></div>
+    ${src.allDay ? '' : `<div class="grid2"><div class="field"><label for="ed-start">Starts</label><input id="ed-start" type="time" data-bind="ev.draft.start" value="${esc(d.start ?? hhmm(src.start))}"></div>
+    <div class="field"><label for="ed-end">Ends</label><input id="ed-end" type="time" data-bind="ev.draft.end" value="${esc(d.end ?? hhmm(src.end))}"></div></div>`}`}
+    <div class="row-wrap"><button type="button" class="btn" data-act="evSave">Save the change</button><button type="button" class="btn sec" data-act="evEditCancel">Cancel</button></div></section>`;
+}
+// count down to it on Today, for both of you
+function countdownBlock(state, ref, item, date) {
+  if (date < new Date(new Date().toDateString())) return '';
+  const id = reminderId(ref);
+  const has = !!(((state.people[state.me] || {}).countdowns || {})[id]);
+  return `<button type="button" class="btn ${has ? 'sec' : 'link-btn'} self-start" data-act="evCountdown" data-v="${has ? 'off' : 'on'}">${has ? 'Stop the countdown' : 'Count down to this on Today'}</button>`;
 }
 function hasPush() { try { return localStorage.getItem('caledonite.push') === '1' && Notification.permission === 'granted'; } catch (e) { return false; } }

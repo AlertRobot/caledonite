@@ -350,3 +350,27 @@ details.older .stack { margin-top: 8px; }
 .card.inset { box-shadow: none; background: var(--soft); border-color: transparent; padding: 0; }
 .card.inset .row-toggle { background: transparent; }
 .card.inset > .row-toggle:first-child { border-top: none; }
+
+/* countdowns */
+.countdowns { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 2px 16px; }
+.countdowns::-webkit-scrollbar { display: none; }
+.cd-chip { flex: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px 8px 8px; border-radius: 999px; background: var(--card); border: var(--card-border); box-shadow: var(--shadow); font-weight: 700; font-size: 15px; }
+.cd-chip b { min-width: 34px; height: 34px; padding: 0 6px; border-radius: 17px; background: var(--accent-soft); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; font-size: 15px; }
+/* warnings */
+.warn-card { border-left: 6px solid var(--bad); }
+/* jobs */
+.job-row { min-height: 60px; }
+.tick-btn { flex: none; width: 40px; height: 40px; border-radius: 20px; border: 2px solid var(--muted); background: transparent; color: transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.tick-btn.on { background: var(--tog); border-color: var(--tog); color: var(--tog-on); }
+.tick-btn:hover { color: var(--muted); }
+.tick-btn.on:hover { color: var(--tog-on); }
+/* banner second button */
+.banner-ghost { background: transparent; color: var(--banner-ink); border: 1.5px solid var(--banner-label); margin-top: 6px; }
+/* holiday meter */
+.meter { height: 10px; border-radius: 5px; background: var(--soft); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--orange); border-radius: 5px; }
+/* ideas jar */
+.jar-card { gap: 14px; }
+.idea-pick { padding: 14px; border-radius: var(--radius-s); background: var(--tog-soft); }
+.idea-pick .h2 { color: var(--ink); }
+.small-link { display: inline-flex; align-items: center; gap: 6px; color: var(--link); text-decoration: none; min-height: 40px; }

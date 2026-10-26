@@ -1,12 +1,16 @@
 // The app's state, built from whichever backend is running (Firebase, or the demo).
 // Views read `store.state` and call `actions.*`. Every change re-renders.
+// Each action saves everything it changes in one batch, so nothing is ever half saved.
 import { dayKey, fromDayKey, uid, addDays, startOfDay } from './util.js';
-import { clearDayCache, settingsOf, sleepingUntil, nameOf, DEFAULT_SETTINGS, reminderId } from './logic.js';
+import { clearDayCache, settingsOf, sleepingUntil, nameOf, DEFAULT_SETTINGS, reminderId, leaveDaysFor, nextJobDay } from './logic.js';
+import './ops.js';
 
+const Ops = (typeof self !== 'undefined' ? self : window).CaledoniteOps;
 const listeners = new Set();
 export const store = {
   backend: null,
   raw: null,
+  linked: {},
   state: emptyState(),
   subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
   emit() { for (const fn of listeners) fn(this.state); }
@@ -16,9 +20,18 @@ function emptyState() {
   return {
     rev: 0, phase: 'loading', error: null, demo: false,
     user: null, me: null, partner: null,
-    people: {}, household: {}, calendars: {}, events: [], shifts: {}, requests: [], notes: [], outbox: [], status: {}
+    people: {}, household: {}, calendars: {}, events: [], shifts: {}, requests: [], notes: [], outbox: [], status: {},
+    jobs: [], ideas: [], tokens: null, linked: {}
   };
 }
+
+// Values that end up in class names or styles: only ever known words
+const COLOURS = ['blue', 'orange', 'green', 'purple', 'pink', 'teal', 'red', 'grey'];
+const LAYERS = ['own', 'family', 'friends', 'other'];
+const ROLES = ['normal', 'work', 'rota'];
+const SHARES = ['all', 'busy', 'none', 'hours'];
+const pick = (v, list, d) => (list.includes(v) ? v : d);
+const safeColour = (c) => (typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c) ? c : '');
 
 // Raw backend data -> tidy state
 export function setRaw(raw, extra = {}) {
@@ -28,7 +41,11 @@ export function setRaw(raw, extra = {}) {
   s.rev = (store.state.rev || 0) + 1;
   s.household = raw.household || {};
   s.people = {};
-  for (const [pid, p] of Object.entries(raw.people || {})) s.people[pid] = Object.assign({ id: pid }, p);
+  let n = 0;
+  for (const [pid, p] of Object.entries(raw.people || {})) {
+    s.people[pid] = Object.assign({ id: pid }, p, { colour: pick(p.colour, COLOURS, n === 0 ? 'blue' : 'orange') });
+    n++;
+  }
   const email = (s.user && s.user.email || '').toLowerCase();
   if (s.demo) {
     s.me = extra.me;
@@ -38,7 +55,12 @@ export function setRaw(raw, extra = {}) {
   s.partner = Object.keys(s.people).find((pid) => pid !== s.me) || null;
   s.calendars = {};
   for (const [k, c] of Object.entries(raw.calendars || {})) {
-    s.calendars[k] = Object.assign({ show: true, share: 'busy', role: 'normal', layer: 'own' }, c, { key: k });
+    const cal = Object.assign({ show: true, share: 'busy', role: 'normal', layer: 'own' }, c, { key: k });
+    cal.layer = pick(cal.layer, LAYERS, 'other');
+    cal.role = pick(cal.role, ROLES, 'normal');
+    cal.share = pick(cal.share, SHARES, 'busy');
+    cal.color = safeColour(cal.color);
+    s.calendars[k] = cal;
   }
   const evs = [];
   for (const f of raw.feeds || []) {
@@ -55,18 +77,33 @@ export function setRaw(raw, extra = {}) {
         end = new Date(e.e);
       }
       if (!(end > start)) end = new Date(start.getTime() + 30 * 60000);
-      evs.push({ owner: f.owner, calKey: f.calKey, id: e.id, title: e.t || '', start, end, allDay: !!e.ad, startKey: e.ad ? e.sd : null, busy: !!e.b, tag: e.tag || null, location: e.l || '', sid: e.sid || null });
+      evs.push({
+        owner: f.owner, calKey: f.calKey, id: e.id, title: e.t || '', start, end, allDay: !!e.ad, startKey: e.ad ? e.sd : null,
+        busy: !!e.b, tag: e.tag || null, location: e.l || '', sid: e.sid || null, uid: e.uid || null, gid: e.gid || null, rid: e.rid || null
+      });
     }
   }
   s.events = evs;
   s.shifts = {};
   for (const sh of Object.values(raw.shifts || {})) if (sh && sh.person && sh.day) s.shifts[`${sh.person}|${sh.day}`] = sh;
   s.requests = Object.entries(raw.requests || {}).map(([id, r]) => Object.assign({ id }, r)).sort((a, b) => (b.created || 0) - (a.created || 0));
-  s.notes = Object.entries(raw.notes || {}).map(([id, n]) => Object.assign({ id }, n)).sort((a, b) => (b.created || 0) - (a.created || 0));
+  s.notes = Object.entries(raw.notes || {}).map(([id, x]) => Object.assign({ id }, x)).sort((a, b) => (b.created || 0) - (a.created || 0));
   s.outbox = Object.entries(raw.outbox || {}).map(([id, o]) => Object.assign({ id }, o)).filter((o) => !o.done);
+  s.jobs = Object.entries(raw.jobs || {}).map(([id, j]) => Object.assign({ id }, j));
+  s.ideas = Object.entries(raw.ideas || {}).map(([id, i]) => Object.assign({ id }, i)).sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+  s.tokens = raw.tokens === undefined ? null : Object.keys(raw.tokens || {});
   s.status = raw.status || {};
+  s.linked = store.linked || {};
   if (s.phase === 'ready' && !s.me) s.phase = 'not-member';
   store.state = s;
+  clearDayCache();
+  store.emit();
+}
+
+// Data from Peckish and Budgie on this phone (see linked.js)
+export function setLinked(linked) {
+  store.linked = linked || {};
+  store.state = Object.assign({}, store.state, { linked: store.linked, rev: store.state.rev + 1 });
   clearDayCache();
   store.emit();
 }
@@ -79,101 +116,85 @@ export function setPhase(phase, extra = {}) {
 // ---------- actions ----------
 function db() { return store.backend; }
 const now = () => Date.now();
-
-function notify(to, title, body, link = '#today', kind = 'requests') {
+function myEmail() {
   const st = store.state;
+  return ((st.people[st.me] && st.people[st.me].email) || (st.user && st.user.email) || '').toLowerCase();
+}
+
+// A notification to send. Quiet hours are handled when it's sent; sleep after a night shift here.
+function notifyOp(to, title, body, link = '#today', kind = 'requests', extra = {}) {
+  const st = store.state;
+  if (!to) return null;
   const s = settingsOf(st, to);
+  if (s.notif[kind] === false) return null;
   let sendAfter = now();
   if (s.notif.quiet) {
     const until = sleepingUntil(st, to);
     if (until) sendAfter = until.getTime();
   }
-  if (s.notif[kind] === false) return null;
-  return db().add('notify', { to, kind, title, body, link, sendAfter, sent: false, created: now() });
+  return { type: 'add', path: 'notify', data: Object.assign({ to, kind, title, body, link, sendAfter, sent: false, created: now() }, extra) };
+}
+function outboxOp(item) {
+  return { type: 'add', path: 'outbox', data: Object.assign({ byEmail: myEmail(), done: false, created: now() }, item) };
+}
+async function commit(ops, ping = true) {
+  await db().commit(ops.filter(Boolean));
+  if (ping) db().ping();
+}
+function names() {
+  const st = store.state;
+  const out = {};
+  for (const pid of Object.keys(st.people)) out[pid] = nameOf(st, pid);
+  return out;
 }
 
 export const actions = {
-  async createRequest({ type, title, when, hold, note }) {
+  async createRequest({ type, title, when, hold, note, days, people }) {
     const st = store.state;
     const id = uid('r');
     const req = {
-      from: st.me, to: st.partner, type, title: title.trim(), when: when || null, hold: !!(hold && when && type !== 'heads'),
+      from: st.me, to: st.partner, type, title: (title || '').trim(), when: when || null, hold: !!(hold && when && type !== 'heads' && type !== 'leave'),
       status: type === 'heads' ? 'sent' : 'waiting', note: note || '', created: now()
     };
-    await db().set(`requests/${id}`, req);
+    if (type === 'leave') { req.days = days || {}; req.people = people || [st.me, st.partner]; }
+    const ops = [{ type: 'set', path: `requests/${id}`, data: req }];
     if (req.hold) {
-      for (const pid of [st.me, st.partner]) {
-        await db().add('outbox', { person: pid, op: 'create', tag: `req:${id}`, both: true, event: evFromWhen(`Pencilled in: ${req.title}`, when), done: false, created: now() });
-      }
+      for (const pid of [st.me, st.partner]) ops.push(outboxOp({ person: pid, op: 'create', tag: `req:${id}`, both: true, event: Ops.evFromWhen(`Pencilled in: ${req.title}`, when) }));
     }
     const me = nameOf(st, st.me);
-    const titles = { plan: `${me} wants to plan something`, favour: `${me} asked a favour`, free: `${me} asked you to keep some time free`, heads: `Heads up from ${me}`, add: `${me} added something for you` };
-    await notify(st.partner, titles[type] || `${me} asked you something`, req.title + (when ? ` (${when.label})` : ''), '#requests');
-    db().ping();
+    const titles = {
+      plan: `${me} wants to plan something`, favour: `${me} asked a favour`, free: `${me} asked you to keep some time free`,
+      heads: `Heads up from ${me}`, add: `${me} added something for you`, leave: `${me} would like to book a holiday together`
+    };
+    const body = (req.title || 'Holiday') + (when ? ` (${when.label})` : '');
+    ops.push(notifyOp(st.partner, titles[type] || `${me} asked you something`, body, '#requests', 'requests', type === 'heads' ? { reqId: id } : { reqId: id, ask: '1' }));
+    await commit(ops);
     return id;
+  },
+
+  // Your own holiday, just you: no answer needed, it goes straight in your calendar
+  async bookOwnLeave({ title, when, days }) {
+    const st = store.state;
+    const id = uid('r');
+    const req = { from: st.me, to: st.partner, type: 'leave', title: (title || '').trim(), when, hold: false, status: 'yes', own: true, days: days || {}, people: [st.me], note: '', created: now(), answeredAt: now() };
+    const ops = [{ type: 'set', path: `requests/${id}`, data: req }];
+    ops.push(outboxOp({ person: st.me, op: 'create', tag: `req:${id}`, event: Ops.evFromWhen(Ops.eventTitle(req), when) }));
+    ops.push(notifyOp(st.partner, `${nameOf(st, st.me)} booked a holiday`, `${req.title || 'Holiday'} (${when.label})`, '#requests'));
+    await commit(ops);
   },
 
   async answerRequest(id, answer, extra = {}) {
     const st = store.state;
     const r = st.requests.find((x) => x.id === id);
     if (!r) return;
-    const tag = `req:${id}`;
-    const me = nameOf(st, st.me);
-    const both = [r.from, r.to];
-    const patch = { answeredAt: now() };
-    if (answer === 'yes') {
-      patch.status = 'yes';
-      if (r.type === 'favour') {
-        if (r.hold) for (const pid of both) await db().add('outbox', { person: pid, op: 'delete', tag, done: false, created: now() });
-        if (r.when) await db().add('outbox', { person: r.to, op: 'create', tag, event: evFromWhen(`${r.title} (for ${nameOf(st, r.from)})`, r.when, '19:00'), done: false, created: now() });
-      } else if (r.type === 'add') {
-        if (r.when) await db().add('outbox', { person: r.to, op: 'create', tag, event: evFromWhen(r.title, r.when), done: false, created: now() });
-      } else if (r.type !== 'heads' && r.when) {
-        const title = r.type === 'free' ? `Kept free: ${r.title}` : r.title;
-        for (const pid of both) {
-          if (r.hold) await db().add('outbox', { person: pid, op: 'update', tag, event: { title }, done: false, created: now() });
-          else await db().add('outbox', { person: pid, op: 'create', tag, both: true, event: evFromWhen(title, r.when), done: false, created: now() });
-        }
-      }
-      await notify(r.from, `${me} said yes`, r.title, '#requests');
-    } else if (answer === 'no') {
-      patch.status = 'no';
-      if (r.hold) for (const pid of both) await db().add('outbox', { person: pid, op: 'delete', tag, done: false, created: now() });
-      await notify(r.from, `${me} can't this time`, r.title, '#requests');
-    } else if (answer === 'maybe') {
-      patch.status = 'maybe';
-      await notify(r.from, `${me} isn't sure yet`, r.title, '#requests');
-    } else if (answer === 'seen') {
-      patch.status = 'seen';
-    } else if (answer === 'other') {
-      patch.status = 'other';
-      patch.counter = extra.when;
-      await notify(r.from, `${me} suggested another time`, `${r.title}: ${extra.when.label}`, '#requests');
-    } else if (answer === 'accept-counter') {
-      // the person who asked agrees to the other time
-      patch.status = 'yes';
-      patch.when = r.counter;
-      patch.counter = null;
-      const title = r.type === 'free' ? `Kept free: ${r.title}` : r.title;
-      for (const pid of both) {
-        if (r.hold) await db().add('outbox', { person: pid, op: 'delete', tag, done: false, created: now() });
-        await db().add('outbox', { person: pid, op: 'create', tag, both: true, event: evFromWhen(title, r.counter), done: false, created: now() });
-      }
-      await notify(r.to, `${me} said yes to your time`, `${r.title}: ${r.counter.label}`, '#requests');
-    } else if (answer === 'cancel') {
-      patch.status = 'cancelled';
-      if (r.hold) for (const pid of both) await db().add('outbox', { person: pid, op: 'delete', tag, done: false, created: now() });
-    } else if (answer === 'remind') {
-      patch.reminded = now();
-      await notify(r.to, `Reminder from ${me}`, r.title, '#requests');
-    } else if (answer === 'undo') {
-      patch.status = 'waiting';
-    }
-    await db().update(`requests/${id}`, patch);
-    db().ping();
+    const res = Ops.buildAnswer({ req: r, id, answer, me: st.me, byEmail: myEmail(), names: names(), when: extra.when, now: now() });
+    const ops = [{ type: 'update', path: `requests/${id}`, data: res.patch }];
+    for (const o of res.outbox) ops.push({ type: 'add', path: 'outbox', data: o });
+    if (res.notify) ops.push(notifyOp(res.notify.to, res.notify.title, res.notify.body, res.notify.link, res.notify.kind));
+    await commit(ops);
   },
 
-  async addEvent({ who, title, day, start, end, allDay, calKey, busyOnly }) {
+  async addEvent({ who, title, day, endDay, start, end, allDay, calKey, busyOnly, repeat }) {
     const st = store.state;
     const when = { day, start, end, allDay, label: '' };
     if (who === 'partner') {
@@ -181,69 +202,125 @@ export const actions = {
     }
     const tag = `${who === 'both' ? 'both' : 'add'}:${uid()}`;
     const ev = { title: title.trim(), day, start, end, allDay: !!allDay, calKey: calKey || null, busyOnly: !!busyOnly };
+    if (endDay && endDay !== day) ev.endDay = endDay;
+    if (repeat) ev.repeat = repeat;
+    const ops = [];
     if (who === 'both') {
-      for (const pid of [st.me, st.partner]) await db().add('outbox', { person: pid, op: 'create', tag, both: true, event: Object.assign({}, ev, { calKey: pid === st.me ? ev.calKey : null }), done: false, created: now() });
-      await notify(st.partner, `${nameOf(st, st.me)} added something for you both`, `${ev.title} (${whenLabel(when)})`, '#calendar');
+      for (const pid of [st.me, st.partner]) ops.push(outboxOp({ person: pid, op: 'create', tag, both: true, event: Object.assign({}, ev, { calKey: pid === st.me ? ev.calKey : null }) }));
+      ops.push(notifyOp(st.partner, `${nameOf(st, st.me)} added something for you both`, `${ev.title} (${whenLabel(when)})`, '#calendar'));
     } else {
-      await db().add('outbox', { person: st.me, op: 'create', tag, event: ev, done: false, created: now() });
+      ops.push(outboxOp({ person: st.me, op: 'create', tag, event: ev }));
     }
-    db().ping();
+    await commit(ops);
     return tag;
+  },
+
+  // Change something already in Google Calendar. Things made in this app change by their tag,
+  // in both calendars; your own other events by their Google id.
+  async editEvent({ ev, changes, scope = 'one' }) {
+    const st = store.state;
+    const ops = [];
+    if (ev.tag) {
+      const parties = partiesOf(st, ev);
+      for (const pid of parties) ops.push(outboxOp({ person: pid, op: 'update', tag: ev.tag, changes }));
+      const other = parties.find((p) => p !== st.me);
+      if (other) ops.push(notifyOp(other, `${nameOf(st, st.me)} changed something`, `${changes.title || ev.title}`, '#calendar'));
+    } else {
+      const cal = st.calendars[`${ev.owner}__${ev.calKey}`] || {};
+      ops.push(outboxOp({ person: st.me, op: 'edit', account: cal.account || null, calId: cal.calId || null, gid: ev.gid, rid: ev.rid || null, scope, changes }));
+    }
+    await commit(ops);
+  },
+  async removeEvent({ ev, scope = 'one' }) {
+    const st = store.state;
+    const ops = [];
+    if (ev.tag) {
+      const parties = partiesOf(st, ev);
+      for (const pid of parties) ops.push(outboxOp({ person: pid, op: 'delete', tag: ev.tag }));
+      const other = parties.find((p) => p !== st.me);
+      if (other) ops.push(notifyOp(other, `${nameOf(st, st.me)} removed something`, ev.title, '#calendar'));
+      if (ev.tag.startsWith('req:')) ops.push({ type: 'update', path: `requests/${ev.tag.slice(4)}`, data: { status: 'cancelled', answeredAt: now() } });
+    } else {
+      const cal = st.calendars[`${ev.owner}__${ev.calKey}`] || {};
+      ops.push(outboxOp({ person: st.me, op: 'remove', account: cal.account || null, calId: cal.calId || null, gid: ev.gid, rid: ev.rid || null, scope }));
+    }
+    await commit(ops);
   },
 
   async setShift(pid, key, type) {
     const id = `${pid}_${key}`;
-    if (!type) await db().del(`shifts/${id}`);
-    else await db().set(`shifts/${id}`, { person: pid, day: key, type, by: store.state.me, updated: now() });
-    const st = store.state;
-    const other = pid === st.me ? st.partner : st.me;
-    if (pid !== st.me && other) { /* changing your partner's shift: they'll just see it */ }
+    if (!type) await commit([{ type: 'delete', path: `shifts/${id}` }], false);
+    else await commit([{ type: 'set', path: `shifts/${id}`, data: { person: pid, day: key, type, by: store.state.me, updated: now() } }], false);
   },
 
   async saveNote(text) {
     const st = store.state;
     const until = sleepingUntil(st, st.partner);
-    await db().add('notes', { from: st.me, to: st.partner, text: text.trim(), created: now(), showAfter: until ? until.getTime() : now(), seen: false });
-    await notify(st.partner, `A note from ${nameOf(st, st.me)}`, text.trim(), '#today', 'notes');
-    db().ping();
+    await commit([
+      { type: 'add', path: 'notes', data: { from: st.me, to: st.partner, text: text.trim(), created: now(), showAfter: until ? until.getTime() : now(), seen: false } },
+      notifyOp(st.partner, `A note from ${nameOf(st, st.me)}`, text.trim(), '#today', 'notes')
+    ]);
   },
   async noteSeen(id) {
-    await db().update(`notes/${id}`, { seen: true, seenAt: now() });
+    await commit([{ type: 'update', path: `notes/${id}`, data: { seen: true, seenAt: now() } }], false);
   },
 
   async updateCalendar(key, patch) {
-    await db().update(`calendars/${key}`, Object.assign({ userSet: true }, patch));
-    await db().update('', { settingsRev: now() });
-    db().ping();
+    await commit([
+      { type: 'update', path: `calendars/${key}`, data: Object.assign({ userSet: true }, patch) },
+      { type: 'update', path: '', data: { settingsRev: now() } }
+    ]);
   },
   async updateMySettings(patch) {
     const st = store.state;
     const cur = (st.people[st.me] && st.people[st.me].settings) || {};
-    await db().update(`people/${st.me}`, { settings: Object.assign({}, cur, patch) });
-    await db().update('', { settingsRev: now() });
+    await commit([
+      { type: 'update', path: `people/${st.me}`, data: { settings: Object.assign({}, cur, patch) } },
+      { type: 'update', path: '', data: { settingsRev: now() } }
+    ], false);
   },
   async updatePersonSettings(pid, patch) {
     const st = store.state;
-    const cur = (st.people[pid] && st.people[pid].settings) || {};
-    await db().update(`people/${pid}`, { settings: Object.assign({}, cur, patch) });
-    await db().update('', { settingsRev: now() });
+    if (pid === st.me) return actions.updateMySettings(patch);
+    await commit([{ type: 'update', path: `people/${pid}`, data: { settings: patch } }], false);
   },
   async updateHousehold(patch) {
-    await db().update('', patch);
+    await commit([{ type: 'update', path: '', data: patch }], false);
   },
   async updatePerson(pid, patch) {
-    await db().update(`people/${pid}`, patch);
+    await commit([{ type: 'update', path: `people/${pid}`, data: patch }], false);
   },
-  // Reminders live on your own person record, one per event (or repeating series).
+  async setPartnerEmail(email) {
+    const st = store.state;
+    await commit([
+      { type: 'update', path: `people/${st.partner}`, data: { email } },
+      { type: 'update', path: '', data: { emails: [myEmail(), email] } }
+    ], false);
+  },
+  async setLinkedAccounts(list) {
+    await commit([{ type: 'update', path: `people/${store.state.me}`, data: { linked: list } }], false);
+  },
+  // First sign-in: mark yourself as joined; once you both have, the two emails are fixed
+  async markJoined() {
+    const st = store.state;
+    if (!st.me || st.demo) return;
+    const ops = [];
+    if (!st.people[st.me].joined) ops.push({ type: 'update', path: `people/${st.me}`, data: { joined: true, joinedAt: now() } });
+    const partnerJoined = st.partner && st.people[st.partner].joined;
+    if (partnerJoined && !st.household.emailsLocked) ops.push({ type: 'update', path: '', data: { emailsLocked: true } });
+    if (ops.length) await commit(ops, false);
+  },
+
+  // ----- reminders (on your own record) -----
   async setReminder({ ref, owner, title, times, note }) {
     const st = store.state;
     const id = reminderId(ref);
     const cur = ((st.people[st.me] || {}).reminders || {})[id] || {};
     const r = { ref, owner, title: title || cur.title || '', times: times ?? cur.times ?? [], note: note ?? cur.note ?? '', created: cur.created || now(), updated: now() };
-    await db().update(`people/${st.me}`, { reminders: { [id]: r } });
+    await commit([{ type: 'update', path: `people/${st.me}`, data: { reminders: { [id]: r } } }], false);
   },
   async removeReminder(ref) {
-    await db().unset(`people/${store.state.me}`, `reminders.${reminderId(ref)}`);
+    await commit([{ type: 'unset', path: `people/${store.state.me}`, field: `reminders.${reminderId(ref)}` }], false);
   },
   async reminderDone(ref, occ, title) {
     const st = store.state;
@@ -252,15 +329,64 @@ export const actions = {
     if (!cur) {
       // an automatic birthday reminder: keep a record so it stays ticked off
       const s = settingsOf(st, st.me);
-      await db().update(`people/${st.me}`, { reminders: { [id]: { ref, owner: st.me, title: title || '', times: s.autoRemind.birthdays || [], note: '', auto: true, created: now(), done: { [occ]: now() } } } });
+      await commit([{ type: 'update', path: `people/${st.me}`, data: { reminders: { [id]: { ref, owner: st.me, title: title || '', times: s.autoRemind.birthdays || [], note: '', auto: true, created: now(), done: { [occ]: now() } } } } }], false);
       return;
     }
-    await db().update(`people/${st.me}`, { reminders: { [id]: { done: { [occ]: now() } } } });
+    await commit([{ type: 'update', path: `people/${st.me}`, data: { reminders: { [id]: { done: { [occ]: now() } } } } }], false);
   },
+
+  // ----- countdowns (on your own record, shown to you both) -----
+  async setCountdown({ id, title, date, ref }) {
+    const st = store.state;
+    await commit([{ type: 'update', path: `people/${st.me}`, data: { countdowns: { [id]: { title, date, ref: ref || null, shared: true, created: now() } } } }], false);
+  },
+  async removeCountdown(id) {
+    await commit([{ type: 'unset', path: `people/${store.state.me}`, field: `countdowns.${id}` }], false);
+  },
+
+  // ----- jobs -----
+  async addJob({ title, who, day, time, repeat }) {
+    const st = store.state;
+    const job = { title: title.trim(), who, day, time: time || null, repeat: repeat || null, remind: true, done: false, created: now(), by: st.me };
+    const ops = [{ type: 'add', path: 'jobs', data: job }];
+    const other = who === 'both' ? st.partner : (who !== st.me ? who : null);
+    if (other) ops.push(notifyOp(other, who === 'both' ? `${nameOf(st, st.me)} added a job for you both` : `${nameOf(st, st.me)} added a job for you`, `${job.title} (${whenLabel({ day, allDay: true }).replace(', all day', '')})`, '#jobs', 'jobs'));
+    await commit(ops, false);
+  },
+  async updateJob(id, patch) {
+    await commit([{ type: 'update', path: `jobs/${id}`, data: patch }], false);
+  },
+  async jobDone(job) {
+    const st = store.state;
+    const patch = job.repeat ? { day: nextJobDay(job, dayKey(new Date())), lastDone: now(), lastDoneBy: st.me } : { done: true, doneAt: now(), lastDoneBy: st.me };
+    await commit([{ type: 'update', path: `jobs/${job.id}`, data: patch }], false);
+  },
+  async jobUndo(job, prev) {
+    await commit([{ type: 'update', path: `jobs/${job.id}`, data: prev }], false);
+  },
+  async deleteJob(id) {
+    await commit([{ type: 'delete', path: `jobs/${id}` }], false);
+  },
+
+  // ----- ideas jar -----
+  async seedIdeas(list) {
+    const ops = list.map((i) => ({ type: 'set', path: `ideas/${i.id}`, data: Object.assign({ used: 0, created: now(), seeded: true }, i, { id: null }) }));
+    for (const o of ops) delete o.data.id;
+    await commit(ops, false);
+  },
+  async addIdea({ title, cost, where }) {
+    await commit([{ type: 'add', path: 'ideas', data: { title: title.trim(), cost: Number(cost) || 0, where: where || 'out', used: 0, created: now(), by: store.state.me } }], false);
+  },
+  async updateIdea(id, patch) {
+    await commit([{ type: 'update', path: `ideas/${id}`, data: patch }], false);
+  },
+  async deleteIdea(id) {
+    await commit([{ type: 'delete', path: `ideas/${id}` }], false);
+  },
+
   async testPush() {
     const st = store.state;
-    await db().add('notify', { to: st.me, kind: 'test', title: 'Caledonite test', body: 'Notifications are working on this phone.', link: '#settings/notifications', sendAfter: now(), sent: false, created: now() });
-    return db().ping();
+    await commit([{ type: 'add', path: 'notify', data: { to: st.me, kind: 'test', title: 'Caledonite test', body: 'Notifications are working on this phone.', link: '#settings/notifications', sendAfter: now(), sent: false, created: now() } }]);
   },
   syncNow() { return db().ping(true); },
   enableNotifications() { return db().enableNotifications(); },
@@ -269,10 +395,22 @@ export const actions = {
   createHousehold(info) { return db().createHousehold(info); }
 };
 
+// Who has a copy of something made in this app
+function partiesOf(st, ev) {
+  const owners = new Set(st.events.filter((e) => e.tag === ev.tag).map((e) => e.owner));
+  if (ev.tag.startsWith('both:') || owners.size > 1) return [st.me, st.partner].filter(Boolean);
+  if (ev.tag.startsWith('req:')) {
+    const r = st.requests.find((x) => `req:${x.id}` === ev.tag);
+    if (r && r.type !== 'favour' && r.type !== 'add' && !(r.people && r.people.length === 1)) return [st.me, st.partner].filter(Boolean);
+  }
+  return [ev.owner || st.me];
+}
+
 export function whenLabel(w) {
   if (!w || !w.day) return '';
   const d = fromDayKey(w.day);
   const base = `${relDayCap(d)}`;
+  if (w.endDay && w.endDay !== w.day) return `${base} to ${relDayCap(fromDayKey(w.endDay))}`;
   if (w.allDay) return `${base}, all day`;
   const [sh, sm] = (w.start || '19:00').split(':').map(Number);
   const s = new Date(d.getFullYear(), d.getMonth(), d.getDate(), sh, sm);
@@ -294,12 +432,5 @@ function relDayCap(d) {
   if (diff === 1) return 'Tomorrow';
   return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
-function evFromWhen(title, w, defaultStart = '19:00') {
-  return { title, day: w.day, start: w.allDay ? null : (w.start || defaultStart), end: w.allDay ? null : (w.end || plusHour(w.start || defaultStart)), allDay: !!w.allDay };
-}
-function plusHour(hm) {
-  const [h, m] = hm.split(':').map(Number);
-  return `${String(Math.min(23, h + 1)).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
 
-export { DEFAULT_SETTINGS, dayKey };
+export { DEFAULT_SETTINGS, dayKey, leaveDaysFor };

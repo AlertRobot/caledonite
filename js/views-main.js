@@ -1,11 +1,13 @@
 // Today and Calendar screens.
 import {
-  esc, dayKey, fromDayKey, addDays, startOfDay, fmtDate, fmtTime, fmtRange, relDay, MONTH_NAMES, atTime, mondayOf, fmtDateShort
+  esc, dayKey, fromDayKey, addDays, startOfDay, fmtDate, fmtTime, fmtRange, relDay, MONTH_NAMES, atTime, mondayOf, fmtDateShort, agoText, minutesOf
 } from './util.js';
 import {
   buildDay, dayList, statusNow, nextBothFree, itemTime, itemTitle, itemSub, nameOf, personColour, monthCell, allLayers,
-  layerChipLabel, LAYER_INFO, settingsOf, isWorkingShift, reminderFor, myReminders, reminderLine
+  layerChipLabel, LAYER_INFO, settingsOf, isWorkingShift, reminderFor, myReminders, reminderLine,
+  countdowns, countdownText, jobsOn, inQuietHours, quietNight
 } from './logic.js';
+import { jobRow } from './views-extra.js';
 import { icon, avatar, whoChip, seg, empty } from './ui.js';
 import { ui } from './uistate.js';
 
@@ -35,6 +37,12 @@ export function viewToday(state) {
   const me = state.me;
   const out = [];
   out.push(pageHeader(state, 'Today', `Hi ${nameOf(state, me)} · ${fmtDate(now)}`));
+
+  // something wrong with the sync or this phone's notifications
+  out.push(...warnings(state, now));
+  // countdowns
+  const cds = countdowns(state, now).slice(0, 3);
+  if (cds.length) out.push(`<div class="countdowns" role="list" aria-label="Countdowns">${cds.map((c) => `<span class="cd-chip" role="listitem" aria-label="${esc(countdownText(c))}"><b>${c.days === 0 ? 'Today' : c.days}</b><span>${c.days === 0 ? '' : c.days === 1 ? 'day until ' : 'days until '}${esc(c.title)}</span></span>`).join('')}</div>`);
 
   // requests waiting
   const waiting = waitingForMe(state);
@@ -99,6 +107,7 @@ export function viewToday(state) {
         <div class="row">${avatar(state, me, 44)}<div class="grow col"><span class="b small ink-${personColour(state, me)}">You</span><span class="h3">${esc(ms.title)}</span></div></div>
         <p class="muted">${esc(ms.sub)}</p>
         ${ms.kind === 'work' ? `<div class="row small-gap">${icon.eye(20)}<span class="grow">${esc(nameOf(state, P))} sees: <b>${esc(workSeenAs(state))}</b></span><a href="#settings/calendars" class="b pad-y">Change</a></div>` : ''}
+        ${quietLine(state, now)}
       </div>
     </section>`);
 
@@ -108,11 +117,19 @@ export function viewToday(state) {
         <span class="b small banner-label">Next time you're both free</span>
         <span class="h2">${esc(nf.label)}</span>
         <span>${esc(nf.sub)}</span>
-        <a href="#ask" class="btn banner-btn self-start" data-act="askFrom" data-day="${nf.key}" data-start="${hm(nf.start)}">Plan something</a>
+        <div class="row-wrap"><a href="#ask" class="btn banner-btn" data-act="askFrom" data-day="${nf.key}" data-start="${hm(nf.start)}">Plan something</a>
+        <a href="#jar" class="btn banner-ghost">Ideas jar</a></div>
       </section>`);
     }
   } else {
     out.push(`<div class="card stack"><span class="h3">Waiting for your partner</span><p class="muted">Once they sign in, you'll see what they're up to here. Add their Google email in Settings, Account.</p><a class="btn sec self-start" href="#settings/account">Open Account settings</a></div>`);
+  }
+
+  // jobs for today (and anything overdue)
+  const jobs = jobsOn(state, key);
+  if (jobs.length || state.jobs.length) {
+    out.push(`<section class="stack-s"><div class="row between"><h2 class="label">Jobs today</h2><a href="#jobs" class="b small">All jobs</a></div>
+      ${jobs.length ? `<div class="card flush">${jobs.map((j) => jobRow(state, j, key, true)).join('')}</div>` : '<p class="muted empty">No jobs today.</p>'}</section>`);
   }
 
   // today's plans
@@ -151,6 +168,56 @@ function reminderCard(state, x, now) {
     <div class="row-wrap"><button type="button" class="btn" data-act="remDone" data-ref="${esc(x.ref)}" data-occ="${esc(x.occ)}" data-title="${esc(x.title)}">${icon.check(18)} Done</button>
     <button type="button" class="btn sec" data-act="openEv" data-ref="${esc(x.ref)}" data-day="${day}">Change reminder</button></div>
   </div>`;
+}
+
+// A sync that has stopped, or a phone that has stopped getting notifications
+function warnings(state, now) {
+  const out = [];
+  if (state.demo) return out;
+  const mine = Object.values(state.status || {}).filter((x) => x.person === state.me);
+  const bad = mine.find((x) => x.ok === false);
+  const newest = Math.max(0, ...mine.map((x) => x.lastRun || 0));
+  if (bad) {
+    out.push(`<div class="card warn-card stack-s"><span class="b">Your calendar sync has a problem</span><span class="small">${esc(bad.account || '')}: ${esc(bad.error || 'unknown error')}</span>
+      <div class="row-wrap"><button type="button" class="btn sec sm" data-act="syncNow">Try again</button><a href="#settings/account" class="btn link-btn">Details</a></div></div>`);
+  } else if (mine.length && now - newest > 45 * 60000) {
+    out.push(`<div class="card warn-card stack-s"><span class="b">Your calendar hasn't synced since ${esc(agoText(newest))}</span><span class="small">It normally syncs every 10 minutes.</span>
+      <div class="row-wrap"><button type="button" class="btn sec sm" data-act="syncNow">Sync now</button><a href="#settings/account" class="btn link-btn">Details</a></div></div>`);
+  }
+  const P = state.partner;
+  if (P) {
+    const theirs = Object.values(state.status || {}).filter((x) => x.person === P);
+    const last = Math.max(0, ...theirs.map((x) => x.lastRun || 0));
+    if (theirs.length && now - last > 3 * 3600000) out.push(`<p class="small note-box">${esc(nameOf(state, P))}'s calendar hasn't synced since ${esc(agoText(last))}, so what you see of their day may be out of date.</p>`);
+  }
+  // notifications: allowed on this phone, but this phone's address is missing
+  try {
+    const flag = localStorage.getItem('caledonite.push') === '1';
+    const id = localStorage.getItem('caledonite.pushId');
+    if (flag && 'Notification' in window && Notification.permission === 'denied') {
+      out.push(`<div class="card warn-card stack-s"><span class="b">Notifications are blocked on this phone</span><span class="small">Allow them for this site in Chrome's settings, then tap Turn on again in Settings, Notifications.</span></div>`);
+    } else if (flag && state.tokens && id && !state.tokens.includes(id)) {
+      out.push(`<div class="card warn-card stack-s"><span class="b">This phone has stopped getting notifications</span>
+        <div class="row-wrap"><button type="button" class="btn sec sm" data-act="pushOn">Turn them back on</button></div></div>`);
+    }
+  } catch (e) { /* no storage */ }
+  return out;
+}
+// Quiet hours, with a one-tap "not tonight"
+function quietLine(state, now) {
+  const s = settingsOf(state, state.me);
+  const q = s.quiet;
+  if (!q.on) return '';
+  const m = now.getHours() * 60 + now.getMinutes();
+  const from = minutesOf(q.from || '23:00');
+  const soon = (from - m + 1440) % 1440 <= 180;
+  const inside = inQuietHours(s, now);
+  const night = quietNight(s, now);
+  const skipped = q.skip === night;
+  if (!soon && !inside && !skipped) return '';
+  const t = (hmv) => fmtTime(atTime('2000-01-01', hmv));
+  if (skipped) return `<div class="row small-gap">${icon.moon(20)}<span class="grow">No quiet hours tonight.</span><button type="button" class="btn link-btn" data-act="quietTonight" data-v="on">Turn back on</button></div>`;
+  return `<div class="row small-gap">${icon.moon(20)}<span class="grow">${inside ? 'Quiet hours now' : 'Quiet hours'} from ${esc(t(q.from))} to ${esc(t(q.to))}.</span><button type="button" class="btn link-btn" data-act="quietTonight" data-v="off">Not tonight</button></div>`;
 }
 
 function workSeenAs(state) {
@@ -202,6 +269,7 @@ function comingUp(state, key) {
     const bits = [];
     for (const it of p.items) {
       if (it.cont || it.kind === 'sleep') continue;
+      if (it.kind === 'money') { bits.push(it.money && it.money.pay ? 'Payday' : `${it.title} (${(it.sub || 'bill').toLowerCase()})`); continue; }
       if (it.kind === 'shift') bits.push(it.allDay ? it.title : `${itemTitle(state, it)}, ${fmtRange(it.start, it.end)}`);
       else if (it.kind === 'work') bits.push(`${it.title}, ${fmtRange(it.start, it.end)}`);
       else if (bits.length < 3) bits.push(it.allDay ? it.title : `${it.title} at ${fmtTime(it.start)}`);

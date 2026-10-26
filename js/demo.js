@@ -99,6 +99,13 @@ export function createDemoBackend(me = 'ethan') {
     },
     notes: {},
     outbox: {},
+    jobs: {
+      j_bins: { title: 'Put the bins out', who: 'ethan', day: k(nextWd(1, 0)), repeat: { unit: 'week', every: 1 }, remind: true, done: false, created: Date.now() },
+      j_shop: { title: 'Food shop', who: 'both', day: k(nextWd(6, 0)), time: '10:00', repeat: { unit: 'week', every: 1 }, remind: true, done: false, created: Date.now() },
+      j_hoover: { title: 'Hoover the flat', who: 'sophie', day: k(0), repeat: { unit: 'week', every: 2 }, remind: true, done: false, created: Date.now() }
+    },
+    ideas: {},
+    tokens: {},
     status: {
       a1: { person: 'ethan', account: 'Personal Gmail', lastRun: Date.now() - 120000, ok: true },
       a2: { person: 'ethan', account: 'Second Gmail', lastRun: Date.now() - 300000, ok: true },
@@ -118,7 +125,7 @@ export function createDemoBackend(me = 'ethan') {
       const cal = raw.calendars[key];
       const owner = list[0].owner;
       const calKey = list[0].calKey;
-      if (owner === meId) { feeds.push({ owner, calKey, private: true, events: list }); continue; }
+      if (owner === meId) { feeds.push({ owner, calKey, private: true, events: list.map((e) => Object.assign({ gid: e.id, uid: e.sid || e.id }, e)) }); continue; }
       if (!cal || cal.share === 'none') continue;
       if (cal.share === 'all') { feeds.push({ owner, calKey, private: false, events: list }); continue; }
       if (cal.share === 'busy') { feeds.push({ owner, calKey, private: false, events: list.map((e) => Object.assign({}, e, { t: 'Busy', b: 1, l: '' })) }); continue; }
@@ -152,10 +159,23 @@ export function createDemoBackend(me = 'ethan') {
         const day = ev.day;
         const off = Math.round((new Date(day + 'T12:00') - addDays(T, 0)) / 86400000);
         add(o.person, ev.calKey || cal, ev.title, off, ev.allDay ? null : ev.start, ev.allDay ? null : ev.end, { tag: o.tag, b: ev.busyOnly ? 1 : 0 });
-      } else if (o.op === 'update') {
-        for (const e of evs) if (e.owner === o.person && e.tag === o.tag) e.t = o.event.title;
-      } else if (o.op === 'delete') {
-        for (let i = evs.length - 1; i >= 0; i--) if (evs[i].owner === o.person && evs[i].tag === o.tag) evs.splice(i, 1);
+      } else if (o.op === 'update' || o.op === 'edit') {
+        const ch = o.changes || o.event || {};
+        for (const e of evs) {
+          const hit = o.op === 'update' ? (e.owner === o.person && e.tag === o.tag) : (e.owner === o.person && e.id === o.gid);
+          if (!hit) continue;
+          if (ch.title) e.t = ch.title;
+          if (ch.day && !e.ad) {
+            const len = e.e - e.s;
+            const s0 = atTime(ch.day, ch.start || new Date(e.s).toTimeString().slice(0, 5));
+            e.s = s0.getTime(); e.e = ch.end ? atTime(ch.day, ch.end).getTime() : e.s + len;
+          }
+        }
+      } else if (o.op === 'delete' || o.op === 'remove') {
+        for (let i = evs.length - 1; i >= 0; i--) {
+          const e = evs[i];
+          if (o.op === 'delete' ? (e.owner === o.person && e.tag === o.tag) : (e.owner === o.person && e.id === o.gid)) evs.splice(i, 1);
+        }
       }
       o.done = true; changed = true;
     }
@@ -185,6 +205,22 @@ export function createDemoBackend(me = 'ethan') {
     },
     async add(coll, data) { const id = uid(); raw[coll] = raw[coll] || {}; raw[coll][id] = JSON.parse(JSON.stringify(data)); publish(); return id; },
     async del(path) { const { obj, key } = at(path); delete obj[key]; publish(); },
+    async commit(ops) {
+      for (const o of ops) {
+        if (o.type === 'set') { const { obj, key } = at(o.path); obj[key] = JSON.parse(JSON.stringify(o.data)); }
+        else if (o.type === 'update') { const { obj, key } = at(o.path); obj[key] = deepMerge(obj[key] || {}, JSON.parse(JSON.stringify(o.data))); }
+        else if (o.type === 'add') { raw[o.path] = raw[o.path] || {}; raw[o.path][uid()] = JSON.parse(JSON.stringify(o.data)); }
+        else if (o.type === 'delete') { const { obj, key } = at(o.path); delete obj[key]; }
+        else if (o.type === 'unset') {
+          const { obj, key } = at(o.path);
+          const parts = o.field.split('.');
+          let x = obj[key];
+          for (let i = 0; x && i < parts.length - 1; i++) x = x[parts[i]];
+          if (x) delete x[parts[parts.length - 1]];
+        }
+      }
+      publish();
+    },
     ping() { setTimeout(runSync, 700); return Promise.resolve(true); },
     async enableNotifications() { return { ok: false, reason: 'demo' }; },
     async signIn() {},
@@ -201,4 +237,19 @@ function deepMerge(a, b) {
     out[k] = v && typeof v === 'object' && !Array.isArray(v) && a[k] && typeof a[k] === 'object' && !Array.isArray(a[k]) ? deepMerge(a[k], v) : v;
   }
   return out;
+}
+
+// Sample Peckish dinners and Budgie paydays for the demo
+export function demoLinked() {
+  const T = startOfDay(new Date());
+  const k = (n) => dayKey(addDays(T, n));
+  const meals = ['Chicken fajitas', 'Mushroom risotto', 'Smash burgers', 'Thai green curry', 'Sausage and mash', 'Salmon traybake', 'Pizza night'];
+  const days = {};
+  for (let i = -1; i < 8; i++) days[k(i)] = { title: meals[(i + 7) % 7], time: 30, takeaway: i === 4 };
+  let payday = 0;
+  for (let i = 0; i < 40; i++) { const d = addDays(T, i); if (d.getDay() === 5 && addDays(d, 7).getMonth() !== d.getMonth()) { payday = i; break; } }
+  const money = {};
+  money[k(payday)] = [{ name: 'Payday', sub: '', pay: true }];
+  money[k(3)] = [{ name: 'Phone', sub: 'Bill, £18', pay: false }];
+  return { peckish: { found: true, days }, budgie: { found: true, days: money, fun: { left: 64.5, names: ['Fun'], until: k(payday) } } };
 }
