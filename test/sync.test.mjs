@@ -1508,3 +1508,28 @@ test("the weekly backup never copies your partner's rota link, reminders or priv
   assert.match(uploaded, /Trip/);
   assert.match(uploaded, /mine\.example/, 'your own record is as it is');
 });
+
+test('a change Google keeps turning away for a moment is tried for a day, not dropped after five tries', () => {
+  const run = (msg, createTime) => {
+    const calendar = fakeCalendar([]);
+    calendar.Events.insert = () => { throw new Error(msg); };
+    ctx.Calendar = calendar;
+    ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'primary@x', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'primary@x' }) };
+    const writes = [];
+    ctx.fsQuery_ = () => [{ id: 'o1', createTime, data: { person: 'ethan', op: 'create', tag: 'add:z', byEmail: 'e@x.com', done: false, created: 1, tries: 4, event: { title: 'Gym', day: '2026-11-07', start: '10:00', end: '11:00' } } }];
+    ctx.fsCommit_ = (w) => writes.push(...w);
+    ctx.docName_ = (p) => p;
+    ctx.processOutbox_({ email: 'e@x.com', person: 'ethan', main: true }, { appEmail: 'e@x.com', calDocs: {} });
+    return writes[0].update.fields;
+  };
+  const recent = new Date(Date.now() - 3600e3).toISOString();
+  for (const m of ['API call to calendar.events.insert failed with error: Backend Error', 'Rate Limit Exceeded', 'Service invoked too many times for one day: calendar.', 'Address unavailable: https://www.googleapis.com']) {
+    const f = run(m, recent);
+    assert.ok(!f.done, m);
+    assert.equal(f.tries.integerValue, '5');
+  }
+  // a day on, it's given up on
+  assert.equal(run('Backend Error', new Date(Date.now() - 25 * 3600e3).toISOString()).done.booleanValue, true);
+  // something wrong with the change itself: after 5 tries, as before
+  assert.equal(run('API call to calendar.events.insert failed with error: Invalid start time.', recent).done.booleanValue, true);
+});

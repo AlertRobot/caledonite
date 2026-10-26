@@ -1110,7 +1110,10 @@ function processOutbox_(me, ctx) {
       if (key) stuck[key] = true;
       var tries = (o.tries || 0) + 1;
       var patch = { tries: tries, error: String(err && err.message || err).slice(0, 200) };
-      if (tries >= 5) patch.done = true;
+      // given up on after 5 tries, but not while Google is only having a moment (busy, a quota for the day, the
+      // network): those keep trying for a day after the change was made, so an hour's outage loses nothing
+      var age = Date.now() - (Date.parse(it.createTime || '') || o.created || 0);
+      if (tries >= 5 && (!transient_(err) || age > 864e5)) patch.done = true;
       writes.push(upd_(HOUSEHOLD + '/outbox/' + it.id, patch, Object.keys(patch)));
     }
   });
@@ -1304,6 +1307,11 @@ function editOwn_(o, rs) {
   if (!Object.keys(patch).length) return { changed: 0 };
   Calendar.Events.patch(patch, o.calId, target);
   return { changed: 1 };
+}
+
+// An error that's Google or the network having a moment, not something wrong with the change itself
+function transient_(err) {
+  return /rate limit|backend error|internal error|service unavailable|unavailable|timed out|timeout|try again|too many|quota|limit exceeded|\b(429|500|502|503|504)\b|address unavailable|dns error|unexpected error/i.test(String(err && err.message || err));
 }
 
 // The Calendar API saying an event isn't there (any more)
