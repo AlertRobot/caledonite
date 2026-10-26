@@ -1096,3 +1096,38 @@ test('a "from this day on" query asks Firestore for just that', () => {
   assert.equal(body.structuredQuery.where.fieldFilter.op, 'GREATER_THAN_OR_EQUAL');
   assert.equal(body.structuredQuery.where.fieldFilter.value.stringValue, '2026-10-25');
 });
+
+test('a ping that waited while "Stop syncing" finished writes nothing back', () => {
+  asUser('e@x.com');
+  fakeCache();
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.ScriptApp = { getProjectTriggers: () => [] };
+  let read = 0;
+  ctx.fsList_ = () => { read++; return [{ id: 'ethan', data: { email: 'e@x.com' } }]; };
+  assert.equal(ctx.syncAll({ fromPing: true }), 'not connected');
+  assert.equal(read, 0);
+});
+
+test('reminder times that are not a list never stop the reminders', () => {
+  const now = Date.now();
+  const { api } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsGet_ = (path) => (path === 'households/main/people/ethan/private/main'
+    ? { reminders: { bad: { ref: 'e:ethan:primary:u0', owner: 'ethan', times: 'h1' }, r1: { ref: 'e:ethan:primary:u1', owner: 'ethan', times: ['h1'] } } } : null);
+  const me = { person: 'ethan', email: 'e@x.com', main: true, people: [{ id: 'ethan', data: { settings: { autoRemind: { birthdays: 'd0' } } } }] };
+  const ev = (uid) => ({ calKey: 'primary', shown: true, share: 'all', doc: { share: 'all' }, ev: { id: uid, uid, t: 'Dentist ' + uid, ad: 0, s: now + 30 * 60e3, e: now + 90 * 60e3 } });
+  ctx.fireReminders_(me, {}, [ev('u0'), ev('u1')]);
+  assert.equal(writes.length, 1);
+});
+
+test("an extra account isn't synced while its person's email is also someone else's", () => {
+  ctx.fsGet_ = () => ({});
+  ctx.fsQuery_ = () => [];
+  const people = [{ id: 'ethan', data: { email: 'e@x.com' } }, { id: 'sophie', data: { email: 'E@x.com', linked: ['s.work@x.com'] } }];
+  assert.throws(() => ctx.loadCtx_({ email: 's.work@x.com', person: 'sophie', main: false, people }), /more than one person/);
+  people[1].data.email = 's@x.com';
+  assert.equal(ctx.loadCtx_({ email: 's.work@x.com', person: 'sophie', main: false, people }).appEmail, 's@x.com');
+});

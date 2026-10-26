@@ -237,14 +237,15 @@ function doPost(e) {
   cache.put('last_ping', String(Date.now()), 45);
   // the owner's account stopped syncing: a ping doesn't start it again
   if (!hasTrigger_()) return text_('not connected');
-  try { syncAll(); } catch (err) { return text_('error: ' + err.message); }
+  try { syncAll({ fromPing: true }); } catch (err) { return text_('error: ' + err.message); }
   return text_('ok');
 }
 function text_(s) { return ContentService.createTextOutput(s).setMimeType(ContentService.MimeType.TEXT); }
 
 // ===================== the sync =====================
 
-function syncAll() {
+// opts: { fromPing: true } from the ping (a time-driven run is handed Google's own event instead)
+function syncAll(opts) {
   RUN_STARTED_ = Date.now();
   var lock = LockService.getUserLock();
   if (!lock.tryLock(25000)) return 'already running';
@@ -257,6 +258,8 @@ function syncAll() {
     // the ping deployment, running as Ethan for no one in particular, gets)
     claim = claimRun_();
     if (!claim) return 'already running';
+    // "Stop syncing" may have finished while this ping waited its turn: never write the copies back
+    if (opts && opts.fromPing === true && !hasTrigger_()) return 'not connected';
     try { me = whoAmI_(); } catch (err) {
       // taken out of Caledonite (Settings, Account): take its calendars out too, and stop
       if (err && err.notMember) forgetThisAccount_(err.email);
@@ -348,6 +351,12 @@ function loadCtx_(me) {
   var people = {};
   me.people.forEach(function (p) { people[p.id] = p.data; });
   var person = people[me.person] || {};
+  // the email whose copies these are must be this person's alone, or another of your accounts could be written
+  // as readable by someone else
+  var appEmail = String(person.email || '').toLowerCase();
+  if (appEmail && me.people.some(function (p) { return p.id !== me.person && String(p.data.email || '').toLowerCase() === appEmail; })) {
+    throw new Error(appEmail + ' is listed for more than one person in Caledonite, so nothing is synced. Correct it in Settings, Account.');
+  }
   return { hh: hh, people: people, person: person, settings: person.settings || {}, appEmail: String(person.email || '').toLowerCase(), calDocs: loadCalDocs_(me) };
 }
 function loadCalDocs_(me) {
@@ -1343,11 +1352,13 @@ function fireReminders_(me, ctx, seen) {
     var rems = merge_(p.data.reminders || {}, priv.reminders || {});
     var settings = p.data.settings || {};
     var bdays = (settings.autoRemind && settings.autoRemind.birthdays) || [];
+    if (!Array.isArray(bdays)) bdays = [];
     Object.keys(rems).forEach(function (id) {
       var r = rems[id];
       if (!r || r.owner !== me.person || !r.ref) return;
       var times = r.auto ? bdays : r.times;
-      if (!times || !times.length) return;
+      // (one odd value never stops everyone's reminders)
+      if (!Array.isArray(times) || !times.length) return;
       consider(p.id, settings, r.ref, merge_(r, { times: times }), byRef[r.ref]);
     });
     // every birthday in your own calendars, unless you've set that one yourself
