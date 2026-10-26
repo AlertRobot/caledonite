@@ -475,3 +475,16 @@ test('the page runs under its own Content Security Policy: the theme script is a
   assert.deepEqual(await page.evaluate(() => window.__blocked), []);
   await ctx.close();
 });
+
+test('the times along the top of the week never run into each other on a small phone', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 320, height: 640 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, locale: 'en-GB', timezoneId: 'Europe/London', bypassCSP: true });
+  const page = await ctx.newPage();
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await page.goto(`${URL}?demo=ethan#calendar`);
+  await page.waitForSelector('.bottom-nav');
+  await page.click('[data-act="calView"][data-v="week"]');
+  const boxes = await page.$$eval('.scale > div span', (els) => els.map((e) => { const b = e.getBoundingClientRect(); return [b.left, b.right]; }));
+  assert.equal(boxes.length, 4);
+  for (let i = 1; i < boxes.length; i++) assert.ok(boxes[i][0] >= boxes[i - 1][1], `label ${i} overlaps the one before`);
+  await ctx.close();
+});

@@ -461,7 +461,7 @@ function weekView(state) {
       <button type="button" class="btn sec sm" data-act="weekToday">This week</button>
       <button type="button" class="icon-btn" aria-label="Next week" data-act="weekNext">${icon.next(20)}</button>
     </div>
-    <div class="scale"><span></span><div><span style="left:0">6am</span><span style="left:33.3%;transform:translateX(-50%)">Noon</span><span style="left:66.7%;transform:translateX(-50%)">6pm</span><span style="right:0">Midnight</span></div></div>
+    <div class="scale"><span></span><div><span style="left:0">6am</span><span style="left:33.3%;transform:translateX(-50%)">Noon</span><span style="left:66.7%;transform:translateX(-50%)">6pm</span><span style="right:0">12am</span></div></div>
     ${cards.join('')}`;
 }
 // all-day things: a thin line through the whole strip, one per colour
