@@ -348,3 +348,20 @@ test('the week strips put things at the right time on the day the clocks change'
   assert.ok(lefts.includes('33.33%'), lefts.join(' '));
   await page.context().close();
 });
+
+test('a settings switch saves just that setting, so one changed on your other phone meanwhile is kept', async () => {
+  const page = await open('ethan', '#settings/notifications');
+  await mods(page, (store) => {
+    const b = store.store.backend; const real = b.commit.bind(b);
+    window.__sent = [];
+    b.commit = (ops) => { window.__sent.push(...ops.filter((o) => o.path === 'people/ethan').map((o) => o.data.settings)); return real(ops); };
+  });
+  await page.click('[data-act="notifToggle"][data-f="notes"]');
+  await page.click('[data-act="quietToggle"]');
+  await page.click('[data-act="summaryToggle"][data-f="morning"]');
+  await go(page, '#settings/holidays');
+  await page.click('[data-act="leaveToggle"]');
+  const sent = await page.evaluate(() => window.__sent);
+  assert.deepEqual(sent, [{ notif: { notes: false } }, { quiet: { on: false, skip: null } }, { morning: { on: false } }, { leave: { bankHolsCount: true } }]);
+  await page.context().close();
+});

@@ -176,20 +176,21 @@ const H = {
     const s = settingsOf(store.state, store.state.me);
     const cur = s.autoRemind.birthdays || [];
     const v = el.dataset.v;
-    run(actions.updateMySettings({ autoRemind: Object.assign({}, s.autoRemind, { birthdays: cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v] }) }));
+    run(actions.updateMySettings({ autoRemind: { birthdays: cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v] } }));
   },
   addRemind: (el) => { const v = el.dataset.v; ui.add.remind = ui.add.remind.includes(v) ? ui.add.remind.filter((x) => x !== v) : [...ui.add.remind, v]; render(); },
   addNotePick: (el) => { ui.add.note = ui.add.note === el.dataset.v ? '' : el.dataset.v; render(); },
   // ----- quiet hours, summaries, countdowns, holidays -----
+  // (just the one setting that changed: it merges into what's saved, so one changed on your other phone stays)
   quietTonight: (el) => {
     const s = settingsOf(store.state, store.state.me);
     const skip = el.dataset.v === 'off' ? quietNight(s, new Date()) : null;
-    run(actions.updateMySettings({ quiet: Object.assign({}, s.quiet, { skip }) }), skip ? 'No quiet hours tonight.' : 'Quiet hours are back on tonight.');
+    run(actions.updateMySettings({ quiet: { skip } }), skip ? 'No quiet hours tonight.' : 'Quiet hours are back on tonight.');
   },
-  quietToggle: () => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ quiet: Object.assign({}, s.quiet, { on: !s.quiet.on, skip: null }) })); },
-  summaryToggle: (el) => { const s = settingsOf(store.state, store.state.me); const f = el.dataset.f; run(actions.updateMySettings({ [f]: Object.assign({}, s[f], { on: !s[f].on }) })); },
+  quietToggle: () => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ quiet: { on: !s.quiet.on, skip: null } })); },
+  summaryToggle: (el) => { const s = settingsOf(store.state, store.state.me); const f = el.dataset.f; run(actions.updateMySettings({ [f]: { on: !s[f].on } })); },
   myToggle: (el) => { const s = settingsOf(store.state, store.state.me); const f = el.dataset.f; run(actions.updateMySettings({ [f]: s[f] === false })); },
-  leaveToggle: () => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ leave: Object.assign({}, s.leave, { bankHolsCount: !s.leave.bankHolsCount }) })); },
+  leaveToggle: () => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ leave: { bankHolsCount: !s.leave.bankHolsCount } })); },
   linkedReload: async () => { setLinked(await loadLinked()); toast('Checked.'); },
   budgieLink: async () => {
     const cfg = parseBudgieLink(ui.settings.budgieDraft);
@@ -448,7 +449,7 @@ const H = {
   },
   notifToggle: (el) => {
     const s = settingsOf(store.state, store.state.me);
-    run(actions.updateMySettings({ notif: Object.assign({}, s.notif, { [el.dataset.f]: !s.notif[el.dataset.f] }) }));
+    run(actions.updateMySettings({ notif: { [el.dataset.f]: !s.notif[el.dataset.f] } }));
   },
   pushOn: async () => {
     ui.pushMsg = 'Asking this phone...'; render();
@@ -537,13 +538,12 @@ const C = {
     run(actions.updateMySettings({ altOff: { day, from: nextWeekday(day) } }));
   },
   addNote: (el) => { ui.add.note = el.value; },
-  quietField: (el) => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ quiet: Object.assign({}, s.quiet, { [el.dataset.f]: el.value }) })); },
-  summaryField: (el) => { const s = settingsOf(store.state, store.state.me); const f = el.dataset.f; run(actions.updateMySettings({ [f]: Object.assign({}, s[f], { [el.dataset.k]: el.dataset.k === 'day' ? Number(el.value) : el.value }) })); },
+  quietField: (el) => { if (el.value) run(actions.updateMySettings({ quiet: { [el.dataset.f]: el.value } })); },
+  summaryField: (el) => { const f = el.dataset.f; if (el.value) run(actions.updateMySettings({ [f]: { [el.dataset.k]: el.dataset.k === 'day' ? Number(el.value) : el.value } })); },
   leaveField: (el) => {
-    const s = settingsOf(store.state, store.state.me);
     const v = el.dataset.f === 'allowance' ? Math.max(0, Math.min(60, Number(el.value) || 0)) : (el.value || '').slice(5);
     if (el.dataset.f === 'yearStart' && !/^\d{2}-\d{2}$/.test(v)) return;
-    run(actions.updateMySettings({ leave: Object.assign({}, s.leave, { [el.dataset.f]: v }) }));
+    run(actions.updateMySettings({ leave: { [el.dataset.f]: v } }));
   },
   askLeaveDate: () => render(),
   addLeaveDate: () => render(),
