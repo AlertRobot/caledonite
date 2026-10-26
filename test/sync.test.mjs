@@ -932,3 +932,37 @@ test('a rota link that sends a sign-in page instead of a calendar leaves the shi
   ctx.syncRotaLink_({ person: 'sophie', email: 's@x.com', main: true }, { calDocs: { rotalink: { share: 'all', role: 'rota', lastSeen: Date.now() } }, people: { sophie: {}, ethan: {} }, appEmail: 's@x.com' }, 'https://loop.example/r.ics');
   assert.ok(writes.some((w) => w.delete === 'households/main/privateFeeds/sophie__rotalink__2026-11'));
 });
+
+test('a long list of changes is left for the next run once time is short, and what was done is marked done', () => {
+  const calendar = fakeCalendar([]);
+  let clock = Date.now();
+  // each change takes 30 seconds of a run that started just now
+  const insert = calendar.Events.insert;
+  calendar.Events.insert = (res, calId) => { clock += 30e3; return insert(res, calId); };
+  ctx.Date = class extends Date { static now() { return clock; } };
+  ctx.RUN_STARTED_ = clock;
+  const items = Array.from({ length: 20 }, (_, i) => ({ person: 'ethan', op: 'create', tag: `add:n${i}`, byEmail: 'e@x.com', done: false, created: i, event: { title: `E${i}`, day: '2026-11-07', start: '10:00', end: '11:00' } }));
+  const writes = runOutbox(items, { calendar });
+  delete ctx.Date; ctx.RUN_STARTED_ = 0;
+  const done = writes.filter((w) => w.update.fields.done && w.update.fields.done.booleanValue);
+  assert.ok(done.length > 0 && done.length < 20, `some done (${done.length}), the rest left`);
+  assert.equal(calendar.events.length, done.length);
+});
+
+test('notifications are left unsent for the next run once time is short', () => {
+  const sent = [];
+  ctx.UrlFetchApp = { fetch: (url, opt) => { sent.push(opt.payload); return { getResponseCode: () => 200 }; } };
+  const realToken = ctx.saToken_, realProp = ctx.prop_;
+  ctx.saToken_ = () => 't'; ctx.prop_ = () => 'proj';
+  ctx.fsQuery_ = (coll) => (coll === 'notify' ? [{ id: 'n1', data: { to: 'sophie', kind: 'notes', title: 'x', sendAfter: 0, sent: false }, updateTime: 't' }] : []);
+  ctx.fsList_ = () => [{ id: 't1', data: { token: 'tok' } }];
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.RUN_STARTED_ = Date.now() - 5.5 * 60e3;
+  ctx.processNotify_({ people: { sophie: { settings: { quiet: { on: false } } } } });
+  ctx.RUN_STARTED_ = 0;
+  ctx.saToken_ = realToken; ctx.prop_ = realProp;
+  assert.equal(sent.length, 0);
+  assert.equal(writes.length, 0, 'not claimed either');
+});

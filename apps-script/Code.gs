@@ -33,6 +33,9 @@ var DAYS_BACK = 14;
 var DAYS_AHEAD = 120;
 var TZ = 'Europe/London';
 var RUN_STARTED_ = 0;   // when this run started (a run is stopped by Google after 6 minutes)
+var OUTBOX_BUDGET_ = 200e3;   // no new change to Google Calendar is started after this long into a run
+var NOTIFY_BUDGET_ = 300e3;   // nor a new notification after this
+function timeUsed_() { return RUN_STARTED_ ? Date.now() - RUN_STARTED_ : 0; }
 var WEEKDAYS_ = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 var MONTHS_ = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -975,7 +978,11 @@ function processOutbox_(me, ctx) {
     return (ta && tb && ta !== tb ? (ta < tb ? -1 : 1) : 0) || ((a.data.created || 0) - (b.data.created || 0)) || ((a.data.seq || 0) - (b.data.seq || 0));
   });
   var stuck = {};
+  var outOfTime = false;
   items.forEach(function (it) {
+    // a long list (an account that hasn't run for a while): leave the rest for the next run, so this one is never
+    // stopped by Google part way, before any of it is marked done, again and again
+    if (outOfTime || timeUsed_() > OUTBOX_BUDGET_) { outOfTime = true; return; }
     var o = it.data;
     var own = !!ctx.appEmail && String(o.byEmail || '').toLowerCase() === ctx.appEmail;
     var result = {};
@@ -1734,7 +1741,10 @@ function processNotify_(ctx) {
   var due = fsQuery_('notify', [['sent', false]]).filter(function (n) { return (n.data.sendAfter || 0) <= now; });
   if (!due.length) return;
   var tokensFor = {};
+  var outOfTime = false;
   due.forEach(function (n) {
+    // the rest wait for the next run (still unsent), rather than this run being stopped part way
+    if (outOfTime || timeUsed_() > NOTIFY_BUDGET_) { outOfTime = true; return; }
     var d = n.data;
     // only ever one of the two of you (its address builds the path to their phones)
     if (!Object.prototype.hasOwnProperty.call(ctx.people, String(d.to))) {
