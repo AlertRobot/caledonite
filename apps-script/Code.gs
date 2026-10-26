@@ -923,20 +923,29 @@ function rrule_(rep) {
   return 'RRULE:FREQ=' + f + ';INTERVAL=' + Math.max(1, Math.min(52, Math.floor(+rep.interval || 1)));
 }
 
-// update or delete: every copy carrying the tag
+// update or delete: every copy carrying the tag. With o.inst (when it first started, as Google writes it in an
+// occurrence's id: 20261030T180000Z, or 20261030 for all day), just that occurrence of something that repeats.
 function changeByTag_(o, rs) {
   if (!o.tag) return { refused: 'no tag' };
+  var inst = /^\d{8}(T\d{6}Z)?$/.test(String(o.inst || '')) ? String(o.inst) : '';
   var owned = ownedCals_(rs);
-  var targets = findByTag_(rs, o.tag).filter(function (t) { return owned[t.calId]; });
+  var targets = findByTag_(rs, o.tag).filter(function (t) { return owned[t.calId] && (!inst || String(t.eventId).indexOf('_') < 0); });
   var n = 0;
   targets.forEach(function (t) {
-    if (o.op === 'delete') { Calendar.Events.remove(t.calId, t.eventId); n++; return; }
-    var changes = o.changes || {};
-    if (o.event && o.event.title && !changes.title) changes = merge_(changes, { title: o.event.title });
-    var patch = patchFor_(changes, t.calId, t.eventId, tzOf_(o));
-    if (Object.keys(patch).length) { Calendar.Events.patch(patch, t.calId, t.eventId); n++; }
+    var id = inst ? t.eventId + '_' + inst : t.eventId;
+    try {
+      if (o.op === 'delete') { Calendar.Events.remove(t.calId, id); n++; return; }
+      var changes = o.changes || {};
+      if (o.event && o.event.title && !changes.title) changes = merge_(changes, { title: o.event.title });
+      var patch = patchFor_(changes, t.calId, id, tzOf_(o));
+      if (Object.keys(patch).length) { Calendar.Events.patch(patch, t.calId, id); n++; }
+    } catch (err) {
+      // that occurrence is already gone (or this copy doesn't repeat): nothing to do
+      if (inst && /not found|404|410|deleted/i.test(String(err && err.message || err))) return;
+      throw err;
+    }
   });
-  if (o.op === 'delete') rs.tagMap[o.tag] = [];
+  if (o.op === 'delete' && !inst) rs.tagMap[o.tag] = [];
   return { changed: n };
 }
 

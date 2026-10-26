@@ -255,3 +255,27 @@ test('an account taken out in the app takes its calendars out and stops syncing'
   assert.equal(writes.length, 0);
   assert.equal(triggersRemoved, false);
 });
+
+test('"Just this one" of something repeating made in the app changes or deletes only that occurrence', () => {
+  const calendar = fakeCalendar([{ id: 'm1', calId: 'primary@x', tag: 'both:wk', summary: 'Date night', start: { dateTime: '2026-11-06T19:00:00+00:00' }, end: { dateTime: '2026-11-06T21:00:00+00:00' } }]);
+  const removed = []; const patched = [];
+  calendar.Events.remove = (calId, id) => { removed.push(id); };
+  calendar.Events.patch = (p, calId, id) => { patched.push(id); };
+  calendar.Events.get = (calId, id) => ({ start: { dateTime: '2026-11-13T19:00:00+00:00' }, end: { dateTime: '2026-11-13T21:00:00+00:00' } });
+  runOutbox([
+    { person: 'ethan', op: 'delete', tag: 'both:wk', inst: '20261120T190000Z', byEmail: 'e@x.com', done: false, created: 1 },
+    { person: 'ethan', op: 'update', tag: 'both:wk', inst: '20261113T190000Z', changes: { start: '20:00' }, byEmail: 'e@x.com', done: false, created: 2 }
+  ], { calendar });
+  assert.deepEqual(removed, ['m1_20261120T190000Z']);
+  assert.deepEqual(patched, ['m1_20261113T190000Z']);
+  // without it, the whole series, as before
+  runOutbox([{ person: 'ethan', op: 'delete', tag: 'both:wk', byEmail: 'e@x.com', done: false, created: 3 }], { calendar });
+  assert.deepEqual(removed, ['m1_20261120T190000Z', 'm1']);
+});
+
+test('an occurrence that has already gone is not an error', () => {
+  const calendar = fakeCalendar([{ id: 'm2', calId: 'primary@x', tag: 'add:gym', summary: 'Gym' }]);
+  calendar.Events.remove = () => { throw new Error('API call to calendar.events.delete failed with error: Resource has been deleted'); };
+  const writes = runOutbox([{ person: 'ethan', op: 'delete', tag: 'add:gym', inst: '20261120', byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+});

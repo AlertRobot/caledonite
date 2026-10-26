@@ -232,7 +232,8 @@ export const actions = {
     const ops = [];
     if (ev.tag) {
       const parties = partiesOf(st, ev);
-      for (const pid of parties) ops.push(outboxOp({ person: pid, op: 'update', tag: ev.tag, changes }));
+      const inst = scope !== 'all' ? occurrenceOf(ev) : null;
+      for (const pid of parties) ops.push(outboxOp({ person: pid, op: 'update', tag: ev.tag, changes, inst }));
       const other = parties.find((p) => p !== st.me);
       if (other) ops.push(notifyOp(other, `${nameOf(st, st.me)} changed something`, `${changes.title || ev.title}`, '#calendar'));
     } else {
@@ -246,7 +247,8 @@ export const actions = {
     const ops = [];
     if (ev.tag) {
       const parties = partiesOf(st, ev);
-      for (const pid of parties) ops.push(outboxOp({ person: pid, op: 'delete', tag: ev.tag }));
+      const inst = scope !== 'all' ? occurrenceOf(ev) : null;
+      for (const pid of parties) ops.push(outboxOp({ person: pid, op: 'delete', tag: ev.tag, inst }));
       const other = parties.find((p) => p !== st.me);
       if (other) ops.push(notifyOp(other, `${nameOf(st, st.me)} removed something`, ev.title, '#calendar'));
       if (ev.tag.startsWith('req:')) ops.push({ type: 'update', path: `requests/${ev.tag.slice(4)}`, data: { status: 'cancelled', answeredAt: now() } });
@@ -427,6 +429,14 @@ export function setupOps(email, { myName, myShifts, partnerName, partnerEmail, p
     { type: 'set', path: `people/${a}`, data: { name: String(myName || '').trim(), email: myEmail, colour: 'blue', joined: true, settings: settingsFor(myShifts) } },
     { type: 'set', path: `people/${b}`, data: { name: String(partnerName || '').trim(), email: emails[1] || '', colour: 'orange', settings: settingsFor(partnerShifts) } }
   ];
+}
+
+// One occurrence of something that repeats: when it first started, as Google writes it at the end of the
+// occurrence's id ("..._20261030T180000Z"). The same in both your copies, so both change just that one.
+export function occurrenceOf(ev) {
+  if (!ev || !ev.rid || !ev.gid) return null;
+  const m = String(ev.gid).match(/_(\d{8}(?:T\d{6}Z)?)$/);
+  return m ? m[1] : null;
 }
 
 // Who has a copy of something made in this app

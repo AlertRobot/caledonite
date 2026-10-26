@@ -287,3 +287,18 @@ test('the page only loads pictures from Caledonite itself, so injected markup or
   assert.match(html, /img-src 'self' data:;/);
   assert.doesNotMatch(html, /script-src[^;]*'unsafe-inline'/);
 });
+
+test('changing or deleting just one occurrence of something repeating sends which one', async () => {
+  load();
+  const seen = [];
+  store.backend = { commit: async (ops) => { seen.push(...ops); }, ping() {} };
+  const ev = { owner: 'ethan', calKey: 'primary', tag: 'both:wk', title: 'Date night', gid: 'abc123_20261113T190000Z', rid: 'abc123', start: new Date(), end: new Date() };
+  await actions.removeEvent({ ev, scope: 'one' });
+  assert.ok(seen.filter((o) => o.path === 'outbox').every((o) => o.data.inst === '20261113T190000Z'));
+  seen.length = 0;
+  await actions.removeEvent({ ev, scope: 'all' });
+  assert.ok(seen.filter((o) => o.path === 'outbox').every((o) => !o.data.inst));
+  seen.length = 0;
+  await actions.editEvent({ ev, changes: { start: '20:00' }, scope: 'one' });
+  assert.ok(seen.filter((o) => o.path === 'outbox').every((o) => o.data.inst === '20261113T190000Z'));
+});
