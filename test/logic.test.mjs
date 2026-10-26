@@ -402,6 +402,25 @@ test('reminders and private countdowns are kept where your partner can’t read 
   assert.ok(store.state.people.ethan.reminders.r9 && store.state.people.ethan.reminders.r1);
 });
 
+test("older reminders and the rota link move only once what's in the private place is known from the server", async () => {
+  const seen = [];
+  store.backend = { commit: async (ops) => { seen.push(...ops); }, ping() {} };
+  const base = {
+    household: {}, private: {}, privateFromServer: false,
+    people: { ethan: { name: 'Ethan', email: 'e@x.com', settings: { rotaUrl: 'https://loop.example/old.ics' }, reminders: { r1: { ref: 'e:ethan:primary:a', times: ['d0'] } } }, sophie: { name: 'Sophie', email: 's@x.com' } },
+    calendars: {}, feeds: [], shifts: {}, requests: {}, notes: {}, outbox: {}, jobs: {}, ideas: {}, status: {}
+  };
+  // offline, with nothing of it saved on this phone: it might already hold a newer link
+  setRaw(base, { phase: 'ready', me: 'ethan', user: { email: 'e@x.com' } });
+  assert.equal(store.state.privateReady, false);
+  await actions.movePrivate();
+  assert.equal(seen.length, 0);
+  setRaw(Object.assign({}, base, { privateFromServer: true }), { phase: 'ready', me: 'ethan', user: { email: 'e@x.com' } });
+  assert.equal(store.state.privateReady, true);
+  await actions.movePrivate();
+  assert.ok(seen.some((o) => o.path === 'people/ethan/private/main'));
+});
+
 test('your rota link is kept where your partner can’t read it, and one on your record moves there', async () => {
   const seen = [];
   store.backend = { commit: async (ops) => { seen.push(...ops); }, ping() {} };

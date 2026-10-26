@@ -84,7 +84,8 @@ export function setRaw(raw, extra = {}) {
     s.me = Object.keys(s.people).find((pid) => (s.people[pid].email || '').toLowerCase() === email) || null;
   }
   // your reminders and private countdowns live where only you can read them (older ones may still be on your record)
-  s.privateReady = raw.private !== undefined;
+  // known from the server (not only this phone's saved copy, which may be missing or out of date)
+  s.privateReady = raw.private !== undefined && raw.privateFromServer !== false;
   if (s.me && s.people[s.me] && raw.private) {
     const p = s.people[s.me];
     s.people[s.me] = Object.assign({}, p, {

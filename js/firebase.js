@@ -112,8 +112,10 @@ export async function createFirebaseBackend() {
     }, (err) => console.warn('tokens', err));
     unsubs.push(() => { if (tokenUnsub) tokenUnsub(); tokenUnsub = null; });
     // what's just for you (reminders, private countdowns): only you can read it
-    const privUnsub = fs.onSnapshot(ref(`people/${me}/private/main`), (snap) => {
+    // (whether it's what the server has, or only what this phone saved: moving older things in waits for the server)
+    const privUnsub = fs.onSnapshot(ref(`people/${me}/private/main`), { includeMetadataChanges: true }, (snap) => {
       raw.private = snap.exists() ? snap.data() : {};
+      raw.privateFromServer = !snap.metadata.fromCache;
       publish();
     }, (err) => console.warn('private', err));
     unsubs.push(privUnsub);
