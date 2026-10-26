@@ -472,3 +472,18 @@ test("the rules: once sent, a request's name, note, holiday days and pencilling-
   }
   for (const k of written) assert.ok(!fixed.includes(k), k);
 });
+
+test('a holiday over several days, not in the calendars yet, shows on every one of its days', () => {
+  const day2 = dayKey(addDays(new Date(sat + 'T12:00'), 2));
+  const day1 = dayKey(addDays(new Date(sat + 'T12:00'), 1));
+  const st = load({
+    requests: { lv: { from: 'ethan', to: 'sophie', type: 'leave', title: 'Lisbon', people: ['ethan', 'sophie'], status: 'yes', when: { day: sat, endDay: day2, allDay: true }, created: Date.now() } },
+    outbox: { o1: { person: 'ethan', op: 'create', tag: 'add:camp', byEmail: 'e@x.com', done: false, event: { title: 'Camping', day: sat, endDay: day2, allDay: true } } }
+  });
+  for (const k of [sat, day1, day2]) {
+    const titles = L.dayList(st, k).map((it) => it.title);
+    assert.ok(titles.includes('Holiday: Lisbon'), k);
+    assert.ok(titles.includes('Camping'), k);
+  }
+  assert.ok(!L.dayList(st, dayKey(addDays(new Date(sat + 'T12:00'), 3))).some((it) => it.pending));
+});

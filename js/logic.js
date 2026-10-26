@@ -398,7 +398,7 @@ export function buildDay(state, key, now = new Date()) {
   }
   // requests not in the calendars yet
   for (const r of state.requests) {
-    if (!r.when || !r.when.day || r.when.day !== key) continue;
+    if (!r.when || !r.when.day || !onDayOf(r.when, key)) continue;
     const tag = `req:${r.id}`;
     if (seenTags.has(tag)) continue;
     const start = r.when.allDay ? new Date(dayStart) : atTime(key, r.when.start || '19:00');
@@ -423,7 +423,7 @@ export function buildDay(state, key, now = new Date()) {
   // things just added in this app, not synced yet (only your own: your partner's may be private)
   const myEmail = ((state.people[state.me] || {}).email || '').toLowerCase();
   for (const o of state.outbox) {
-    if (o.op !== 'create' || o.done || !o.event || o.event.day !== key) continue;
+    if (o.op !== 'create' || o.done || !o.event || !o.event.day || !onDayOf(o.event, key)) continue;
     if (o.byEmail && String(o.byEmail).toLowerCase() !== myEmail) continue;
     if (!o.tag || seenTags.has(o.tag) || o.tag.startsWith('req:')) continue;
     if (together.some((t) => t.tag === o.tag)) continue;
@@ -469,6 +469,11 @@ export function buildDay(state, key, now = new Date()) {
   cache.set(ck, out);
   if (cache.size > 400) cache.delete(cache.keys().next().value);
   return out;
+}
+// a day something not yet in the calendars covers (all-day things can run over several days)
+function onDayOf(w, key) {
+  if (!w.allDay || !w.endDay || w.endDay <= w.day) return w.day === key;
+  return w.day <= key && key <= w.endDay;
 }
 // a request that's just for one of you (a holiday booked for yourself)
 function justOne(r) { return !!r.own || (Array.isArray(r.people) && r.people.length === 1); }
