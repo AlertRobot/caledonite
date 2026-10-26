@@ -112,9 +112,13 @@ const H = {
     ui.ask.custom = true; ui.ask.cday = el.dataset.day; ui.ask.cstart = el.dataset.start || '19:00'; ui.ask.cend = plusMins(ui.ask.cstart, 120);
     const slots = freeSlots(store.state, new Date(), 4);
     const i = slots.findIndex((s) => s.key === el.dataset.day && s.start === ui.ask.cstart);
-    if (i >= 0) { ui.ask.custom = false; ui.ask.slot = i; }
+    if (i >= 0) { ui.ask.custom = false; ui.ask.slot = i; ui.ask.pick = slots[i]; }
   },
-  calGo: (el) => { const d = fromDayKey(el.dataset.day); ui.calView = 'month'; ui.calSel = el.dataset.day; ui.calMonth = new Date(d.getFullYear(), d.getMonth(), 1); },
+  calGo: (el) => {
+    const d = fromDayKey(el.dataset.day);
+    if (el.dataset.v === 'week') { ui.calView = 'week'; ui.weekStart = mondayOf(d); ui.weekOpen = el.dataset.day; return; }
+    ui.calView = 'month'; ui.calSel = el.dataset.day; ui.calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+  },
   calView: (el) => { ui.calView = el.dataset.v; render(); },
   layerToggle: (el) => { ui.layerOff[el.dataset.k] = !ui.layerOff[el.dataset.k]; render(); },
   monthPrev: () => { ui.calMonth = new Date(ui.calMonth.getFullYear(), ui.calMonth.getMonth() - 1, 1); render(); },
@@ -249,7 +253,7 @@ const H = {
     if (nf) {
       const slots = freeSlots(store.state, new Date(), 4);
       const i = slots.findIndex((x) => x.key === nf.key);
-      if (i >= 0) ui.ask.slot = i;
+      if (i >= 0) { ui.ask.slot = i; ui.ask.pick = slots[i]; }
     }
     if (idea) run(actions.updateIdea(idea.id, { used: (idea.used || 0) + 1, lastUsed: Date.now() }));
   },
@@ -329,14 +333,14 @@ const H = {
   suggestOpen: (el) => { ui.suggestFor = el.dataset.id; render(); },
   suggestCancel: () => { ui.suggestFor = null; render(); },
   suggest: (el) => {
-    const s = freeSlots(store.state, new Date(), 4)[Number(el.dataset.i)];
+    const s = ui.suggestSlots[Number(el.dataset.i)];
     ui.suggestFor = null;
     if (s) run(actions.answerRequest(el.dataset.id, 'other', { when: { day: s.key, start: s.start, end: s.end, allDay: false, label: s.label } }), 'Suggestion sent.');
   },
   askType: (el) => { ui.ask.type = el.dataset.v; render(); },
   askFav: (el) => { ui.ask.title = el.dataset.v; render(); },
-  askSlot: (el) => { ui.ask.slot = Number(el.dataset.i); ui.ask.custom = false; render(); },
-  askCustom: () => { ui.ask.custom = true; if (!ui.ask.cday) ui.ask.cday = dayKey(addDays(new Date(), 1)); render(); },
+  askSlot: (el) => { ui.ask.slot = Number(el.dataset.i); ui.ask.pick = (ui.ask.shown || [])[ui.ask.slot] || null; ui.ask.custom = false; render(); },
+  askCustom: () => { ui.ask.custom = true; ui.ask.pick = null; if (!ui.ask.cday) ui.ask.cday = dayKey(addDays(new Date(), 1)); render(); },
   askHold: () => { const def = store.state.household.pencilDefault !== false; ui.ask.hold = !(ui.ask.hold === null ? def : ui.ask.hold); render(); },
   askSend: async () => {
     const a = ui.ask;

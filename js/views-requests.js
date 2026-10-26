@@ -42,6 +42,7 @@ function reqCard(state, r) {
       const maybeNote = r.status === 'maybe' ? '<p class="small muted">You said you’re not sure yet.</p>' : '';
       if (ui.suggestFor === r.id) {
         const slots = freeSlots(state, new Date(), 4);
+        ui.suggestSlots = slots; // what a tap on one of these means, even if the list changes later
         body = `<div class="stack-s"><span class="b small">Suggest a time you're both free:</span>
           ${slots.map((s, i) => `<button type="button" class="slot" data-act="suggest" data-id="${id}" data-i="${i}">${esc(s.label)}</button>`).join('') || '<p class="muted small">No shared free time in the next three weeks.</p>'}
           <button type="button" class="btn link-btn self-start" data-act="suggestCancel">Cancel</button></div>`;
@@ -122,6 +123,13 @@ export function viewAsk(state) {
       </section>`;
   }
   const slots = freeSlots(state, new Date(), 4);
+  // keep the time that was tapped, even when the free times move on (a slot ends, or a new one appears)
+  if (!a.custom && a.pick) {
+    const i = slots.findIndex((x) => x.key === a.pick.key && x.start === a.pick.start && x.end === a.pick.end);
+    if (i >= 0) a.slot = i;
+    else Object.assign(a, { custom: true, cday: a.pick.key, cstart: a.pick.start, cend: a.pick.end, pick: null });
+  }
+  a.shown = slots;
   const holdDefault = state.household.pencilDefault !== false;
   const hold = a.hold === null ? holdDefault : a.hold;
   const favours = state.household.favours || [];
@@ -182,9 +190,9 @@ export function askWhen(state) {
   const a = ui.ask;
   if (a.type === 'heads') return null;
   if (a.type === 'leave') return leaveWhen();
-  const slots = freeSlots(state, new Date(), 4);
-  if (!a.custom && slots[a.slot]) {
-    const s = slots[a.slot];
+  const slots = a.shown || freeSlots(state, new Date(), 4);
+  const s = a.custom ? null : (a.pick || slots[a.slot]);
+  if (s) {
     return { day: s.key, start: s.start, end: s.end, allDay: false, label: s.label };
   }
   const day = a.cday || dayKey(addDays(new Date(), 1));

@@ -121,7 +121,7 @@ export function viewToday(state) {
     out.push(`<section class="stack-s"><div class="row between"><h2 class="label">Jobs</h2><a href="#jobs" class="b small">All jobs</a></div>
       <div class="card flush">${jobs.map((j) => jobRow(state, j, key, true)).join('')}</div></section>`);
   }
-  out.push(`<a href="#calendar" class="small-link center-link" data-act="calGo" data-day="${dayKey(addDays(now, 1))}">See the rest of the week ${icon.next(16)}</a>`);
+  out.push(`<a href="#calendar" class="small-link center-link" data-act="calGo" data-v="week" data-day="${dayKey(addDays(now, 1))}">See the rest of the week ${icon.next(16)}</a>`);
   return out.join('');
 }
 // "2 more from low-priority calendars", opening that day in the month

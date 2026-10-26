@@ -14,7 +14,8 @@ export const ui = {
   layerOff: {},
   reqTab: 'for',
   suggestFor: null,
-  ask: { type: 'plan', title: '', slot: 0, custom: false, cday: '', cstart: '19:00', cend: '21:00', hold: null, sent: false, lfrom: '', lto: '' },
+  suggestSlots: [],
+  ask: { type: 'plan', title: '', slot: 0, custom: false, cday: '', cstart: '19:00', cend: '21:00', hold: null, sent: false, lfrom: '', lto: '', pick: null, shown: null },
   add: { kind: 'event', who: 'me', title: '', day: 'today', date: '', start: '', end: '', allDay: false, cal: '', busyOnly: false, shiftType: 'long', shiftWho: null, done: '', remind: [], note: '', repeat: '', jobWho: 'me', jobRepeat: '', lfrom: '', lto: '', more: false },
   ev: { ref: null, day: null, back: '#today', noteDraft: null, editing: false, confirmDelete: false, scope: 'one', draft: null },
   jar: { pick: null, adding: false, draft: { title: '', cost: '', where: 'out' }, filter: 'all' },
@@ -25,7 +26,7 @@ export const ui = {
 };
 
 export function resetAsk() {
-  ui.ask = { type: 'plan', title: '', slot: 0, custom: false, cday: '', cstart: '19:00', cend: '21:00', hold: null, sent: false, lfrom: '', lto: '' };
+  ui.ask = { type: 'plan', title: '', slot: 0, custom: false, cday: '', cstart: '19:00', cend: '21:00', hold: null, sent: false, lfrom: '', lto: '', pick: null, shown: null };
 }
 export function resetAdd() {
   const keep = { kind: ui.add.kind, who: ui.add.who };
