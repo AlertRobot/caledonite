@@ -644,6 +644,7 @@ async function boot() {
     try {
       const { createFirebaseBackend } = await import('./firebase.js');
       store.backend = await createFirebaseBackend();
+      store.backend.onLateError = (e) => { console.error(e); toast('A change you made didn’t save, so it has been undone. Try it again.'); };
     } catch (e) {
       console.error(e);
       ui.signInError = 'Couldn’t reach Caledonite’s server. Check your connection and reload.';

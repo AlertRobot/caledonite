@@ -146,8 +146,11 @@ export async function createFirebaseBackend() {
         else if (o.type === 'unset') b.update(ref(o.path), { [o.field]: fs.deleteField() });
       }
       const p = b.commit();
-      // offline the server never answers; the change is already saved on the phone
-      return Promise.race([p, new Promise((res) => setTimeout(res, 1200))]);
+      // offline the server never answers; the change is already saved on the phone.
+      // If the server turns it down later (when back online), the phone undoes it: say so.
+      let waited = false;
+      p.catch((e) => { if (waited && backend.onLateError) backend.onLateError(e); });
+      return Promise.race([p, new Promise((res) => setTimeout(() => { waited = true; res(); }, 1200))]);
     },
     async unset(path, field) { await fs.updateDoc(ref(path), { [field]: fs.deleteField() }); },
     async ping(force) {
