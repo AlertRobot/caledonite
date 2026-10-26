@@ -75,6 +75,24 @@ function backupNow() {
   return name;
 }
 
+// An account that has been removed in the app: what it wrote goes, and it stops running every 10 minutes
+function forgetThisAccount_(email) {
+  var props = PropertiesService.getUserProperties();
+  var all = props.getProperties();
+  var writes = [];
+  Object.keys(all).forEach(function (k) {
+    if (k.indexOf('h_') !== 0) return;
+    var old = {};
+    try { old = JSON.parse(all[k] || '{}'); } catch (e) { old = {}; }
+    Object.keys(old).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
+  });
+  fsQuery_('calendars', [['account', email]]).forEach(function (d) { writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + d.id) }); });
+  writes.push({ 'delete': docName_(HOUSEHOLD + '/status/' + email.replace(/[^a-z0-9]+/g, '_')) });
+  fsCommit_(writes);
+  props.deleteAllProperties();
+  removeTriggers_();
+}
+
 function installTrigger_() {
   removeTriggers_();
   ScriptApp.newTrigger('syncAll').timeBased().everyMinutes(10).create();
@@ -181,7 +199,11 @@ function syncAll() {
   var errors = [];
   var n = 0;
   try {
-    me = whoAmI_();
+    try { me = whoAmI_(); } catch (err) {
+      // taken out of Caledonite (Settings, Account): take its calendars out too, and stop
+      if (err && err.notMember) forgetThisAccount_(err.email);
+      throw err;
+    }
     var ctx = loadCtx_(me);
     var stage = function (name, fn) {
       try { return fn(); } catch (err) {
@@ -239,7 +261,11 @@ function whoAmI_() {
   (hh.linked || []).forEach(function (x) { if (String(x.email || '').toLowerCase() === email && x.person) claims.push(x.person); });
   found = one(claims, false);
   if (found) return found;
-  throw new Error(email + ' is not part of Caledonite. Add it in Caledonite: Settings, Account, then connect it again.');
+  var e = new Error(email + ' is not part of Caledonite. Add it in Caledonite: Settings, Account, then connect it again.');
+  // only when the household could be read: a passing problem must never look like being taken out
+  e.notMember = people.length > 0;
+  e.email = email;
+  throw e;
 }
 
 function loadCtx_(me) {

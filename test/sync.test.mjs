@@ -231,3 +231,27 @@ test("a calendar that's gone from Google leaves Settings after a couple of days"
   } }, []);
   assert.deepEqual(writes.map((w) => w.delete), ['households/main/calendars/ethan__gone']);
 });
+
+test('an account taken out in the app takes its calendars out and stops syncing', () => {
+  const people = [{ id: 'ethan', data: { email: 'e@x.com', linked: [] } }];
+  ctx.fsList_ = () => people;
+  ctx.fsGet_ = () => ({});
+  ctx.Session = { getEffectiveUser: () => ({ getEmail: () => 'Work@X.com' }) };
+  const store = { h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h', 'households/main/sharedFeeds/ethan__abc__2026-11': 'h' }), rem_fired: '{}' };
+  ctx.PropertiesService = { getUserProperties: () => ({ getProperties: () => Object.assign({}, store), deleteAllProperties: () => { for (const k of Object.keys(store)) delete store[k]; } }) };
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  const writes = []; let triggersRemoved = false;
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.fsQuery_ = (coll, eq) => (coll === 'calendars' && eq[0][1] === 'work@x.com' ? [{ id: 'ethan__abc', data: {} }] : []);
+  ctx.docName_ = (p) => p;
+  ctx.ScriptApp = { getProjectTriggers: () => [{ getHandlerFunction: () => 'syncAll' }], deleteTrigger: () => { triggersRemoved = true; } };
+  assert.throws(() => ctx.syncAll(), /not part of Caledonite/);
+  assert.deepEqual(writes.map((w) => w.delete).sort(), ['households/main/calendars/ethan__abc', 'households/main/privateFeeds/ethan__abc__2026-11', 'households/main/sharedFeeds/ethan__abc__2026-11', 'households/main/status/work_x_com']);
+  assert.ok(triggersRemoved);
+  assert.deepEqual(Object.keys(store), []);
+  // a household that can't be read at all is never taken as being taken out
+  people.length = 0; writes.length = 0; triggersRemoved = false;
+  assert.throws(() => ctx.syncAll(), /not part of Caledonite/);
+  assert.equal(writes.length, 0);
+  assert.equal(triggersRemoved, false);
+});

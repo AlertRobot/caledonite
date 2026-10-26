@@ -480,7 +480,7 @@ const H = {
   unlinkAcc: (el) => {
     const st = store.state;
     const linked = ((st.people[st.me] && st.people[st.me].linked) || []).filter((x) => x !== el.dataset.v);
-    run(actions.setLinkedAccounts(linked));
+    run(actions.setLinkedAccounts(linked), 'Removed. Its calendars leave Caledonite within 10 minutes.');
   },
   syncNow: async () => { const ok = await actions.syncNow(); toast(ok ? 'Syncing now.' : 'The sync script isn’t set up yet.'); },
   signOut: () => { if (store.state.demo) location.href = './'; else actions.signOut(); },
