@@ -307,8 +307,9 @@ function syncAll(opts) {
     if (cal) { n = cal.count; seen = cal.seen; }
     if (me.main) stage('rota link', function () { var url = rotaUrlOf_(me, ctx); if (url) syncRotaLink_(me, ctx, url); else dropRotaLink_(me); });
     var changed = stage('outbox', function () { return processOutbox_(me, ctx); });
-    if (changed) {
-      // let the feeds catch up straight away
+    // let the feeds catch up straight away, unless reading every calendar again could run into Google stopping this
+    // run (and the reminders and notifications after it): the next run catches up
+    if (changed && timeUsed_() < 150e3) {
       var again = stage('calendars after changes', function () { ctx.calDocs = loadCalDocs_(me); return syncCalendars_(me, ctx, errors); });
       if (again) { n = again.count; seen = again.seen; }
     }

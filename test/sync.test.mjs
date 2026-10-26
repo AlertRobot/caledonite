@@ -1348,3 +1348,26 @@ test('a request answered or called off just as the nudge goes out is not nudged'
   assert.equal(commits[0][0].update.fields.body.stringValue, 'Walk');
   assert.equal(commits[0][1].currentDocument.updateTime, 'T2');
 });
+
+test('after slow changes, the calendars are not all read again when the run is short of time', () => {
+  const c2 = vm.createContext({ Utilities, Logger: { log() {} } });
+  vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8'), c2);
+  const cache = {};
+  c2.CacheService = { getScriptCache: () => ({ get: (k) => cache[k] || null, put: (k, v) => { cache[k] = v; }, remove: (k) => { delete cache[k]; } }) };
+  c2.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  c2.Session = { getEffectiveUser: () => ({ getEmail: () => 'e@x.com' }) };
+  const { api } = fakeProps({ me_person: 'ethan' });
+  c2.PropertiesService = { getUserProperties: () => api };
+  c2.whoAmI_ = () => ({ email: 'e@x.com', person: 'ethan', main: false, people: [] });
+  c2.loadCtx_ = () => ({ calDocs: {} });
+  c2.loadCalDocs_ = () => ({});
+  let reads = 0, slow = 0;
+  c2.syncCalendars_ = () => { reads++; return { count: 1, seen: [] }; };
+  c2.processOutbox_ = () => { c2.RUN_STARTED_ -= slow; return true; };
+  for (const n of ['fireReminders_', 'processNotify_', 'writeStatus_']) c2[n] = () => {};
+  c2.syncAll();
+  assert.equal(reads, 2, 'caught up straight away');
+  reads = 0; slow = 200e3;
+  c2.syncAll();
+  assert.equal(reads, 1, 'left for the next run');
+});
