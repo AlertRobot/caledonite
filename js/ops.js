@@ -1,10 +1,12 @@
 // What answering a request changes. Shared by the app and the service worker (answer buttons on
 // notifications), so both do exactly the same thing. Plain script: no imports or exports.
 (function (root) {
+  // an hour later, but never past midnight (23:30 gives 23:59, not 23:30)
   function plusHour(hm) {
     var p = String(hm || '19:00').split(':').map(Number);
-    var h = Math.min(23, p[0] + 1);
-    return (h < 10 ? '0' : '') + h + ':' + (p[1] < 10 ? '0' : '') + p[1];
+    var t = Math.min(23 * 60 + 59, (p[0] || 0) * 60 + (p[1] || 0) + 60);
+    var h = Math.floor(t / 60), m = t % 60;
+    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
   }
   function evFromWhen(title, w, defaultStart) {
     var start = w.allDay ? null : (w.start || defaultStart || '19:00');
