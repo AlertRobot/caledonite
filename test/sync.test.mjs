@@ -849,3 +849,17 @@ test('when Google Calendar can only be read the slow way and time is running out
   ctx.RUN_STARTED_ = 0;
   ctx.Calendar = realCal;
 });
+
+test('your own copies follow a corrected email (set before you joined), not just changed events', () => {
+  withDigest();
+  const s = ctx.localTime_('2026-11-10', '09:00');
+  const evs = [{ id: 'a', t: 'A', s, e: s + 3600e3 }];
+  const { api } = fakeProps();
+  const me = { person: 'sophie', email: 's@x.com' };
+  const first = ctx.feedWrites_(me, { appEmail: 'sophy@x.com' }, 'k', { share: 'all' }, evs, api);
+  api.setProperty(first.key, first.value);
+  const again = ctx.feedWrites_(me, { appEmail: 's@x.com' }, 'k', { share: 'all' }, evs, api);
+  const priv = again.writes.find((w) => w.update && w.update.name.includes('/privateFeeds/'));
+  assert.ok(priv, 'written again');
+  assert.equal(priv.update.fields.ownerEmail.stringValue, 's@x.com');
+});

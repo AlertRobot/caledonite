@@ -637,7 +637,8 @@ function feedWrites_(me, ctx, calKey, doc, events, props, known) {
     if (shared) put_(HOUSEHOLD + '/sharedFeeds/' + me.person + '__' + calKey + '__' + mk, base, shared);
   });
   function put_(path, base, evs) {
-    var h = hash_(JSON.stringify(evs));
+    // whose it is too (an email corrected before joining, or another of your accounts taking over)
+    var h = hash_(JSON.stringify([base, evs]));
     next[path] = h;
     if (old[path] !== h) writes.push(upd_(path, merge_(base, { events: evs, updated: Date.now() })));
   }
