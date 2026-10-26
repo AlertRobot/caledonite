@@ -89,6 +89,10 @@ function leaveDaysLine(state, r) {
 function resultLine(state, r, mine) {
   const on = nameOf(state, mine ? r.to : r.from);
   const who = mine ? on : 'You';
+  // a holiday booked just for one of you: no one said yes, and it's in one calendar
+  if (r.status === 'yes' && (r.own || (r.people && r.people.length === 1))) {
+    return `<p class="ok-box">${mine ? 'Booked. It’s in your calendar.' : `${esc(on)} booked it. It’s in ${esc(on)}’s calendar.`}</p>`;
+  }
   if (r.status === 'yes') {
     const where = r.type === 'favour' ? (mine ? `${on} will do it.` : 'Done. It’s in your calendar as a reminder.') : r.when ? 'It’s in both your calendars.' : '';
     return `<p class="ok-box">${esc(who)} said yes. ${esc(where)}</p>`;

@@ -268,3 +268,17 @@ test('odd values in your partner’s record or the ideas jar can’t break your 
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
+
+test("your partner's holiday just for themselves doesn't say you said yes, or that it's in both calendars", async () => {
+  const page = await open('ethan', '#requests');
+  await mods(page, (store) => {
+    const d = new Date(); d.setDate(d.getDate() + 20);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return store.store.backend.commit([{ type: 'set', path: 'requests/r_solo', data: { from: 'sophie', to: 'ethan', type: 'leave', title: 'Lisbon', own: true, people: ['sophie'], status: 'yes', hold: false, days: { sophie: 1 }, when: { day, endDay: day, allDay: true, label: '' }, note: '', created: Date.now(), answeredAt: Date.now() } }]);
+  });
+  await page.waitForTimeout(150);
+  const text = await page.locator('article', { hasText: 'Lisbon' }).textContent();
+  assert.doesNotMatch(text, /You said yes|both your calendars/);
+  assert.match(text, /Sophie booked it/);
+  await page.context().close();
+});

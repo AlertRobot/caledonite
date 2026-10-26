@@ -385,7 +385,7 @@ export function buildDay(state, key, now = new Date()) {
     const title = (ev.title || '').replace(/^pencilled in:\s*/i, '');
     const req = state.requests.find((r) => `req:${r.id}` === tag);
     if (req && (req.status === 'no' || req.status === 'cancelled')) continue;
-    const both = owners.size > 1 || (req && req.type !== 'favour' && req.type !== 'add') || tag.startsWith('both:');
+    const both = owners.size > 1 || (req && req.type !== 'favour' && req.type !== 'add' && !justOne(req)) || tag.startsWith('both:');
     const who = both ? 'both' : ev.owner;
     const mine = evs.find((e) => e.owner === state.me) || ev;
     const it = {
@@ -411,8 +411,12 @@ export function buildDay(state, key, now = new Date()) {
         if (persons[doer]) addOwn(persons[doer], { kind: 'event', who: doer, title: r.title, start, end, allDay: r.when.allDay, sub: `${nameOf(state, r.from)} asked`, pending: true });
       } else if (r.type === 'add') {
         if (persons[r.to]) addOwn(persons[r.to], { kind: 'event', who: r.to, title: r.title, start, end, allDay: r.when.allDay, sub: `Added by ${nameOf(state, r.from)}`, pending: true });
+      } else if (justOne(r)) {
+        // a holiday booked just for yourself
+        const who = r.people[0] || r.from;
+        if (persons[who]) addOwn(persons[who], { kind: 'event', who, title: reqTitle(r), start, end, allDay: r.when.allDay, sub: 'Saving to the calendar', pending: true, reqId: r.id });
       } else {
-        together.push({ kind: 'together', who: 'both', title: r.type === 'free' ? `Kept free: ${r.title}` : r.title, start, end, allDay: r.when.allDay, sub: 'Saving to your calendars', pending: true, reqId: r.id });
+        together.push({ kind: 'together', who: 'both', title: reqTitle(r), start, end, allDay: r.when.allDay, sub: 'Saving to your calendars', pending: true, reqId: r.id });
       }
     }
   }
@@ -465,6 +469,13 @@ export function buildDay(state, key, now = new Date()) {
   cache.set(ck, out);
   if (cache.size > 400) cache.delete(cache.keys().next().value);
   return out;
+}
+// a request that's just for one of you (a holiday booked for yourself)
+function justOne(r) { return !!r.own || (Array.isArray(r.people) && r.people.length === 1); }
+function reqTitle(r) {
+  if (r.type === 'free') return `Kept free: ${r.title}`;
+  if (r.type === 'leave') return r.title ? `Holiday: ${r.title}` : 'Holiday';
+  return r.title;
 }
 // one person's own thing: on their list, and (when it has a time) it makes them busy
 function addOwn(p, it) {

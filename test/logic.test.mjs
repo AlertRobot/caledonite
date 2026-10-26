@@ -355,3 +355,18 @@ test('opening the second day of something repeating that runs overnight changes 
   assert.equal(findEvent(st, ref, sat2).ev.id, 'late2');
   assert.equal(findEvent(st, ref, sat).ev.id, 'late1');
 });
+
+test('a holiday one of you booked just for themselves is theirs on the calendar, not something together', () => {
+  const lv = { from: 'sophie', to: 'ethan', type: 'leave', title: '', own: true, people: ['sophie'], status: 'yes', when: { day: sat, endDay: sat, allDay: true }, created: Date.now() };
+  // not in the calendars yet
+  let st = load({ requests: { lv } });
+  let it = L.dayList(st, sat).find((x) => x.pending);
+  assert.equal(it.who, 'sophie');
+  assert.equal(it.title, 'Holiday');
+  assert.ok(!L.buildDay(st, sat).together.some((x) => !x.auto));
+  // and once it's in Sophie's calendar
+  st = load({ requests: { lv }, events: [{ owner: 'sophie', calKey: 'primary', id: 'h1', t: 'Holiday', ad: 1, sd: sat, ed: dayKey(addDays(new Date(sat + 'T12:00'), 1)), tag: 'req:lv' }] });
+  it = L.dayList(st, sat).find((x) => x.tag === 'req:lv');
+  assert.equal(it.who, 'sophie');
+  assert.equal(it.kind, 'event');
+});
