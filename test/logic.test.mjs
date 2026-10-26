@@ -280,3 +280,10 @@ test("the rules: a request's asker, who it's for and whether it's just for one o
   const generic = rules.slice(rules.indexOf('match /{coll}/{id}'));
   assert.doesNotMatch(generic, /'requests'/);
 });
+
+test('the page only loads pictures from Caledonite itself, so injected markup or styles have nowhere to send things', async () => {
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /img-src 'self' data:;/);
+  assert.doesNotMatch(html, /script-src[^;]*'unsafe-inline'/);
+});
