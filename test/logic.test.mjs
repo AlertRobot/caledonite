@@ -270,16 +270,83 @@ test('signing out takes this phone off your notifications first', async () => {
   assert.match(so, /removeItem\('caledonite\.push'\)/);
 });
 
-test("the rules: a request's asker, who it's for and whether it's just for one of you can't be changed or forged", async () => {
-  const { readFileSync } = await import('node:fs');
-  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
-  const rq = rules.slice(rules.indexOf('match /requests/{id}'), rules.indexOf('match /outbox/{id}'));
-  assert.match(rq, /allow create: if member\(\) && personEmail\(request\.resource\.data\.from\) == myEmail\(\);/);
-  assert.match(rq, /allow update: if member\(\) && !changed\(\)\.hasAny\(\['from', 'to', 'type', 'own', 'people'[^\]]*\]\)/);
-  assert.match(rq, /allow delete: if false;/);
-  // and the catch-all for shared lists no longer lets requests through
-  const generic = rules.slice(rules.indexOf('match /{coll}/{id}'));
-  assert.doesNotMatch(generic, /'requests'/);
+// The rules, run by a small stand-in for Firestore's rules engine (there's no emulator here)
+const { loadRules } = await import('./rules-eval.mjs');
+const RULES = loadRules((await import('node:fs')).readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8'));
+const HH = 'households/main';
+const EM = { ethan: 'ethan@gmail.com', sophie: 'sophie@gmail.com' };
+function rulesDb(extra = {}) {
+  return Object.assign({
+    [HH]: { emails: [EM.ethan, EM.sophie], emailsLocked: true, pingSecret: 's' },
+    [`${HH}/people/ethan`]: { email: EM.ethan, name: 'Ethan', joined: true, settings: {} },
+    [`${HH}/people/sophie`]: { email: EM.sophie, name: 'Sophie', joined: true, settings: {} }
+  }, extra);
+}
+// Firestore's merge (set with merge: maps merge, everything else is replaced)
+function merged(a, b) {
+  const out = Object.assign({}, a);
+  for (const [key, v] of Object.entries(b)) out[key] = v && typeof v === 'object' && !Array.isArray(v) && a[key] && typeof a[key] === 'object' && !Array.isArray(a[key]) ? merged(a[key], v) : v;
+  return out;
+}
+// can `who` save this change (merged into what's there) to requests/{id}?
+function canPatch(who, id, doc, patch) {
+  const db = rulesDb({ [`${HH}/requests/${id}`]: doc });
+  return RULES.allowed({ method: 'update', path: `${HH}/requests/${id}`, email: EM[who], db, data: merged(doc, patch) });
+}
+const ask = (extra = {}) => Object.assign({ from: 'ethan', to: 'sophie', type: 'plan', title: 'Cinema', note: '', hold: false, status: 'waiting', created: 1, when: { day: '2026-11-07', start: '19:00', end: '21:00', allDay: false, label: '' } }, extra);
+const answer = (req, a, me, when) => Ops.buildAnswer({ req, id: 'r1', answer: a, me, byEmail: EM[me], names: { ethan: 'Ethan', sophie: 'Sophie' }, when, now: 5 }).patch;
+
+test("the rules: a request's asker, who it's for and whether it's just for one of you can't be changed or forged", () => {
+  const create = (who, data) => RULES.allowed({ method: 'create', path: `${HH}/requests/n1`, email: EM[who], db: rulesDb(), data });
+  assert.equal(create('ethan', ask()), true);
+  assert.equal(create('sophie', ask()), false, 'not in your partner\'s name');
+  for (const f of [{ from: 'sophie' }, { to: 'ethan' }, { type: 'favour' }, { own: true }, { people: ['ethan'] }, { title: 'x' }, { hold: true }]) {
+    assert.equal(canPatch('sophie', 'r1', ask(), f), false, JSON.stringify(f));
+    assert.equal(canPatch('ethan', 'r1', ask(), f), false, JSON.stringify(f));
+  }
+  assert.equal(RULES.allowed({ method: 'delete', path: `${HH}/requests/r1`, email: EM.ethan, db: rulesDb({ [`${HH}/requests/r1`]: ask() }) }), false);
+  // and the catch-all for shared lists doesn't let requests through
+  assert.equal(RULES.allowed({ method: 'update', path: `${HH}/requests/r1`, email: EM.ethan, db: rulesDb({ [`${HH}/requests/r1`]: ask() }), data: ask({ from: 'sophie' }) }), false);
+});
+
+test("the rules: only the one it's for answers a request, and a holiday booked just for one of you is theirs alone", () => {
+  // every answer the app (and a notification's buttons) saves still goes through
+  for (const a of ['yes', 'no', 'maybe', 'other']) {
+    const when = a === 'other' ? { day: '2026-11-08', start: '18:00', end: '20:00', allDay: false, label: 'Sunday' } : undefined;
+    assert.equal(canPatch('sophie', 'r1', ask(), answer(ask(), a, 'sophie', when)), true, a);
+    // but never by the one who asked
+    assert.equal(canPatch('ethan', 'r1', ask(), answer(ask(), a, 'ethan', when)), false, `${a} by the asker`);
+  }
+  const heads = ask({ type: 'heads', when: null, status: 'sent' });
+  assert.equal(canPatch('sophie', 'r1', heads, answer(heads, 'seen', 'sophie')), true);
+  assert.equal(canPatch('ethan', 'r1', heads, answer(heads, 'seen', 'ethan')), false);
+  // the asker can remind, cancel, and say yes to the other time that was suggested (and only that time)
+  assert.equal(canPatch('ethan', 'r1', ask(), answer(ask(), 'remind', 'ethan')), true);
+  assert.equal(canPatch('ethan', 'r1', ask(), answer(ask(), 'cancel', 'ethan')), true);
+  const other = ask({ status: 'other', counter: { day: '2026-11-08', start: '18:00', end: '20:00', allDay: false, label: 'Sunday' } });
+  const accept = answer(other, 'accept-counter', 'ethan');
+  assert.equal(canPatch('ethan', 'r1', other, accept), true);
+  assert.equal(canPatch('sophie', 'r1', other, accept), false, 'the one who suggested it can\'t agree to it for them');
+  assert.equal(canPatch('ethan', 'r1', other, Object.assign({}, accept, { when: { day: '2026-12-25', start: '10:00', end: '11:00', allDay: false, label: '' } })), false, 'only the time suggested');
+  // the time of something can't be changed otherwise, by either of you
+  for (const who of ['ethan', 'sophie']) assert.equal(canPatch(who, 'r1', ask({ status: 'yes' }), { when: { day: '2027-01-01', allDay: true } }), false, who);
+  // either of you can call off something between you (deleting it from the calendar does)
+  assert.equal(canPatch('sophie', 'r1', ask({ status: 'yes' }), { status: 'cancelled', answeredAt: 5 }), true);
+  // a holiday Sophie booked just for herself: Ethan can't cancel it or move it, Sophie can cancel it
+  const own = { from: 'sophie', to: 'ethan', type: 'leave', title: 'Spain', note: '', hold: false, status: 'yes', own: true, people: ['sophie'], days: { sophie: 5 }, created: 1, when: { day: '2026-11-09', endDay: '2026-11-13', allDay: true, label: '' } };
+  assert.equal(canPatch('ethan', 'r2', own, { status: 'cancelled', answeredAt: 5 }), false);
+  assert.equal(canPatch('ethan', 'r2', own, { when: { day: '2027-03-01', endDay: '2027-03-05', allDay: true } }), false);
+  assert.equal(canPatch('sophie', 'r2', own, { status: 'cancelled', answeredAt: 5 }), true);
+  // and nothing can be made already agreed, except your own holiday booked just for you
+  const create = (who, data) => RULES.allowed({ method: 'create', path: `${HH}/requests/n1`, email: EM[who], db: rulesDb(), data });
+  assert.equal(create('ethan', ask({ type: 'leave', status: 'yes', people: ['ethan', 'sophie'] })), false);
+  assert.equal(create('ethan', ask({ status: 'yes' })), false);
+  assert.equal(create('ethan', ask({ type: 'leave', status: 'yes', own: true, people: ['sophie'] })), false, 'not "your own" holiday for your partner');
+  assert.equal(create('ethan', ask({ type: 'heads', when: null, status: 'sent' })), true);
+  assert.equal(create('ethan', { from: 'ethan', to: 'sophie', type: 'leave', title: 'Spain', when: { day: '2026-11-09', endDay: '2026-11-13', allDay: true, label: '' }, hold: false, status: 'yes', own: true, days: { ethan: 5 }, people: ['ethan'], note: '', created: 1, answeredAt: 1 }), true);
+  // stale: once answered, an answer saved offline can't change it, but it can still be called off
+  assert.equal(canPatch('sophie', 'r1', ask({ status: 'cancelled' }), answer(ask(), 'yes', 'sophie')), false);
+  assert.equal(canPatch('sophie', 'r1', ask({ status: 'no' }), answer(ask(), 'yes', 'sophie')), false);
 });
 
 test('the page only loads pictures from Caledonite itself, so injected markup or styles have nowhere to send things', async () => {
@@ -551,12 +618,11 @@ test("just this one, from your partner's copy of something repeating you share, 
 });
 
 test("the rules: an answer saved offline can't bring back a request already called off; cancelling clears both calendars", async () => {
-  const { readFileSync } = await import('node:fs');
-  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
-  const rq = rules.slice(rules.indexOf('match /requests/{id}'), rules.indexOf('match /outbox/{id}'));
-  const upd = rq.slice(rq.indexOf('allow update'), rq.indexOf('allow delete'));
-  assert.match(upd, /!changed\(\)\.hasAny\(\['status'\]\) \|\| resource\.data\.get\('status', ''\) in \['waiting', 'maybe', 'sent', 'other'\]\s*\|\| request\.resource\.data\.status == 'cancelled'/);
-  // every status the app writes from an open request is one of those, and cancelling is the only way out of a closed one
+  // once agreed (or turned down, or seen), only cancelling is left
+  for (const st of ['yes', 'no', 'seen', 'cancelled']) {
+    assert.equal(canPatch('sophie', 'r1', ask({ status: st }), answer(ask(), 'maybe', 'sophie')), false, st);
+    assert.equal(canPatch('ethan', 'r1', ask({ status: st }), answer(ask(), 'cancel', 'ethan')), true, st);
+  }
   const req = { from: 'ethan', to: 'sophie', type: 'plan', title: 'Film', hold: false, when: { day: sat, start: '19:00', end: '21:00' }, counter: { day: sat, start: '20:00', end: '22:00', label: 'x' } };
   // cancelling one this phone still thought was waiting (it had been agreed meanwhile): what was added goes too
   const c = Ops.buildAnswer({ req, id: 'r1', answer: 'cancel', me: 'ethan', byEmail: 'e@x.com', names: {} });

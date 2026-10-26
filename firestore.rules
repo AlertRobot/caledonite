@@ -76,17 +76,36 @@ service cloud.firestore {
           allow read, write: if member() && personEmail(pid) == myEmail();
         }
       }
-      // requests: anyone can answer, but who asked, who it's for and whether it's just for one of you are fixed
+      // requests: who asked, who it's for and whether it's just for one of you are fixed
       // (the calendar sync uses them to decide whether your partner may change the event that came from it),
       // and so is what was asked: its name, note, holiday days and whether it was pencilled in.
+      // Only the one it's for answers it (the one who asked can say yes to the other time they suggested), and only
+      // that other time can change when it is. Either of you can call off something between you; a holiday one of
+      // you booked just for themselves only they can.
       // Once it's answered or cancelled, the only change left is cancelling it, so an answer saved on a phone that
       // was offline can't bring back something already called off, or answer it a second time.
+      function isMe(pid) { return personEmail(pid) == myEmail(); }
+      function justOne(r) { return r.get('own', false) == true || (r.get('people', null) is list && r.people.size() == 1); }
+      function okStatus(r, next) {
+        return next == 'cancelled'
+          ? (!justOne(r) || isMe(r.from))
+          : (r.get('status', '') in ['waiting', 'maybe', 'sent'] && isMe(r.to) && next in ['yes', 'no', 'maybe', 'seen', 'other'])
+            || (r.get('status', '') == 'other' && isMe(r.from) && next == 'yes');
+      }
       match /requests/{id} {
         allow read: if member();
-        allow create: if member() && personEmail(request.resource.data.from) == myEmail();
+        // asked (or a heads up), or your own holiday, booked straight away: never one already agreed for the other
+        allow create: if member() && isMe(request.resource.data.from)
+          && (request.resource.data.get('status', '') in ['waiting', 'sent']
+              || (request.resource.data.get('status', '') == 'yes' && request.resource.data.get('own', false) == true
+                  && request.resource.data.get('people', null) == [request.resource.data.from]));
         allow update: if member() && !changed().hasAny(['from', 'to', 'type', 'own', 'people', 'title', 'note', 'days', 'hold', 'created'])
-          && (!changed().hasAny(['status']) || resource.data.get('status', '') in ['waiting', 'maybe', 'sent', 'other']
-              || request.resource.data.status == 'cancelled');
+          && (!changed().hasAny(['status']) || okStatus(resource.data, request.resource.data.status))
+          && (!changed().hasAny(['when']) || (isMe(resource.data.from) && resource.data.get('status', '') == 'other'
+              && resource.data.get('counter', null) is map && request.resource.data.when.day == resource.data.counter.day
+              && request.resource.data.when.get('start', null) == resource.data.counter.get('start', null)
+              && request.resource.data.when.get('end', null) == resource.data.counter.get('end', null)))
+          && (!changed().hasAny(['counter']) || request.resource.data.get('counter', null) == null || isMe(resource.data.to));
         allow delete: if false;
       }
       // asks to add, change or remove things in Google Calendar: always signed with who asked.
