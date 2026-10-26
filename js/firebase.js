@@ -23,6 +23,7 @@ export async function createFirebaseBackend() {
 
   let raw = fresh();
   let unsubs = [];
+  let listening = false;
   let user = null;
   let timer = null;
   function fresh() {
@@ -35,14 +36,21 @@ export async function createFirebaseBackend() {
       setRaw(raw, { phase: 'ready', user: { email: user.email, name: user.displayName || '' } });
     }, 60);
   }
-  function stopAll() { unsubs.forEach((u) => u()); unsubs = []; }
-  function mapColl(name, q, into, map) {
-    unsubs.push(fs.onSnapshot(q, (snap) => {
+  function stopAll() { unsubs.forEach((u) => u()); unsubs = []; listening = false; }
+  function mapColl(name, q, into, map, tries = 0) {
+    let un = null;
+    const holder = () => un && un();
+    unsubs.push(holder);
+    un = fs.onSnapshot(q, (snap) => {
       const obj = {};
       snap.forEach((d) => { obj[d.id] = map ? map(d.data(), d.id) : d.data(); });
       raw[into] = obj;
       publish();
-    }, (err) => console.warn(name, err)));
+    }, (err) => {
+      console.warn(name, err);
+      // right after the household is created the server may not know it yet: try again
+      if (tries < 6) setTimeout(() => { if (unsubs.includes(holder)) mapColl(name, q, into, map, tries + 1); }, 1500 * (tries + 1));
+    });
   }
 
   async function start(u) {
@@ -50,10 +58,11 @@ export async function createFirebaseBackend() {
     stopAll();
     raw = fresh();
     setPhase('loading', { user: { email: u.email, name: u.displayName || '' } });
-    unsubs.push(fs.onSnapshot(ref(''), (snap) => {
+    unsubs.push(fs.onSnapshot(ref(''), { includeMetadataChanges: true }, (snap) => {
       if (!snap.exists()) { setPhase('setup', { user: { email: u.email, name: u.displayName || '' } }); return; }
       raw.household = snap.data();
-      if (unsubs.length === 1) listenAll();
+      if (snap.metadata.hasPendingWrites) return; // wait until the server has it
+      if (!listening) { listening = true; listenAll(); }
       publish();
     }, (err) => {
       // not allowed to read = not in this household

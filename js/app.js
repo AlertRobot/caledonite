@@ -49,6 +49,7 @@ export function render() {
   if (st.phase === 'loading') html = viewLoading();
   else if (st.phase === 'signed-out') html = viewSignedOut();
   else if (st.phase === 'setup') html = viewSetup(st);
+  else if (st.phase === 'ready' && !st.me && !Object.keys(st.people).length) html = viewLoading();
   else if (st.phase === 'not-member' || !st.me) html = viewNotMember(st);
   else {
     nav = true;
