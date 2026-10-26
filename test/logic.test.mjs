@@ -441,3 +441,19 @@ test("shift times and travel your partner saved are kept to ones that make sense
   assert.equal(s.sleepUntil, '14:00');
   assert.equal(s.shiftTypes.night.start, '19:30');
 });
+
+test("Peckish's recipe names come back after a failed download, without reloading the app", async () => {
+  const mem = { 'esk-wk:h1:2026-11-02': JSON.stringify({ days: [{ r: 'fajitas' }] }) };
+  globalThis.localStorage = { get length() { return Object.keys(mem).length; }, key: (i) => Object.keys(mem)[i], getItem: (k) => (k in mem ? mem[k] : null), setItem: (k, v) => { mem[k] = String(v); }, removeItem: (k) => { delete mem[k]; } };
+  globalThis.location = { href: 'https://alertrobot.github.io/caledonite/index.html' };
+  let online = false;
+  globalThis.fetch = async (url) => {
+    if (!online) throw new TypeError('offline');
+    assert.equal(url, 'https://alertrobot.github.io/es-kitchen/data/library.json');
+    return { ok: true, json: async () => ({ recipes: [{ id: 'fajitas', title: 'Chicken fajitas', time: 30 }] }) };
+  };
+  const { loadPeckish } = await import('../js/linked.js');
+  assert.equal((await loadPeckish()).days['2026-11-02'].title, 'dinner planned in Peckish');
+  online = true;
+  assert.equal((await loadPeckish()).days['2026-11-02'].title, 'Chicken fajitas');
+});

@@ -8,13 +8,18 @@ const BASE = new URL('../', location.href).href; // https://alertrobot.github.io
 let library = null;
 async function peckishLibrary() {
   if (library) return library;
+  // kept only once it has arrived: offline, the names come back the next time Today is opened
   try {
     const res = await fetch(`${BASE}es-kitchen/data/library.json`);
+    if (!res.ok) throw new Error(`library ${res.status}`);
     const data = await res.json();
-    library = {};
-    for (const r of data.recipes || []) library[r.id] = { title: r.short || r.title, time: r.time || null };
-  } catch (e) { library = {}; }
-  return library;
+    const lib = {};
+    for (const r of (data && Array.isArray(data.recipes) ? data.recipes : [])) {
+      if (r && r.id != null) lib[r.id] = { title: String(r.short || r.title || 'dinner planned in Peckish'), time: Number(r.time) || null };
+    }
+    library = lib;
+    return library;
+  } catch (e) { return {}; }
 }
 export async function loadPeckish() {
   const weeks = [];
