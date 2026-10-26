@@ -517,9 +517,9 @@ const C = {
   shiftTime: (el) => {
     const st = store.state;
     const s = settingsOf(st, el.dataset.p);
-    const types = JSON.parse(JSON.stringify(s.shiftTypes));
-    types[el.dataset.t][el.dataset.f] = el.value;
-    run(actions.updatePersonSettings(el.dataset.p, { shiftTypes: types }));
+    // just that kind of shift (it merges into what's saved, so a change to another kind on the other phone stays)
+    const t = el.dataset.t;
+    run(actions.updatePersonSettings(el.dataset.p, { shiftTypes: { [t]: Object.assign({}, s.shiftTypes[t], { [el.dataset.f]: el.value }) } }));
   },
   personField: (el) => run(actions.updatePersonSettings(el.dataset.p, { [el.dataset.f]: el.dataset.f === 'travelMins' ? Number(el.value) : el.value })),
   myField: (el) => run(actions.updateMySettings({ [el.dataset.f]: el.value })),
@@ -549,11 +549,9 @@ const C = {
   addLeaveDate: () => render(),
   addRerender: () => render(),
   hhBday: (el) => {
-    const h = store.state.household || {};
-    const b = Object.assign({}, h.birthdays || {});
-    // cleared: an empty value, as a saved change merges into what's there (a removed key would come back)
-    b[el.dataset.p] = el.value ? el.value.slice(5) : '';
-    run(actions.updateHousehold({ birthdays: b }), 'Saved.');
+    // just this one birthday (it merges into what's saved, so one your partner changed meanwhile stays).
+    // Cleared: an empty value, as a removed key would come back
+    run(actions.updateHousehold({ birthdays: { [el.dataset.p]: el.value ? el.value.slice(5) : '' } }), 'Saved.');
   },
   hhField: (el) => run(actions.updateHousehold({ [el.dataset.f]: el.dataset.f === 'nudgeHours' ? Number(el.value) : el.value }))
 };

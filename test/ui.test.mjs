@@ -378,3 +378,27 @@ test("odd values in the household record (dinner time, favours, birthdays) can't
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
+
+test("a birthday or your partner's shift time saves just that one, so one changed on the other phone meanwhile is kept", async () => {
+  const page = await open('ethan', '#settings/routine');
+  await mods(page, (store) => {
+    const b = store.store.backend; const real = b.commit.bind(b);
+    window.__sent = [];
+    b.commit = (ops) => { window.__sent.push(...ops.map((o) => ({ path: o.path, data: o.data }))); return real(ops); };
+    // what this phone last heard: Sophie's birthday, and her usual shift times
+    return real([{ type: 'update', path: '', data: { birthdays: { sophie: '05-01' } } }]);
+  });
+  await page.fill('#bd-ethan', '2000-03-14');
+  await page.dispatchEvent('#bd-ethan', 'change');
+  await page.evaluate(() => document.activeElement.blur());
+  await go(page, '#settings/shifts');
+  await page.fill('#st-night', '20:00');
+  await page.dispatchEvent('#st-night', 'change');
+  const sent = await page.evaluate(() => window.__sent);
+  assert.deepEqual(sent.find((o) => o.path === '').data, { birthdays: { ethan: '03-14' } });
+  const sh = sent.find((o) => o.path === 'people/sophie').data.settings.shiftTypes;
+  assert.deepEqual(Object.keys(sh), ['night']);
+  assert.equal(sh.night.start, '20:00');
+  assert.equal(sh.night.end, '08:00');
+  await page.context().close();
+});
