@@ -1138,12 +1138,24 @@ function fireReminders_(me, ctx, seen) {
       });
     }
   });
-  if (writes.length) fsCommit_(writes);
+  // only the last few days are needed (older reminder times are skipped anyway)
+  sendOnce_(props, 'rem_fired', fired, newly, 3, writes);
+}
+
+// Remember what's being sent before sending it, so a list that can't be saved never sends the same thing
+// again every 10 minutes. Kept to the last few days: a saved value can't be bigger than about 9 KB.
+function sendOnce_(props, key, sent, newly, days, writes) {
+  var now = Date.now();
   var keys = Object.keys(newly);
-  if (keys.length) {
-    keys.forEach(function (k) { fired[k] = newly[k]; });
-    Object.keys(fired).forEach(function (k) { if (now - fired[k] > 45 * 864e5) delete fired[k]; });
-    props.setProperty('rem_fired', JSON.stringify(fired));
+  if (!keys.length) return;
+  var before = props.getProperty(key);
+  keys.forEach(function (k) { sent[k] = newly[k]; });
+  Object.keys(sent).forEach(function (k) { if (!(now - sent[k] <= days * 864e5)) delete sent[k]; });
+  props.setProperty(key, JSON.stringify(sent));
+  try { fsCommit_(writes); } catch (err) {
+    // not sent after all: try them again next time
+    if (before === null) props.deleteProperty(key); else props.setProperty(key, before);
+    throw err;
   }
 }
 
@@ -1174,13 +1186,8 @@ function processJobs_(me, ctx) {
     if (d.time && hm_(d.time)) body = 'At ' + timeText_(localTime_(today, hm_(d.time))) + '. ' + body;
     writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: me.person, kind: 'jobs', title: 'Today: ' + (d.title || 'a job'), body: body, link: '#today', sendAfter: now, sent: false, created: now }));
   });
-  if (writes.length) fsCommit_(writes);
-  var keys = Object.keys(newly);
-  if (keys.length) {
-    keys.forEach(function (k) { sent[k] = newly[k]; });
-    Object.keys(sent).forEach(function (k) { if (now - sent[k] > 40 * 864e5) delete sent[k]; });
-    props.setProperty('job_sent', JSON.stringify(sent));
-  }
+  // each is for today only
+  sendOnce_(props, 'job_sent', sent, newly, 2, writes);
 }
 function partnerOf_(me, ctx) {
   var ids = Object.keys(ctx.people).filter(function (pid) { return pid !== me.person; });

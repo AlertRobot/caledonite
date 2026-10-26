@@ -401,3 +401,50 @@ test("the rules let Peckish keep its own waiting reminders up to date, and nothi
   const src = ['../js/store.js', '../js/ops.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
   for (const k of new Set([...src.matchAll(/kind: '([a-z]+)'/g)].map((m) => m[1]).concat([...src.matchAll(/'#[a-z/]+', '([a-z]+)'/g)].map((m) => m[1])))) assert.ok(kinds.includes(k), k);
 });
+
+// Script properties hold at most about 9 KB each
+function smallProps(init = {}) {
+  const store = Object.assign({}, init);
+  return { store, api: { getProperty: (k) => (k in store ? store[k] : null), setProperty: (k, v) => { if (String(v).length > 9216) throw new Error('Argument too large: value'); store[k] = String(v); }, deleteProperty: (k) => { delete store[k]; } } };
+}
+test('a job reminder goes once, even after weeks of daily jobs, never again every 10 minutes', () => {
+  const now = Date.now();
+  const today = ctx.Utilities.formatDate(new Date(now), 'Europe/London', 'yyyy-MM-dd');
+  // six weeks of four daily jobs already sent
+  const old = {};
+  for (let d = 1; d <= 38; d++) for (let j = 0; j < 4; j++) old[`ethan|job${j}xxxxxxxxxxxxxxxx|day-${d}`] = now - d * 864e5;
+  const { store, api } = smallProps({ job_sent: JSON.stringify(old) });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  const sent = [];
+  ctx.fsCommit_ = (w) => sent.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsQuery_ = () => [{ id: 'bins', data: { title: 'Bins', who: 'ethan', day: today, done: false, time: '00:00' } }];
+  const run = () => { try { ctx.processJobs_({ person: 'ethan', email: 'e@x.com', main: true }, { settings: {}, people: { ethan: {}, sophie: {} } }); } catch (e) { /* a stage error */ } };
+  run(); run(); run();
+  assert.equal(sent.length, 1, 'sent once');
+  assert.ok(store.job_sent.length < 2000, 'only the last couple of days are kept');
+  // and when the list can't be saved at all, nothing is sent (rather than the same one over and over)
+  sent.length = 0;
+  api.setProperty = () => { throw new Error('Argument too large: value'); };
+  ctx.fsQuery_ = () => [{ id: 'hoover', data: { title: 'Hoover', who: 'ethan', day: today, done: false, time: '00:00' } }];
+  run(); run();
+  assert.equal(sent.length, 0);
+});
+
+test('a reminder whose notification could not be saved is tried again next time', () => {
+  const now = Date.now();
+  const { store, api } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  let fail = true; const sent = [];
+  ctx.fsCommit_ = (w) => { if (fail) throw new Error('Firestore 503'); sent.push(...w); };
+  ctx.fsGet_ = (path) => (path === 'households/main/people/ethan/private/main' ? { reminders: { r1: { ref: 'e:ethan:primary:u1', owner: 'ethan', times: ['h1'], note: '' } } } : null);
+  const me = { person: 'ethan', email: 'e@x.com', main: true, people: [{ id: 'ethan', data: { settings: {} } }] };
+  const seen = [{ calKey: 'primary', shown: true, share: 'all', doc: { share: 'all' }, ev: { id: 'e1', uid: 'u1', t: 'Dentist', s: now + 30 * 60e3, e: now + 90 * 60e3 } }];
+  assert.throws(() => ctx.fireReminders_(me, {}, seen), /503/);
+  assert.equal(store.rem_fired, undefined, 'not marked as sent');
+  fail = false;
+  ctx.fireReminders_(me, {}, seen);
+  ctx.fireReminders_(me, {}, seen);
+  assert.equal(sent.length, 1);
+});
