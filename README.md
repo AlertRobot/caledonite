@@ -21,10 +21,18 @@ Try it with made-up data: open the app with `?demo=ethan` or `?demo=sophie` on t
 2. **Open the app**, sign in with Google and fill in the first-time form (your name, your partner's name and Google email).
 3. **Sync script** (script.google.com, signed in as Ethan): new project called "Caledonite sync". Paste in `apps-script/Code.gs`, and in Project Settings tick "Show appsscript.json" and paste `apps-script/appsscript.json`.
    - Script properties: `PROJECT_ID` (the Firebase project id) and `SA_JSON` (the whole service account JSON, pasted by you).
-   - Deploy, New deployment, Web app, execute as Me, access Anyone. Copy the web app address into a `WEBAPP_URL` script property.
+   - Two web app deployments (Deploy, New deployment, Web app), both from this project:
+     - **Ping**: execute as Me, access Anyone. Copy its address into a `PING_URL` script property.
+     - **Connect**: execute as User accessing the web app, access Anyone with a Google account. Copy its address into `CONNECT_URL`.
    - Run `setupProject` and allow access when Google asks.
-4. **Sophie**: share the script project with her Google account (Share, Editor). She opens it while signed in as herself, picks `connectMe`, presses Run and allows access. That's it.
-5. **More accounts** (second Gmail, work Google account): add the email in the app under Settings, Account. Then open the script while signed in to that account and run `connectMe`.
+   - After any change to the code, give both deployments a new version (Deploy, Manage deployments, Edit, New version).
+4. **Sophie**: in the app, Settings, Calendars shows her the connect page. She opens it signed in as herself, allows access and taps Connect my calendar. Don't share the script project with her: anyone who can edit it can read the service account key in Script properties.
+5. **More accounts** (second Gmail, work Google account): add the email in the app under Settings, Account. Then open the connect page while signed in to that account and tap Connect my calendar.
+
+## Tests
+
+- `node --test test/` runs the logic checks and the Playwright checks of the demo at phone size (`node test/serve.mjs` serves the folder on its own if you want to look).
+- `test/budgie-link.test.mjs` needs Budgie's local test server (see the top of the file).
 
 ## Files
 
