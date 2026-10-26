@@ -996,10 +996,13 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     var s = e.ad ? Utilities.parseDate(e.sd, TZ, 'yyyy-MM-dd').getTime() : e.s;
     var en = e.ad ? Utilities.parseDate(e.ed || keyPlus_(e.sd, 1), TZ, 'yyyy-MM-dd').getTime() : e.e;
     if (s < win.from || s > win.to) return;
+    // shared as working hours: your partner never sees all-day entries or very long ones, so never hears of them
+    if (share === 'hours' && (e.ad || en - s > 14 * 3600e3)) return;
     var k = evStartKey_(e);
     while (map[k]) k += '+';
     // a shift marked Private or #busy is never named, not even by a change to its name
     map[k] = [s, en, e.pb ? '' : String(e.t || 'Shift').slice(0, 40)];
+    if (e.ad) map[k].push(1);
   });
   // a saved value can't be bigger than about 9 KB: a very full calendar keeps the nearest days only
   // (and says so, so the days past them are never compared)
@@ -1035,7 +1038,8 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   if (!changes.length) return;
   var name = (ctx.person && ctx.person.name) || 'Your partner';
   var parts = changes.slice(0, 2).map(function (c) {
-    var label = shiftWords_({ t: named ? c.v[2] : '', s: c.v[0], e: c.v[1] });
+    // an all-day entry (leave, a day off) by its name, never as a shift worked out from its times
+    var label = c.v[3] ? ((named && c.v[2]) || 'an all-day entry') : shiftWords_({ t: named ? c.v[2] : '', s: c.v[0], e: c.v[1] });
     return dayLabel_(c.k.replace(/\+*$/, '')) + ': ' + label + ' ' + c.what + '.';
   });
   if (changes.length > 2) parts.push('And ' + (changes.length - 2) + ' more.');

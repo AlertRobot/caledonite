@@ -1458,3 +1458,31 @@ test('no "Still waiting" nudge once the time asked about has gone by', () => {
   assert.equal(ctx.whenOver_({ day: '2026-11-06', start: '22:00', end: '01:00' }, L('2026-11-07', '01:00')), true);
   assert.equal(ctx.whenOver_({ day: '2026-11-06', start: '19:00' }, L('2026-11-06', '19:59')), false);
 });
+
+test('rota changes: an all-day entry is named as itself, never as a "night shift", and one your partner can\'t see is never mentioned', () => {
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 3 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const run = (share, after) => {
+    const { api } = smallProps();
+    ctx.PropertiesService = { getUserProperties: () => api };
+    ctx.Utilities.getUuid = () => 'u' + Math.random();
+    const writes = [];
+    ctx.fsCommit_ = (w) => writes.push(...w);
+    ctx.docName_ = (p) => p;
+    const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+    ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', [], api, { share });
+    ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', after, api, { share });
+    return writes.map((w) => w.update.fields.body.stringValue);
+  };
+  const leave = [{ ad: 1, sd: day, ed: ctx.keyPlus_(day, 1), t: 'Annual leave' }];
+  const all = run('all', leave);
+  assert.match(all[0], /Annual leave added/);
+  assert.doesNotMatch(all[0], /night/);
+  const busy = run('busy', leave);
+  assert.match(busy[0], /an all-day entry added/);
+  assert.doesNotMatch(busy[0], /Annual|night/);
+  assert.deepEqual(run('hours', leave), [], 'not in the working hours your partner sees');
+  // shifts are still told as before
+  const s = ctx.localTime_(day, '07:30');
+  assert.match(run('hours', [{ t: 'Ward 7', s, e: ctx.localTime_(day, '20:00') }])[0], /long day added/);
+});
