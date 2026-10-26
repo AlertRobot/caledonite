@@ -1057,12 +1057,12 @@ function findByTag_(rs, tag) {
     } while (token && ++guard < 20);
   };
   Object.keys(owned).forEach(function (calId) {
-    each(calId, { privateExtendedProperty: 'caledonite=' + tag, fields: 'nextPageToken,items(id,status)' }, function (x) { if (x.status !== 'cancelled') found.push({ calId: calId, eventId: x.id }); });
+    each(calId, { privateExtendedProperty: 'caledonite=' + tag, fields: 'nextPageToken,items(id,status,recurrence)' }, function (x) { if (x.status !== 'cancelled') found.push({ calId: calId, eventId: x.id, series: !!(x.recurrence && x.recurrence.length) }); });
   });
   if (!found.length) {
     // older events, made before the tag was stored as a property, only have it in the description
     Object.keys(owned).forEach(function (calId) {
-      each(calId, { q: tag, fields: 'nextPageToken,items(id,status,description)' }, function (x) { if (x.status !== 'cancelled' && String(x.description || '').indexOf(marker) >= 0) found.push({ calId: calId, eventId: x.id }); });
+      each(calId, { q: tag, fields: 'nextPageToken,items(id,status,description,recurrence)' }, function (x) { if (x.status !== 'cancelled' && String(x.description || '').indexOf(marker) >= 0) found.push({ calId: calId, eventId: x.id, series: !!(x.recurrence && x.recurrence.length) }); });
     });
   }
   // never something this run has just deleted (Google's search can take a moment to catch up)
@@ -1101,7 +1101,7 @@ function createEvent_(me, ctx, o, own, rs) {
   var rule = rrule_(ev.repeat);
   if (rule) resource.recurrence = [rule];
   var created = Calendar.Events.insert(resource, calId);
-  rs.tagMap[tag] = [{ calId: calId, eventId: created.id }];
+  rs.tagMap[tag] = [{ calId: calId, eventId: created.id, series: !!resource.recurrence }];
   return { eventId: created.id, calId: calId };
 }
 function rrule_(rep) {
@@ -1113,27 +1113,36 @@ function rrule_(rep) {
 
 // update or delete: every copy carrying the tag. With o.inst (when it first started, as Google writes it in an
 // occurrence's id: 20261030T180000Z, or 20261030 for all day), just that occurrence of something that repeats.
+// A changed time of something repeating (an exception: "series_20261113T190000Z", or "series_20261113" all day).
+// A series split in Google Calendar ("this and following") is a series of its own: "series_R20261113T190000".
+var EXCEPTION_RE_ = /_\d{8}(T\d{6}Z)?$/;
 function changeByTag_(o, rs) {
   if (!o.tag) return { refused: 'no tag' };
   var inst = /^\d{8}(T\d{6}Z)?$/.test(String(o.inst || '')) ? String(o.inst) : '';
   var owned = ownedCals_(rs);
-  var targets = findByTag_(rs, o.tag).filter(function (t) { return owned[t.calId] && (!inst || String(t.eventId).indexOf('_') < 0); });
-  // Google lists a time of a series that was changed on its own (an exception, "series_20261113T190000Z")
-  // next to the series itself
+  var isExc = function (id) { return EXCEPTION_RE_.test(String(id)); };
+  var found = findByTag_(rs, o.tag).filter(function (t) { return owned[t.calId]; });
+  // Google lists a changed time of a series next to the series itself
   var series = {};
-  targets.forEach(function (t) { if (String(t.eventId).indexOf('_') < 0) series[t.calId + '|' + t.eventId] = true; });
+  found.forEach(function (t) { if (!isExc(t.eventId)) series[t.calId + '|' + t.eventId] = true; });
+  // one occurrence: it's in one of the series (a split one has the later times)
+  var targets = inst ? found.filter(function (t) { return !isExc(t.eventId); }) : found;
+  var several = !!inst && targets.length > 1;
   var n = 0;
   targets.forEach(function (t) {
     var id = inst ? t.eventId + '_' + inst : t.eventId;
-    var exception = !inst && String(t.eventId).indexOf('_') > 0;
+    var exception = !inst && isExc(t.eventId);
     // deleting the series takes its changed times with it
-    if (exception && o.op === 'delete' && series[t.calId + '|' + String(t.eventId).split('_')[0]]) return;
+    if (exception && o.op === 'delete' && series[t.calId + '|' + String(t.eventId).replace(EXCEPTION_RE_, '')]) return;
     try {
+      // in more than one series: only the one that really has that time (not one ended before it)
+      if (several) { var cur = Calendar.Events.get(t.calId, id); if (!cur || cur.status === 'cancelled') return; }
       if (o.op === 'delete') { Calendar.Events.remove(t.calId, id); rs.removed[t.calId + '|' + id] = true; n++; return; }
       var changes = o.changes || {};
       if (o.event && o.event.title && !changes.title) changes = merge_(changes, { title: o.event.title });
-      // a changed time keeps its own day and time when every time is changed: just the new name
-      if (exception) changes = changes.title ? { title: changes.title } : {};
+      // a changed time keeps its own day and time when every time is changed: just the new name. And every time of
+      // a series is only ever renamed: moving it to one day would take all the earlier times away
+      if (exception || (!inst && t.series)) changes = changes.title ? { title: changes.title } : {};
       var patch = patchFor_(changes, t.calId, id, tzOf_(o));
       if (Object.keys(patch).length) { Calendar.Events.patch(patch, t.calId, id); n++; }
     } catch (err) {

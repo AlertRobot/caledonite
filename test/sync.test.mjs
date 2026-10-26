@@ -966,3 +966,43 @@ test('notifications are left unsent for the next run once time is short', () => 
   assert.equal(sent.length, 0);
   assert.equal(writes.length, 0, 'not claimed either');
 });
+
+test('something repeating split in Google Calendar ("this and following"): every time, and just one time, reach the later part too', () => {
+  // the original series ends before 13 November; from then on it's a series of its own, with one time changed
+  const evs = [
+    { id: 'abc', calId: 'primary@x', tag: 'both:wk', recurrence: ['RRULE:FREQ=WEEKLY;UNTIL=20261112T235959Z'] },
+    { id: 'abc_R20261113T190000', calId: 'primary@x', tag: 'both:wk', recurrence: ['RRULE:FREQ=WEEKLY'] },
+    { id: 'abc_R20261113T190000_20261127T190000Z', calId: 'primary@x', tag: 'both:wk' }
+  ];
+  const has = (id) => id === 'abc_20261106T190000Z' || id.startsWith('abc_R20261113T190000_') || evs.some((e) => e.id === id);
+  const removed = [], patched = [];
+  const calendar = { Events: {
+    list: (calId, q) => ({ items: evs.filter((e) => q.privateExtendedProperty === 'caledonite=' + e.tag).map((e) => ({ id: e.id, status: 'confirmed', recurrence: e.recurrence })) }),
+    get: (calId, id) => { if (!has(id)) throw new Error('API call to calendar.events.get failed with error: Not Found'); return { status: 'confirmed', start: { dateTime: '2026-11-20T19:00:00Z' }, end: { dateTime: '2026-11-20T21:00:00Z' } }; },
+    remove: (calId, id) => { if (!has(id)) throw new Error('API call to calendar.events.delete failed with error: Not Found'); removed.push(id); },
+    patch: (p, calId, id) => { patched.push([id, Object.keys(p)]); }
+  } };
+  // just the time on 20 November (in the later part)
+  runOutbox([{ person: 'ethan', op: 'delete', tag: 'both:wk', inst: '20261120T190000Z', byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
+  assert.deepEqual(removed, ['abc_R20261113T190000_20261120T190000Z']);
+  // every time: both parts go (and the changed time with its own part)
+  removed.length = 0;
+  runOutbox([{ person: 'ethan', op: 'delete', tag: 'both:wk', byEmail: 'e@x.com', done: false, created: 2 }], { calendar });
+  assert.deepEqual(removed.sort(), ['abc', 'abc_R20261113T190000']);
+});
+
+test('a new time sent for every time of something repeating only renames it, never moves the whole series to one day', () => {
+  const patched = [];
+  const calendar = { Events: {
+    list: () => ({ items: [{ id: 'ser1', status: 'confirmed', recurrence: ['RRULE:FREQ=WEEKLY'] }] }),
+    get: () => ({ start: { dateTime: '2026-11-06T19:00:00Z' }, end: { dateTime: '2026-11-06T21:00:00Z' } }),
+    patch: (p, calId, id) => { patched.push([id, p]); }, remove() {}
+  } };
+  runOutbox([{ person: 'ethan', op: 'update', tag: 'both:wk', changes: { title: 'Film night', day: '2026-11-20', start: '20:00', end: '22:00' }, byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
+  assert.equal(JSON.stringify(patched), JSON.stringify([['ser1', { summary: 'Film night' }]]));
+  // something that doesn't repeat still moves
+  patched.length = 0;
+  calendar.Events.list = () => ({ items: [{ id: 'one1', status: 'confirmed' }] });
+  runOutbox([{ person: 'ethan', op: 'update', tag: 'add:x', changes: { day: '2026-11-20', start: '20:00', end: '22:00' }, byEmail: 'e@x.com', done: false, created: 2 }], { calendar });
+  assert.equal(patched[0][1].start.dateTime, '2026-11-20T20:00:00');
+});
