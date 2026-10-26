@@ -105,3 +105,36 @@ test('adding an event saves the phone time zone with it', async () => {
   assert.ok(o && o.data.tz, 'has a time zone');
   assert.equal(o.data.byEmail, 'e@x.com');
 });
+
+// ---------- the service worker, run outside a browser with a stand-in for its surroundings ----------
+async function loadSw({ cacheKeys = [], fetchRes = null } = {}) {
+  const { readFileSync } = await import('node:fs');
+  const vm = await import('node:vm');
+  const handlers = {}; const deleted = []; const puts = [];
+  const cacheObj = { match: async () => undefined, put: async (req) => { puts.push(String(req.url || req)); }, add: async () => {}, addAll: async () => {} };
+  const sandbox = {
+    URL, Promise, console, Request: class { constructor(u) { this.url = u; } },
+    caches: { keys: async () => cacheKeys, delete: async (k) => { deleted.push(k); return true; }, open: async () => cacheObj, match: async () => undefined },
+    fetch: async () => fetchRes, location: { origin: 'https://alertrobot.github.io' }
+  };
+  sandbox.self = Object.assign(sandbox, { addEventListener: (n, fn) => { handlers[n] = fn; }, clients: { claim: async () => {} }, skipWaiting: () => {}, registration: {} });
+  sandbox.importScripts = (p) => vm.runInContext(readFileSync(new URL(`../${p.replace('./', '')}`, import.meta.url), 'utf8'), ctx);
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), ctx);
+  return { handlers, deleted, puts };
+}
+
+test('the service worker clears only its own old copies, never Peckish’s on the same website', async () => {
+  const { handlers, deleted } = await loadSw({ cacheKeys: ['caledonite-v1', 'caledonite-sdk-11.0.0', 'peckish-v7', 'esk-shell', 'workbox-precache-v2'] });
+  let p; handlers.activate({ waitUntil: (x) => { p = x; } });
+  await p;
+  assert.deepEqual(deleted.sort(), ['caledonite-sdk-11.0.0', 'caledonite-v1']);
+});
+
+test('the service worker never keeps a failed download of the Firebase library', async () => {
+  const bad = { ok: false, status: 404, clone() { return this; } };
+  const { handlers, puts } = await loadSw({ fetchRes: bad });
+  let p; handlers.fetch({ request: { method: 'GET', url: 'https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js' }, respondWith: (x) => { p = x; } });
+  assert.equal(await p, bad);
+  assert.deepEqual(puts, []);
+});

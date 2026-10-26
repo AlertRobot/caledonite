@@ -25,7 +25,8 @@ self.addEventListener('install', (e) => {
   ]).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== SDK_CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+  // only Caledonite's own old copies: Peckish lives on the same website and keeps its offline copy in the same place
+  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith('caledonite-') && k !== VERSION && k !== SDK_CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
@@ -40,7 +41,7 @@ self.addEventListener('fetch', (e) => {
   }
   // the Firebase library: its own cache, kept across updates
   if (url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/')) {
-    e.respondWith(caches.open(SDK_CACHE).then((c) => c.match(e.request).then((r) => r || fetch(e.request).then((res) => { c.put(e.request, res.clone()); return res; }))));
+    e.respondWith(caches.open(SDK_CACHE).then((c) => c.match(e.request).then((r) => r || fetch(e.request).then((res) => { if (res.ok) c.put(e.request, res.clone()); return res; }))));
     return;
   }
   // fonts: cache first
