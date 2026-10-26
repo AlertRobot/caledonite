@@ -1209,3 +1209,37 @@ test('connecting it again on the connect page (which says whose it is) moves it 
   ctx.syncAll = realSync;
   assert.equal(seenAs, 'sophie');
 });
+
+test('stopping or losing an account never deletes the copies another of your accounts took over from it', () => {
+  // the shared calendar "abc" went quiet on work@x.com for a while; e@x.com took it over (same addresses)
+  const props = () => ({ h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h', 'households/main/sharedFeeds/ethan__abc__2026-11': 'h' }), h_own: JSON.stringify({ 'households/main/privateFeeds/ethan__own__2026-11': 'h' }), rota_abc: '{}' });
+  ctx.fsGet_ = (path) => ({ 'households/main/calendars/ethan__abc': { account: 'e@x.com' }, 'households/main/calendars/ethan__own': { account: 'work@x.com' } })[path] || null;
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  // 1. "Stop syncing this account" on the connect page
+  asUser('work@x.com');
+  fakeCache();
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.ScriptApp = { getProjectTriggers: () => [{ getHandlerFunction: () => 'syncAll' }], deleteTrigger() {} };
+  let p = fakeProps(props());
+  ctx.PropertiesService = { getUserProperties: () => p.api };
+  ctx.disconnectFromPage();
+  assert.deepEqual(writes.map((w) => w.delete).sort(), ['households/main/privateFeeds/ethan__own__2026-11', 'households/main/status/work_x_com']);
+  // 2. the account comes back but can't see that calendar any more
+  writes.length = 0;
+  withDigest();
+  p = fakeProps(props());
+  ctx.PropertiesService = { getUserProperties: () => p.api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'w@x', getName: () => 'Work', getColor: () => '#1', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'w@x' }) };
+  ctx.Calendar = { Events: { list: () => ({ items: [] }) } };
+  ctx.fsQuery_ = () => [];
+  ctx.syncCalendars_({ email: 'work@x.com', person: 'ethan', main: false, people: [] }, { appEmail: 'e@x.com', hh: {}, people: {}, calDocs: {
+    abc: { account: 'e@x.com', lastSeen: Date.now() }, own: { account: 'work@x.com', lastSeen: Date.now() - 864e5 }
+  } }, []);
+  const gone = writes.map((w) => w.delete).filter(Boolean);
+  assert.ok(gone.includes('households/main/privateFeeds/ethan__own__2026-11'), 'its own calendar that went is still taken out');
+  assert.ok(!gone.some((x) => x.includes('ethan__abc__')), 'the one taken over is left alone');
+  assert.equal(p.store.h_abc, undefined, 'and forgotten here');
+  assert.equal(p.store.rota_abc, undefined);
+});

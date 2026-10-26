@@ -118,17 +118,28 @@ function stopSyncing_() {
   }
 }
 
-// Deleting every copy this account remembers writing, and its status
+// Deleting every copy this account remembers writing, and its status. Not a calendar another of your accounts
+// has taken over since (same addresses): those copies are that account's now, and it would never write them again.
 function copiesWritten_(all, email) {
   var writes = [];
   Object.keys(all).forEach(function (k) {
     if (k.indexOf('h_') !== 0) return;
     var old = {};
     try { old = JSON.parse(all[k] || '{}'); } catch (e) { old = {}; }
-    Object.keys(old).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
+    var paths = Object.keys(old);
+    if (!paths.length) return;
+    var ck = k.slice(2);
+    var person = (String(paths[0]).split('/').pop() || '').split('__')[0];
+    if (ck !== 'rotalink' && person && /^[A-Za-z0-9_-]+$/.test(person + ck) && otherAccount_(fsGet_(HOUSEHOLD + '/calendars/' + person + '__' + ck), email)) return;
+    paths.forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
   });
   if (email) writes.push({ 'delete': docName_(HOUSEHOLD + '/status/' + email.replace(/[^a-z0-9]+/g, '_')) });
   return writes;
+}
+// A calendar record saying another of your Google accounts writes its copies now
+function otherAccount_(doc, email) {
+  var acc = String((doc && doc.account) || '').toLowerCase();
+  return !!acc && acc !== 'rota link' && acc !== String(email || '').toLowerCase();
 }
 function hasTrigger_() {
   return ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'syncAll'; });
@@ -465,13 +476,16 @@ function syncCalendars_(me, ctx, errors) {
     if (k.indexOf('h_') !== 0) return;
     var ck = k.slice(2);
     if (ck === 'rotalink' || seenCalKeys[ck]) return;
-    // now written by the other account, at the same addresses: just forget them here
-    if (!handledElsewhere[ck]) {
+    // now written by the other account, at the same addresses: just forget them here (also when this account
+    // can't see it any more and another of yours took it over meanwhile: those copies are that account's now)
+    if (!handledElsewhere[ck] && !otherAccount_(ctx.calDocs && ctx.calDocs[ck], me.email)) {
       var old = {};
       try { old = JSON.parse(all[k] || '{}'); } catch (e) { old = {}; }
       Object.keys(old).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
     }
     toForget.push(k);
+    // and its rota as it was (if it comes back to this account, it's compared afresh, never with old shifts)
+    if (all['rota_' + ck] !== undefined) toForget.push('rota_' + ck);
   });
   // and their records, once they've been gone a couple of days (so they leave Settings too)
   var listed = me.main ? accountsOf_(me, ctx) : {};
