@@ -130,7 +130,8 @@ export function setRaw(raw, extra = {}) {
   s.tokens = raw.tokens === undefined ? null : Object.keys(raw.tokens || {});
   s.status = raw.status || {};
   s.linked = store.linked || {};
-  if (s.phase === 'ready' && !s.me) s.phase = 'not-member';
+  // not one of the two of you, once your records have arrived (until then it's still loading)
+  if (s.phase === 'ready' && !s.me && Object.keys(s.people).length) s.phase = 'not-member';
   store.state = s;
   clearDayCache();
   store.emit();

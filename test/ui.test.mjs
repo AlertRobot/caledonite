@@ -3,6 +3,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { serve } from './serve.mjs';
+import { useFakeFirebase } from './fake-firebase.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium, devices } = require('playwright');
@@ -280,5 +281,58 @@ test("your partner's holiday just for themselves doesn't say you said yes, or th
   const text = await page.locator('article', { hasText: 'Lisbon' }).textContent();
   assert.doesNotMatch(text, /You said yes|both your calendars/);
   assert.match(text, /Sophie booked it/);
+  await page.context().close();
+});
+
+
+// ---------- the real backend (js/firebase.js), with a stand-in for the Firebase SDK ----------
+const H = 'households/main';
+const HOUSE = { emails: ['e@x.com', 's@x.com'], dinnerTime: '19:00', favours: ['Put the bins out'], emailsLocked: true };
+const PEOPLE = { ethan: { name: 'Ethan', email: 'e@x.com', joined: true, settings: { workDays: [1, 2, 3, 4, 5] } }, sophie: { name: 'Sophie', email: 's@x.com', joined: true, settings: { hasShifts: true, workDays: [] } } };
+async function openReal(hash = '#today') {
+  const ctx = await browser.newContext({ ...devices['Pixel 7'], locale: 'en-GB', timezoneId: 'Europe/London', bypassCSP: true });
+  const page = await ctx.newPage();
+  page.errors = [];
+  page.on('pageerror', (e) => page.errors.push(String(e)));
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await useFakeFirebase(page, { email: 'e@x.com', displayName: 'Ethan Dunning' });
+  await page.goto(`${URL}${hash}`);
+  await page.waitForFunction((p) => window.__fb && window.__fb.listening && window.__fb.listening(p), H);
+  return page;
+}
+const fb = (page, fn, ...args) => page.evaluate(([src, a]) => (0, eval)(src)(window.__fb, ...a), [fn.toString(), args]);
+const mainText = (page) => page.textContent('main');
+
+test('opening the app: no "Not on the list" while your records are still on their way', async () => {
+  const page = await openReal();
+  await fb(page, (f, h, house) => f.emitDoc(h, house), H, HOUSE);
+  await page.waitForTimeout(300);
+  assert.doesNotMatch(await mainText(page), /Not on the list/);
+  await fb(page, (f, h, people) => f.emitColl(`${h}/people`, people), H, PEOPLE);
+  await page.waitForSelector('.bottom-nav');
+  assert.match(await mainText(page), /Today/);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('opening the app offline for the first time shows it loading, not the first-time setup', async () => {
+  const page = await openReal();
+  await fb(page, (f, h) => f.emitDoc(h, null, { fromCache: true }), H);
+  await page.waitForTimeout(200);
+  assert.doesNotMatch(await mainText(page), /Set up/);
+  // the server says there's no household yet: now it's the first-time setup
+  await fb(page, (f, h) => f.emitDoc(h, null), H);
+  await page.waitForTimeout(200);
+  assert.match(await mainText(page), /Set up Caledonite/);
+  await page.context().close();
+});
+
+test('a change to the shared settings shows straight away, even before it reaches the server (offline)', async () => {
+  const page = await openReal('#settings/requests');
+  await fb(page, (f, h, house, people) => { f.emitDoc(h, house); f.emitColl(`${h}/people`, people); }, H, HOUSE, PEOPLE);
+  await page.waitForSelector('.bottom-nav');
+  await fb(page, (f, h, house) => f.emitDoc(h, Object.assign({}, house, { favours: ['Put the bins out', 'Walk to the shop'] }), { pending: true }), H, HOUSE);
+  await page.waitForTimeout(250);
+  assert.match(await mainText(page), /Walk to the shop/);
   await page.context().close();
 });

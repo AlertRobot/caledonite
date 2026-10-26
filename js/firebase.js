@@ -59,10 +59,18 @@ export async function createFirebaseBackend() {
     raw = fresh();
     setPhase('loading', { user: { email: u.email, name: u.displayName || '' } });
     unsubs.push(fs.onSnapshot(ref(''), { includeMetadataChanges: true }, (snap) => {
-      if (!snap.exists()) { setPhase('setup', { user: { email: u.email, name: u.displayName || '' } }); return; }
+      if (!snap.exists()) {
+        // offline with nothing saved on this phone yet isn't "no household": wait for the server
+        if (snap.metadata.fromCache) return;
+        setPhase('setup', { user: { email: u.email, name: u.displayName || '' } });
+        return;
+      }
       raw.household = snap.data();
-      if (snap.metadata.hasPendingWrites) return; // wait until the server has it
-      if (!listening) { listening = true; listenAll(); }
+      if (!listening) {
+        if (snap.metadata.hasPendingWrites) return; // just made: wait until the server has it
+        listening = true; listenAll();
+      }
+      // a change you've just made (offline too) shows straight away
       publish();
     }, (err) => {
       // not allowed to read = not in this household
