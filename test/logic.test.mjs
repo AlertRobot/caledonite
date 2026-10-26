@@ -260,3 +260,11 @@ test('a family calendar you both have shows its events once', () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].who, 'ethan:family');
 });
+
+test('signing out takes this phone off your notifications first', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../js/firebase.js', import.meta.url), 'utf8');
+  const so = src.slice(src.indexOf('async signOut()'), src.indexOf('fa.signOut(auth)'));
+  assert.match(so, /fs\.deleteDoc\(ref\(`people\/\$\{me\}\/tokens\/\$\{id\}`\)\)/);
+  assert.match(so, /removeItem\('caledonite\.push'\)/);
+});

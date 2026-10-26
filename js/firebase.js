@@ -186,7 +186,16 @@ export async function createFirebaseBackend() {
         else throw e;
       }
     },
-    async signOut() { await fa.signOut(auth); },
+    // this phone stops getting your notifications (given a moment, so signing out offline still works)
+    async signOut() {
+      try {
+        const id = localStorage.getItem('caledonite.pushId');
+        const me = store.state.me;
+        localStorage.removeItem('caledonite.push'); localStorage.removeItem('caledonite.pushId');
+        if (id && me) await Promise.race([fs.deleteDoc(ref(`people/${me}/tokens/${id}`)), new Promise((res) => setTimeout(res, 2000))]);
+      } catch (e) { console.warn('push off', e); }
+      await fa.signOut(auth);
+    },
     // the household and both of you, in one go: the rules only allow your two records while the household is being made
     async createHousehold(info) {
       const b = fs.writeBatch(db);
