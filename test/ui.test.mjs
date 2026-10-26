@@ -402,3 +402,15 @@ test("a birthday or your partner's shift time saves just that one, so one change
   assert.equal(sh.night.end, '08:00');
   await page.context().close();
 });
+
+test('a "not tonight" from a night that has passed no longer says quiet hours are off', async () => {
+  const page = await open('ethan', '#settings/notifications');
+  await mods(page, (store) => store.actions.updateMySettings({ quiet: { skip: '2026-01-03' } }));
+  await go(page, '#settings/notifications');
+  assert.doesNotMatch(await page.textContent('main'), /off for one night/);
+  // tonight's still does
+  await mods(page, async (store) => { const L = await import('./js/logic.js'); return store.actions.updateMySettings({ quiet: { skip: L.quietNight(L.settingsOf(store.store.state, store.store.state.me)) } }); });
+  await go(page, '#settings/notifications');
+  assert.match(await page.textContent('main'), /off for one night/);
+  await page.context().close();
+});

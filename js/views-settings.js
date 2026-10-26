@@ -1,6 +1,6 @@
 // Settings (with its own menu), plus the sign-in and first-time screens.
 import { esc, dayKey, addDays, mondayOf, fmtDate, agoText, WEEKDAY_NAMES, fmtTime, atTime, MONTH_NAMES, fromDayKey } from './util.js';
-import { isLowCal, nameOf, settingsOf, shiftFor, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours } from './logic.js';
+import { isLowCal, nameOf, settingsOf, shiftFor, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours, quietNight } from './logic.js';
 import { icon, avatar, seg, toggleRow } from './ui.js';
 import { ui } from './uistate.js';
 import { APP, FIREBASE } from './config.js';
@@ -316,7 +316,7 @@ function secNotifications(state) {
         ${toggleRow({ act: 'quietToggle', on: s.quiet.on, label: s.quiet.on ? `Quiet from ${fmtHM(s.quiet.from)} to ${fmtHM(s.quiet.to)}` : 'Quiet hours are off', sub: 'Notifications wait until the morning. Turn off for a night shift or a late night.' })}
         ${s.quiet.on ? `<div class="pad stack-s"><div class="grid2"><div class="field"><label for="q-from">Quiet from</label><input id="q-from" type="time" value="${esc(s.quiet.from)}" data-act="quietField" data-f="from"></div>
           <div class="field"><label for="q-to">Until</label><input id="q-to" type="time" value="${esc(s.quiet.to)}" data-act="quietField" data-f="to"></div></div></div>
-          ${s.quiet.skip ? `<p class="pad small note-box">Quiet hours are off for one night (${esc(fmtDate(new Date(s.quiet.skip + 'T12:00')))}).</p>` : ''}` : ''}
+          ${s.quiet.skip && s.quiet.skip === quietNight(s) ? `<p class="pad small note-box">Quiet hours are off for one night (${esc(fmtDate(new Date(s.quiet.skip + 'T12:00')))}).</p>` : ''}` : ''}
         ${s.hasShifts ? toggleRow({ act: 'notifToggle', on: s.notif.quiet, label: 'Also quiet while I sleep after nights', sub: 'Messages to you wait until you wake.', data: 'data-f="quiet"' }) : ''}
       </div>
       <p class="small muted">${inQuietHours(s) ? 'Quiet hours are on now.' : ''} Today shows a “Not tonight” button in the evening too.</p>
