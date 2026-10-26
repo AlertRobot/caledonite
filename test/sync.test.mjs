@@ -140,3 +140,33 @@ test('an account listed for both of you is not synced as either', () => {
   people.unshift({ id: 'aaa', data: { email: 'E@x.com' } });
   assert.throws(() => as('e@x.com'), /more than one person/);
 });
+
+test('after a night shift, the sync holds notifications until the person wakes', () => {
+  const L = (day, hm) => ctx.localTime_(day, hm);
+  const night = { ev: { t: 'Night', s: L('2026-11-09', '19:30'), e: L('2026-11-10', '08:00') }, cal: { role: 'rota' } };
+  const late = { ev: { t: 'Shift', s: L('2026-11-09', '16:00'), e: L('2026-11-10', '00:00') }, cal: { role: 'rota' } };
+  const p = (items, extra = {}) => ({ id: 'sophie', settings: Object.assign({ hasShifts: true, sleepUntil: '14:00', travelMins: 30 }, extra), items, mine: false });
+  const data = { overrides: {}, jobs: [] };
+  assert.equal(ctx.sleepUntil_(p([night]), data, L('2026-11-10', '10:00')), L('2026-11-10', '14:00'));
+  assert.equal(ctx.sleepUntil_(p([night]), data, L('2026-11-10', '08:10')), 0, 'still on the way home');
+  assert.equal(ctx.sleepUntil_(p([night]), data, L('2026-11-10', '14:30')), 0, 'awake');
+  assert.equal(ctx.sleepUntil_(p([night], { notif: { quiet: false } }), data, L('2026-11-10', '10:00')), 0, 'turned off');
+  assert.equal(ctx.sleepUntil_(p([late]), data, L('2026-11-10', '10:00')), 0, 'a late until midnight is not a night');
+  // a night put in by hand, over the rota
+  assert.equal(ctx.sleepUntil_(p([]), { overrides: { 'sophie|2026-11-09': { type: 'night' } }, jobs: [] }, L('2026-11-10', '11:00')), L('2026-11-10', '14:00'));
+});
+
+test('a reminder due while asleep after nights waits', () => {
+  const now = Date.now();
+  const writes = [];
+  ctx.fsQuery_ = (coll) => (coll === 'notify' ? [{ id: 'n1', data: { to: 'sophie', kind: 'reminders', title: 'x', sendAfter: now - 1000, sent: false }, updateTime: 't' }] : []);
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.fsList_ = () => [];
+  ctx.docName_ = (p) => p;
+  const realSleep = ctx.sleepUntil_;
+  ctx.sleepUntil_ = () => now + 3600e3;
+  ctx.processNotify_({ people: { sophie: { settings: { hasShifts: true, quiet: { on: false } } } } });
+  ctx.sleepUntil_ = realSleep;
+  assert.equal(writes.length, 1);
+  assert.equal(JSON.stringify(writes[0].updateMask.fieldPaths), '["sendAfter"]');
+});

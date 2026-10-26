@@ -1412,6 +1412,43 @@ function quietUntil_(settings, now) {
   return until;
 }
 
+// Asleep after a night shift, worked out the way the app does: when they wake (ms), or 0.
+// p: { id, settings, items: [{ ev, cal }] (their rota), mine }, data: { overrides, jobs }
+function sleepUntil_(p, data, now) {
+  var s = p.settings || {};
+  if (!s.hasShifts || (s.notif && s.notif.quiet === false)) return 0;
+  var today = Utilities.formatDate(new Date(now), TZ, 'yyyy-MM-dd');
+  var prev = personDay_(p, keyPlus_(today, -1), data).shift;
+  if (!prev || !(prev.type ? prev.type === 'night' : shiftWords_(prev) === 'night shift')) return 0;
+  var from = prev.e + (Number(s.travelMins) || 0) * 60e3;
+  var until = localTime_(today, hm_(s.sleepUntil) || '14:00');
+  return now >= from && now < until ? until : 0;
+}
+// The same for someone a notification is for: their rota and yesterday's shift change, read only when needed
+function asleepUntil_(pid, who, ctx, now) {
+  var s = (who && who.settings) || {};
+  if (!s.hasShifts || (s.notif && s.notif.quiet === false)) return 0;
+  ctx.asleep = ctx.asleep || {};
+  if (!(pid in ctx.asleep)) {
+    try {
+      var items = [];
+      fsQuery_('calendars', [['owner', pid], ['role', 'rota']]).forEach(function (c) {
+        var feeds = fsQuery_('privateFeeds', [['owner', pid], ['calKey', c.data.calKey]]);
+        if (!feeds.length) feeds = fsQuery_('sharedFeeds', [['owner', pid], ['calKey', c.data.calKey]]);
+        feeds.forEach(function (f) { (f.data.events || []).forEach(function (e) { items.push({ ev: e, cal: c.data }); }); });
+      });
+      var y = keyPlus_(Utilities.formatDate(new Date(now), TZ, 'yyyy-MM-dd'), -1);
+      var overrides = {};
+      fsQuery_('shifts', [['person', pid], ['day', y]]).forEach(function (d) { overrides[pid + '|' + y] = d.data; });
+      ctx.asleep[pid] = sleepUntil_({ id: pid, settings: s, items: items, mine: false }, { overrides: overrides, jobs: [] }, now);
+    } catch (err) {
+      Logger.log('asleep: ' + err.message);
+      ctx.asleep[pid] = 0;
+    }
+  }
+  return ctx.asleep[pid];
+}
+
 function processNotify_(ctx) {
   var now = Date.now();
   var due = fsQuery_('notify', [['sent', false]]).filter(function (n) { return (n.data.sendAfter || 0) <= now; });
@@ -1421,9 +1458,9 @@ function processNotify_(ctx) {
     var d = n.data;
     var who = ctx.people[d.to] || {};
     var settings = who.settings || {};
-    // inside the person's quiet hours: wait until they end (a test is sent straight away)
+    // inside the person's quiet hours, or asleep after a night shift: wait (a test is sent straight away)
     if (d.kind !== 'test') {
-      var until = quietUntil_(settings, now);
+      var until = Math.max(quietUntil_(settings, now), asleepUntil_(d.to, who, ctx, now));
       if (until > now) {
         try { fsCommit_([upd_(HOUSEHOLD + '/notify/' + n.id, { sendAfter: until }, ['sendAfter'])]); } catch (e) { /* the next run tries again */ }
         return;
