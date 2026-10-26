@@ -138,6 +138,13 @@ function syncCalendars_(me, ctx) {
     };
     var doc = ctx.calDocs[calKey];
     var docPath = HOUSEHOLD + '/calendars/' + me.person + '__' + calKey;
+    // the same calendar seen from another of this person's accounts: let that account handle it
+    if (doc && doc.account && doc.account !== me.email && Date.now() - (doc.lastSeen || 0) < 2 * 864e5) { delete seenCalKeys[calKey]; continue; }
+    // calendars set up before family calendars were recognised
+    if (doc && !doc.userSet && doc.layer === 'own' && isFamilyCal_(id, meta.name)) {
+      writes.push(upd_(docPath, { layer: 'family', share: 'all' }, ['layer', 'share']));
+      doc = merge_(doc, { layer: 'family', share: 'all' });
+    }
     if (!doc) {
       doc = merge_(meta, defaultsFor_(cal, isPrimary, me));
       writes.push(upd_(docPath, doc));
@@ -176,6 +183,7 @@ function defaultsFor_(cal, isPrimary, me) {
   var name = (cal.getName() || '').toLowerCase();
   var personal = /@(gmail|googlemail)\.com$/.test(me.email);
   if (/#contacts@|birthday/.test(id + ' ' + name)) return { show: false, share: 'none', role: 'normal', layer: 'own' };
+  if (isFamilyCal_(id, name)) return { show: true, share: 'all', role: 'normal', layer: 'family' };
   if (/#holiday@|holidays in/.test(id + ' ' + name)) return { show: true, share: 'none', role: 'normal', layer: 'own' };
   if (/rota|roster|shift|loop|healthroster/.test(name)) return { show: true, share: 'all', role: 'rota', layer: 'own' };
   if (/work|office/.test(name) || (!personal && isPrimary)) return { show: true, share: 'hours', role: 'work', layer: 'own' };
@@ -186,6 +194,11 @@ function defaultsFor_(cal, isPrimary, me) {
     return { show: true, share: 'busy', role: 'normal', layer: 'other' };
   }
   return { show: true, share: 'busy', role: 'normal', layer: 'own' };
+}
+
+// Google's family group calendar, or one called "Family"
+function isFamilyCal_(id, name) {
+  return /^family\d*@group\.calendar\.google\.com$/i.test(id) || /\bfamily\b/i.test(name || '');
 }
 
 function norm_(ev) {

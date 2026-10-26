@@ -211,7 +211,7 @@ export const actions = {
   },
 
   async updateCalendar(key, patch) {
-    await db().update(`calendars/${key}`, patch);
+    await db().update(`calendars/${key}`, Object.assign({ userSet: true }, patch));
     await db().update('', { settingsRev: now() });
     db().ping();
   },
