@@ -709,9 +709,16 @@ function rotaUrlOf_(me, ctx) {
 function syncRotaLink_(me, ctx, rotaUrl) {
   var url = String(rotaUrl || '').replace(/^webcal:/i, 'https:');
   if (!/^https:\/\//i.test(url)) return;
-  var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+  // Google's own errors here name the address ("DNS error: https://..."), and what goes wrong ends up in this
+  // account's status, which your partner's phone reads: the link (your whole rota) is never part of the message
+  var res, text;
+  try {
+    res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+    text = res.getResponseCode() < 300 ? res.getContentText() : '';
+  } catch (err) {
+    throw new Error('The rota link could not be reached this time. Trying again next run.');
+  }
   if (res.getResponseCode() >= 300) throw new Error('The rota link returned an error (' + res.getResponseCode() + ').');
-  var text = res.getContentText();
   // a sign-in or error page (or nothing) instead of a calendar is never "no shifts": the ones there stay,
   // and your partner isn't told they've all gone
   if (!/BEGIN:VCALENDAR/i.test(String(text || ''))) throw new Error('The rota link did not send a calendar this time. Trying again next run.');

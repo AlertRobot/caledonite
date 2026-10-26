@@ -1147,3 +1147,21 @@ test("someone who isn't one of you, trying again and again, reads the household 
   asUser('e@x.com');
   assert.equal(ctx.whoAmI_().person, 'ethan');
 });
+
+// ---------- round 7 ----------
+test("the rota link never appears in what went wrong (your partner's phone reads this account's status)", () => {
+  withDigest();
+  const { api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.fsCommit_ = () => {};
+  ctx.docName_ = (p) => p;
+  const link = 'https://rota.example/feed/s3cr3t-token.ics';
+  const c = { calDocs: { rotalink: { share: 'busy', role: 'rota', lastSeen: Date.now() } }, people: { sophie: {}, ethan: {} }, appEmail: 's@x.com' };
+  for (const fail of ['DNS error: ' + link, 'Address unavailable: ' + link, 'Timeout: ' + link]) {
+    ctx.UrlFetchApp = { fetch: () => { throw new Error(fail); } };
+    let err; try { ctx.syncRotaLink_({ person: 'sophie', email: 's@x.com', main: true }, c, link); } catch (e) { err = e; }
+    assert.ok(err, 'still an error');
+    assert.ok(!String(err.message).includes('s3cr3t'), err.message);
+    assert.ok(!String(err.message).includes('rota.example'), err.message);
+  }
+});
