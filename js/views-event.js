@@ -1,5 +1,5 @@
 // One event: what it is, and the reminder you want for it.
-import { esc, fmtDate, fromDayKey, dayKey, fmtTime, fmtRange, hhmm } from './util.js';
+import { esc, fmtDate, fromDayKey, dayKey, fmtTime, fmtRange, hhmm, addDays } from './util.js';
 import {
   dayList, itemTime, itemTitle, itemSub, nameOf, settingsOf, reminderFor, fireTimes, evRef, calOf, reminderId,
   REMIND_OPTIONS, REMIND_NOTES, isBirthday, isLowCal
@@ -11,7 +11,12 @@ import { ui } from './uistate.js';
 export function findEvent(state, ref, day) {
   const it = day ? dayList(state, day).find((x) => x.ref === ref) : null;
   const evs = state.events.filter((e) => evRef(e) === ref);
-  const ev = evs.find((e) => dayKey(e.allDay ? fromDayKey(e.startKey || dayKey(e.start)) : e.start) === day) || evs[0] || null;
+  // every occurrence of something repeating has the same ref: the one behind the row that was tapped, then the one
+  // starting that day, then one still running that day (the morning after something overnight)
+  const onDay = (e) => !!day && e.start < addDays(fromDayKey(day), 1) && e.end > fromDayKey(day);
+  const ev = (it && it.src && evs.includes(it.src) ? it.src : null)
+    || evs.find((e) => dayKey(e.allDay ? fromDayKey(e.startKey || dayKey(e.start)) : e.start) === day)
+    || evs.find(onDay) || evs[0] || null;
   return { it, ev };
 }
 

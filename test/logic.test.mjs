@@ -342,3 +342,16 @@ test('offline, the service worker answers only from Caledonite’s own saved cop
   assert.equal(await ask(lib, 'cors'), 'network error', 'not another app’s copy, and not the app page as a JSON file');
   assert.equal(await ask('https://alertrobot.github.io/caledonite/', 'navigate'), 'APP PAGE');
 });
+
+test('opening the second day of something repeating that runs overnight changes that occurrence, not another', async () => {
+  const { findEvent } = await import('../js/views-event.js');
+  const sat2 = dayKey(addDays(new Date(sat + 'T12:00'), 7));
+  const night = (day, n) => timed('ethan', 'primary', day, '22:00', '23:59', { id: `late${n}`, t: 'Late film', uid: 'u-late', sid: 's-late', rid: 'g-late', gid: `g-late_${day.replace(/-/g, '')}T220000Z`, e: atTime(dayKey(addDays(new Date(day + 'T12:00'), 1)), '01:00').getTime() });
+  const st = load({ events: [night(sat, 1), night(sat2, 2)] });
+  const ref = 'e:ethan:primary:u-late';
+  const nextMorning = dayKey(addDays(new Date(sat2 + 'T12:00'), 1));
+  const { ev } = findEvent(st, ref, nextMorning);
+  assert.equal(ev.id, 'late2', 'the occurrence shown on that morning');
+  assert.equal(findEvent(st, ref, sat2).ev.id, 'late2');
+  assert.equal(findEvent(st, ref, sat).ev.id, 'late1');
+});
