@@ -453,3 +453,25 @@ test('a request whose time went by while it waited no longer asks for an answer,
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
+
+test('the page runs under its own Content Security Policy: the theme script is allowed and nothing is blocked', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const html = readFileSync(new globalThis.URL('../index.html', import.meta.url), 'utf8');
+  const inline = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  assert.ok(html.includes(`'sha256-${createHash('sha256').update(inline).digest('base64')}'`), 'the CSP has the hash of the theme script as it is now');
+  // with the policy enforced (the other checks skip it)
+  const ctx = await browser.newContext({ ...devices['Pixel 7'], locale: 'en-GB', timezoneId: 'Europe/London' });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => {
+    localStorage.setItem('caledonite.look', JSON.stringify({ theme: 'dragonfire' }));
+    window.__blocked = []; document.addEventListener('securitypolicyviolation', (e) => window.__blocked.push(`${e.violatedDirective} ${e.blockedURI}`));
+  });
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await page.goto(`${URL}?demo=sophie#today`);
+  await page.waitForSelector('.bottom-nav');
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.mode), 'dark', 'the theme script ran');
+  for (const h of ['#calendar', '#requests', '#ask', '#add', '#jar', '#settings/theme']) await go(page, h);
+  assert.deepEqual(await page.evaluate(() => window.__blocked), []);
+  await ctx.close();
+});
