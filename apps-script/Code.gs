@@ -758,11 +758,15 @@ function processOutbox_(me, ctx) {
   var rs = { tagMap: {}, owned: null, defaultId: null };
   var writes = [];
   var changed = false;
-  items.sort(function (a, b) { return (a.data.created || 0) - (b.data.created || 0); });
+  // in the order they were made; ones made together (take out the pencilled-in event, then add the agreed one) by seq
+  items.sort(function (a, b) { return ((a.data.created || 0) - (b.data.created || 0)) || ((a.data.seq || 0) - (b.data.seq || 0)); });
+  var stuck = {};
   items.forEach(function (it) {
     var o = it.data;
     var own = !!ctx.appEmail && String(o.byEmail || '').toLowerCase() === ctx.appEmail;
     var result = {};
+    // an earlier change to the same event failed this run: wait, so they still happen in order next time
+    if (o.tag && stuck[o.tag]) return;
     try {
       if (o.op === 'create') result = createEvent_(me, ctx, o, own, rs);
       else if (o.op === 'update' || o.op === 'delete') result = changeByTag_(o, rs);
@@ -771,6 +775,7 @@ function processOutbox_(me, ctx) {
       if (!result.refused && !result.already && (result.eventId || result.changed)) changed = true;
       writes.push(upd_(HOUSEHOLD + '/outbox/' + it.id, { done: true, doneAt: Date.now(), result: result }, ['done', 'doneAt', 'result']));
     } catch (err) {
+      if (o.tag) stuck[o.tag] = true;
       var tries = (o.tries || 0) + 1;
       var patch = { tries: tries, error: String(err && err.message || err).slice(0, 200) };
       if (tries >= 5) patch.done = true;

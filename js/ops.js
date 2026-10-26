@@ -30,8 +30,9 @@
     var patch = { answeredAt: now };
     var out = [];
     var notify = null;
+    // seq: the order to do them in, as they're all made at the same moment (remove the pencilled-in one, then add)
     var add = function (person, op, extra) {
-      var item = { person: person, op: op, tag: tag, byEmail: o.byEmail, done: false, created: now, tz: o.tz || null };
+      var item = { person: person, op: op, tag: tag, byEmail: o.byEmail, done: false, created: now, seq: out.length, tz: o.tz || null };
       for (var k in extra) item[k] = extra[k];
       out.push(item);
     };
@@ -69,10 +70,11 @@
       patch.when = r.counter;
       patch.counter = null;
       var t2 = eventTitle(r);
-      both.forEach(function (p) {
-        if (r.hold) add(p, 'delete', {});
-        add(p, 'create', { both: true, event: evFromWhen(t2, r.counter) });
-      });
+      if (r.hold) both.forEach(function (p) { add(p, 'delete', {}); });
+      // at the new time, in the same calendars a yes would have used
+      if (r.type === 'favour') add(r.to, 'create', { event: evFromWhen(r.title + ' (for ' + ((o.names && o.names[r.from]) || 'your partner') + ')', r.counter, '19:00') });
+      else if (r.type === 'add') add(r.to, 'create', { event: evFromWhen(r.title, r.counter) });
+      else both.forEach(function (p) { add(p, 'create', { both: true, event: evFromWhen(t2, r.counter) }); });
       tell(r.to, meName + ' said yes to your time', (r.title || t2) + ': ' + r.counter.label);
     } else if (answer === 'cancel') {
       patch.status = 'cancelled';
