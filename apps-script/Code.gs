@@ -1791,17 +1791,19 @@ function nudgeRequests_(me, ctx) {
   var hours = Number(ctx.hh.nudgeHours === undefined ? 24 : ctx.hh.nudgeHours);
   if (!hours) return;
   var waiting = fsQuery_('requests', [['from', me.person], ['status', 'waiting']]);
-  var writes = [];
   waiting.forEach(function (r) {
     var d = r.data;
     if (d.autoNudged || d.type === 'heads') return;
     var since = Math.max(d.created || 0, d.reminded || 0);
     if (Date.now() - since < hours * 3600e3) return;
     var name = (ctx.person && ctx.person.name) || 'Your partner';
-    writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: d.to, kind: 'requests', title: 'Still waiting: ' + name + ' asked you something', body: d.title || '', link: '#requests', reqId: r.id, ask: '1', sendAfter: Date.now(), sent: false, created: Date.now() }));
-    writes.push(upd_(HOUSEHOLD + '/requests/' + r.id, { autoNudged: Date.now() }, ['autoNudged']));
+    // together, and only if it's still as it was read: one answered or called off a moment ago isn't nudged
+    var pair = [
+      upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: d.to, kind: 'requests', title: 'Still waiting: ' + name + ' asked you something', body: d.title || '', link: '#requests', reqId: r.id, ask: '1', sendAfter: Date.now(), sent: false, created: Date.now() }),
+      ifSame_(upd_(HOUSEHOLD + '/requests/' + r.id, { autoNudged: Date.now() }, ['autoNudged']), r)
+    ];
+    try { fsCommit_(pair); } catch (err) { if (!/FAILED_PRECONDITION|^Firestore 409/i.test(String(err && err.message))) throw err; }
   });
-  fsCommit_(writes);
 }
 
 // ===================== notifications =====================

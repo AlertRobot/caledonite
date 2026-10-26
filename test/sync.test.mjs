@@ -1329,3 +1329,22 @@ test('a service account key pasted in wrong never shows any of itself in an erro
   assert.ok(err);
   assert.ok(!/MIIE|SECRET/.test(err.message), err.message);
 });
+
+test('a request answered or called off just as the nudge goes out is not nudged', () => {
+  withDigest();
+  const old = Date.now() - 2 * 864e5;
+  ctx.fsQuery_ = () => [
+    { id: 'r1', data: { from: 'ethan', to: 'sophie', title: 'Cinema', status: 'waiting', created: old }, updateTime: 'T1' },
+    { id: 'r2', data: { from: 'ethan', to: 'sophie', title: 'Walk', status: 'waiting', created: old }, updateTime: 'T2' }
+  ];
+  const commits = [];
+  ctx.fsCommit_ = (w) => {
+    if (w.some((x) => x.currentDocument && x.currentDocument.updateTime === 'T1')) throw new Error('Firestore 400: {"error":{"status":"FAILED_PRECONDITION"}}');
+    commits.push(w);
+  };
+  ctx.docName_ = (p) => p;
+  ctx.nudgeRequests_({ person: 'ethan' }, { hh: {}, person: { name: 'Ethan' } });
+  assert.equal(commits.length, 1, 'only the one still waiting');
+  assert.equal(commits[0][0].update.fields.body.stringValue, 'Walk');
+  assert.equal(commits[0][1].currentDocument.updateTime, 'T2');
+});
