@@ -76,7 +76,7 @@ export async function loadBudgie() {
       if (/not allowed|key|link/i.test(j.error || '')) { lsSet(BG_CACHE, null); return { found: true, error: 'Budgie turned this link down. Make a new one in Budgie (Settings, Linked apps) and paste it here.' }; }
       throw new Error(j.error || 'Budgie said no');
     }
-    const out = { found: true, days: j.days || {}, fun: j.fun || null, synced: j.synced || Date.now(), name: j.name || '' };
+    const out = { found: true, days: cleanDays(j.days), fun: cleanFun(j.fun), synced: Number(j.synced) || Date.now(), name: String(j.name || '') };
     lsSet(BG_CACHE, out);
     return out;
   } catch (e) {
@@ -84,6 +84,23 @@ export async function loadBudgie() {
     if (cached) return Object.assign({}, cached, { stale: true });
     return { found: true, error: 'Couldn\u2019t reach Budgie just now.' };
   }
+}
+
+// Only the shape Caledonite draws, so an odd answer can never break Today
+const isKey = (k) => /^\d{4}-\d{2}-\d{2}$/.test(String(k));
+function cleanDays(days) {
+  const out = {};
+  if (!days || typeof days !== 'object') return out;
+  for (const [k, list] of Object.entries(days)) {
+    if (!isKey(k) || !Array.isArray(list)) continue;
+    const items = list.filter((m) => m && typeof m === 'object' && m.name).map((m) => ({ name: String(m.name).slice(0, 80), sub: String(m.sub || '').slice(0, 80), pay: !!m.pay }));
+    if (items.length) out[k] = items;
+  }
+  return out;
+}
+function cleanFun(f) {
+  if (!f || typeof f !== 'object' || !Number.isFinite(Number(f.left))) return null;
+  return { left: Number(f.left), names: Array.isArray(f.names) ? f.names.map(String) : [], until: isKey(f.until) ? f.until : null };
 }
 
 export async function loadLinked() {

@@ -107,7 +107,7 @@ export function viewJar(state) {
       <button type="button" class="btn self-start" data-act="jarAdd">Add to the jar</button></div></section>`);
   const list = state.ideas.filter((i) => j.filter === 'all' || i.where === j.filter);
   out.push(`<section class="stack-s"><h2 class="label">In the jar (${list.length})</h2><div class="card flush">${list.map((i) => `<div class="list-row">
-    <span class="grow col"><span class="b">${esc(i.title)}</span><span class="small muted">${esc(WHERE[i.where] || '')}, ${esc(money(i.cost))}${i.used ? `. Done ${i.used} time${i.used === 1 ? '' : 's'}` : ''}</span></span>
+    <span class="grow col"><span class="b">${esc(i.title)}</span><span class="small muted">${esc(WHERE[i.where] || '')}, ${esc(money(i.cost))}${Number(i.used) > 0 ? `. Done ${Number(i.used)} time${Number(i.used) === 1 ? '' : 's'}` : ''}</span></span>
     <button type="button" class="icon-btn plain" aria-label="Remove ${esc(i.title)}" data-act="jarRemove" data-id="${esc(i.id)}">${icon.close(20)}</button></div>`).join('')}</div>
     <p class="small muted">Costs are rough guesses for two. Change one by removing it and adding it again.</p></section>`);
   return out.join('');
