@@ -1048,3 +1048,35 @@ test('holding a notification for quiet hours never makes again one that was just
   assert.equal(writes.length, 1);
   assert.equal(writes[0].currentDocument.updateTime, '2026-10-26T10:00:00.1Z');
 });
+
+test('a very full rota calendar with long names still remembers its shifts (a saved value is at most 9 KB)', () => {
+  const now = Date.now();
+  const { store, api } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  const evs = (name) => Array.from({ length: 120 }, (_, i) => ({ t: name + ' '.repeat(10) + 'x'.repeat(200), s: now + 3600e3 + i * 4 * 3600e3, e: now + 2 * 3600e3 + i * 4 * 3600e3 }));
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs('Ward'), api, { share: 'all' });
+  assert.ok(store.rota_rota && store.rota_rota.length <= 9216, 'saved');
+  // the same again: nothing to tell
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs('Ward'), api, { share: 'all' });
+  assert.equal(writes.length, 0);
+});
+
+test("a rota calendar that isn't read (not shown, shared as Nothing) doesn't forget its shifts", () => {
+  withDigest();
+  const calId = 'rota@group.calendar.google.com';
+  const key = ctx.shortKey_(calId);
+  const { store, api } = fakeProps({ [`h_${key}`]: '{}', [`rota_${key}`]: '{"from":1,"to":2,"map":{"2026-11-10":[1,2,"Long day"]}}' });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => calId, getName: () => 'Rota', getColor: () => '#1', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'e@x.com' }) };
+  ctx.Calendar = { Events: { list: () => { throw new Error('should not be read'); } } };
+  ctx.fsCommit_ = () => {};
+  ctx.docName_ = (p) => p;
+  ctx.syncCalendars_({ email: 's@x.com', person: 'sophie', main: true, people: [] }, { appEmail: 's@x.com', hh: {}, people: {}, calDocs: {
+    [key]: { owner: 'sophie', calKey: key, calId, name: 'Rota', color: '#1', canWrite: true, primary: false, account: 's@x.com', lastSeen: Date.now(), show: false, share: 'none', role: 'rota', layer: 'own' }
+  } }, []);
+  assert.match(store[`rota_${key}`], /Long day/);
+});

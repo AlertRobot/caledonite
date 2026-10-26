@@ -411,13 +411,15 @@ function syncCalendars_(me, ctx, errors) {
       }
       count++;
       var events = [];
-      if (doc.show !== false || (doc.share && doc.share !== 'none')) events = readEvents_(cal, id, from, to);
+      var read = doc.show !== false || (doc.share && doc.share !== 'none');
+      if (read) events = readEvents_(cal, id, from, to);
       var d2 = doc;
       events.forEach(function (o) { seen.push({ calKey: calKey, shown: d2.show !== false, share: d2.share || 'busy', doc: d2, ev: o }); });
       var fw = feedWrites_(me, ctx, calKey, doc, events, props, reseed ? copiesOf_(me.person, calKey) : null);
       writes = writes.concat(fw.writes);
       pending[fw.key] = fw.value;
-      if (doc.role === 'rota') rotaChanged_(me, ctx, calKey, events, props, doc);
+      // (not when it wasn't read at all: no shifts isn't news, and turning it back on mustn't look like all new ones)
+      if (doc.role === 'rota' && read) rotaChanged_(me, ctx, calKey, events, props, doc);
     } catch (err) {
       var msg = 'calendar ' + ((cal && safeName_(cal)) || id) + ': ' + String(err && err.message || err);
       Logger.log(msg);
@@ -917,8 +919,16 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     var k = evStartKey_(e);
     while (map[k]) k += '+';
     // a shift marked Private or #busy is never named, not even by a change to its name
-    map[k] = [s, en, e.pb ? '' : (e.t || 'Shift')];
+    map[k] = [s, en, e.pb ? '' : String(e.t || 'Shift').slice(0, 40)];
   });
+  // a saved value can't be bigger than about 9 KB: a very full calendar keeps the nearest days only
+  // (and says so, so the days past them are never compared)
+  var order = Object.keys(map).sort(function (a, b) { return map[a][0] - map[b][0]; });
+  while (order.length && JSON.stringify({ from: win.from, to: win.to, map: map }).length > 8000) {
+    var last = order.pop();
+    win.to = Math.min(win.to, map[last][0] - 1);
+    delete map[last];
+  }
   var key = 'rota_' + calKey;
   var before = null;
   try { before = JSON.parse(props.getProperty(key) || 'null'); } catch (err) { before = null; }
