@@ -580,7 +580,9 @@ function readEvents_(cal, id, from, to) {
           pageToken: token || undefined,
           fields: 'nextPageToken,items(id,iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,visibility,attendees(self,responseStatus))'
         });
-        (res.items || []).forEach(function (it) { var o = normApi_(it); if (o) out.push(o); });
+        // (one odd event is left out, never the reason the whole calendar is read the slow way every run, which
+        // can use up the account's daily time for its 10-minute runs)
+        (res.items || []).forEach(function (it) { var o = null; try { o = normApi_(it); } catch (e) { o = null; } if (o) out.push(o); });
         token = res.nextPageToken;
       } while (token);
       return out;

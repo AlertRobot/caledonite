@@ -1371,3 +1371,17 @@ test('after slow changes, the calendars are not all read again when the run is s
   c2.syncAll();
   assert.equal(reads, 1, 'left for the next run');
 });
+
+test('one odd event from Google never sends the whole calendar the slow way', () => {
+  withDigest();
+  const s = Date.now() + 864e5;
+  ctx.Calendar = { Events: { list: () => ({ items: [
+    { id: 'ok1', iCalUID: 'ok1@x', summary: 'Tea', start: { dateTime: new Date(s).toISOString() }, end: { dateTime: new Date(s + 3600e3).toISOString() } },
+    { id: 'odd', iCalUID: 'odd@x', summary: 'No end', start: { dateTime: new Date(s).toISOString() } }
+  ] }) } };
+  let slow = 0;
+  const cal = { getEvents: () => { slow++; return []; } };
+  const evs = ctx.readEvents_(cal, 'c@x', new Date(), new Date(Date.now() + 5 * 864e5));
+  assert.equal(slow, 0);
+  assert.equal(JSON.stringify(evs.map((e) => e.t)), '["Tea"]');
+});
