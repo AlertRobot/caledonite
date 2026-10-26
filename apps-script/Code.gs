@@ -271,8 +271,7 @@ function syncAll() {
     var seen = [];
     var cal = stage('calendars', function () { return syncCalendars_(me, ctx, errors); });
     if (cal) { n = cal.count; seen = cal.seen; }
-    if (me.main && ctx.settings.rotaUrl) stage('rota link', function () { syncRotaLink_(me, ctx); });
-    else if (me.main) stage('rota link', function () { dropRotaLink_(me); });
+    if (me.main) stage('rota link', function () { var url = rotaUrlOf_(me, ctx); if (url) syncRotaLink_(me, ctx, url); else dropRotaLink_(me); });
     var changed = stage('outbox', function () { return processOutbox_(me, ctx); });
     if (changed) {
       // let the feeds catch up straight away
@@ -669,8 +668,21 @@ function shareFilter_(doc, list) {
 
 // ===================== rota link (for example from Loop) =====================
 
-function syncRotaLink_(me, ctx) {
-  var url = String(ctx.settings.rotaUrl || '').replace(/^webcal:/i, 'https:');
+// What only this person can read (people/{id}/private/main), read once a run
+function privateOf_(ctx, pid) {
+  ctx.priv = ctx.priv || {};
+  if (!(pid in ctx.priv)) ctx.priv[pid] = fsGet_(HOUSEHOLD + '/people/' + pid + '/private/main') || {};
+  return ctx.priv[pid];
+}
+// The rota link is kept where only its owner can read it (it gives the whole rota, whatever is shared of it);
+// on their record until the app has moved it
+function rotaUrlOf_(me, ctx) {
+  var priv = privateOf_(ctx, me.person);
+  return String(typeof priv.rotaUrl === 'string' ? priv.rotaUrl : ((ctx.settings || {}).rotaUrl || ''));
+}
+
+function syncRotaLink_(me, ctx, rotaUrl) {
+  var url = String(rotaUrl || '').replace(/^webcal:/i, 'https:');
   if (!/^https:\/\//i.test(url)) return;
   var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
   if (res.getResponseCode() >= 300) throw new Error('The rota link returned an error (' + res.getResponseCode() + ').');
@@ -1297,7 +1309,7 @@ function fireReminders_(me, ctx, seen) {
   }
 
   me.people.forEach(function (p) {
-    var priv = fsGet_(HOUSEHOLD + '/people/' + p.id + '/private/main') || {};
+    var priv = privateOf_(ctx, p.id);
     var rems = merge_(p.data.reminders || {}, priv.reminders || {});
     var settings = p.data.settings || {};
     var bdays = (settings.autoRemind && settings.autoRemind.birthdays) || [];

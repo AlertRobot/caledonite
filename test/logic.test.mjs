@@ -335,6 +335,37 @@ test('reminders and private countdowns are kept where your partner can’t read 
   assert.ok(store.state.people.ethan.reminders.r9 && store.state.people.ethan.reminders.r1);
 });
 
+test('your rota link is kept where your partner can’t read it, and one on your record moves there', async () => {
+  const seen = [];
+  store.backend = { commit: async (ops) => { seen.push(...ops); }, ping() {} };
+  const base = {
+    household: {}, private: {},
+    people: { ethan: { name: 'Ethan', email: 'e@x.com', settings: { rotaUrl: 'https://loop.example/old.ics', remindAt: '08:00' } }, sophie: { name: 'Sophie', email: 's@x.com' } },
+    calendars: {}, feeds: [], shifts: {}, requests: {}, notes: {}, outbox: {}, jobs: {}, ideas: {}, status: {}
+  };
+  setRaw(base, { phase: 'ready', me: 'ethan', user: { email: 'e@x.com' } });
+  await actions.movePrivate();
+  const up = seen.find((o) => o.type === 'update' && o.path === 'people/ethan/private/main');
+  assert.equal(up.data.rotaUrl, 'https://loop.example/old.ics');
+  assert.ok(seen.some((o) => o.type === 'unset' && o.path === 'people/ethan' && o.field === 'settings.rotaUrl'));
+  // saving a new one: only in the private place, and never on your record
+  seen.length = 0;
+  await actions.updateMySettings({ rotaUrl: 'https://loop.example/new.ics', remindAt: '09:00' });
+  assert.deepEqual(seen.find((o) => o.path === 'people/ethan/private/main').data, { rotaUrl: 'https://loop.example/new.ics' });
+  assert.ok(!seen.some((o) => o.path === 'people/ethan' && o.type === 'update' && 'rotaUrl' in ((o.data || {}).settings || {})));
+  assert.equal(seen.find((o) => o.path === 'people/ethan' && o.type === 'update').data.settings.remindAt, '09:00');
+  // and the screens show the one in the private place (taken out counts too)
+  setRaw(Object.assign({}, base, { private: { rotaUrl: 'https://loop.example/new.ics' } }), { phase: 'ready', me: 'ethan', user: { email: 'e@x.com' } });
+  assert.equal(store.state.people.ethan.settings.rotaUrl, 'https://loop.example/new.ics');
+  setRaw(Object.assign({}, base, { private: { rotaUrl: '' } }), { phase: 'ready', me: 'ethan', user: { email: 'e@x.com' } });
+  assert.equal(store.state.people.ethan.settings.rotaUrl, '');
+  // once moved, it isn't moved again
+  seen.length = 0;
+  setRaw(Object.assign({}, base, { people: { ethan: { name: 'Ethan', email: 'e@x.com', settings: {} }, sophie: base.people.sophie }, private: { rotaUrl: 'x' } }), { phase: 'ready', me: 'ethan', user: { email: 'e@x.com' } });
+  await actions.movePrivate();
+  assert.equal(seen.length, 0);
+});
+
 test('offline, the service worker answers only from Caledonite’s own saved copies, and the app page only for a page', async () => {
   const lib = 'https://alertrobot.github.io/es-kitchen/data/library.json';
   const { handlers } = await loadSw({ fetchFails: true, own: { './index.html': 'APP PAGE' }, other: { [lib]: 'PECKISH COPY', './index.html': 'SOMEONE ELSE' } });

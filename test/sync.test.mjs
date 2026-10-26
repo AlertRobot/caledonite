@@ -217,7 +217,22 @@ test('taking the rota link out removes its shifts', () => {
   ctx.dropRotaLink_({ person: 'sophie' });
   assert.equal(writes.length, 0, 'nothing to do the next time');
   // and the sync calls it when there's no link
-  assert.match(ctx.syncAll.toString(), /else if \(me\.main\) stage\('rota link', function \(\) \{ dropRotaLink_\(me\); \}\)/);
+  assert.match(ctx.syncAll.toString(), /if \(me\.main\) stage\('rota link', function \(\) \{ var url = rotaUrlOf_\(me, ctx\); if \(url\) syncRotaLink_\(me, ctx, url\); else dropRotaLink_\(me\); \}\)/);
+});
+
+test('the rota link is read from where only its owner can read it, and from their record until it has moved', () => {
+  const me = { person: 'sophie', main: true };
+  const priv = (p) => { ctx.fsGet_ = (path) => (path === 'households/main/people/sophie/private/main' ? p : null); };
+  priv({ rotaUrl: 'https://loop.example/new.ics' });
+  assert.equal(ctx.rotaUrlOf_(me, { settings: { rotaUrl: 'https://loop.example/old.ics' } }), 'https://loop.example/new.ics');
+  // taken out (saved empty in the private place): not the old one on the record
+  priv({ rotaUrl: '' });
+  assert.equal(ctx.rotaUrlOf_(me, { settings: { rotaUrl: 'https://loop.example/old.ics' } }), '');
+  // not moved yet
+  priv(null);
+  assert.equal(ctx.rotaUrlOf_(me, { settings: { rotaUrl: 'https://loop.example/old.ics' } }), 'https://loop.example/old.ics');
+  priv({ reminders: {} });
+  assert.equal(ctx.rotaUrlOf_(me, { settings: {} }), '');
 });
 
 test("a calendar that's gone from Google leaves Settings after a couple of days", () => {
