@@ -1161,7 +1161,7 @@ function personDay_(p, key, data) {
     var s0 = e.ad ? localTime_(e.sd, '00:00') : e.s;
     var e0 = e.ad ? localTime_(e.ed || keyPlus_(e.sd, 1), '00:00') : e.e;
     if (!(s0 < dayEnd && e0 > dayStart)) return;
-    if (c.role === 'rota') { if (e.ad ? e.sd === key : evStartKey_(e) === key) rota.push(e); return; }
+    if (c.role === 'rota') { if (e.ad ? e.sd <= key && key < (e.ed || keyPlus_(e.sd, 1)) : evStartKey_(e) === key) rota.push(e); return; }
     if (e.tag && /^(both:|req:)/.test(e.tag)) { out.together.push(e); return; }
     if (c.role === 'work') return;
     if (c.layer && c.layer !== 'own') return;
