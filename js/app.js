@@ -390,7 +390,8 @@ const H = {
     if (!a.allDay && !a.start) { ui.focus = 'add-start'; return toast('Add a start time, or tick All day.'); }
     const day = addDayKey();
     let end = a.end;
-    if (!a.allDay && (!end || end <= a.start)) end = plusMins(a.start, 60);
+    if (!a.allDay && end && end <= a.start) { ui.focus = 'add-end'; return toast('The end needs to be after the start.'); }
+    if (!a.allDay && !end) end = plusMins(a.start, 60);
     const cals = Object.values(st.calendars).filter((c) => c.owner === st.me && c.canWrite && c.role !== 'rota');
     const calKey = a.cal || (cals.find((c) => c.primary) || cals[0] || {}).calKey || null;
     try {
