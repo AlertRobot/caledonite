@@ -1,14 +1,12 @@
 // Today and Calendar screens.
 import {
-  esc, dayKey, fromDayKey, addDays, startOfDay, fmtDate, fmtTime, fmtRange, relDay, MONTH_NAMES, atTime, mondayOf, fmtDateShort, agoText, minutesOf
+  esc, dayKey, fromDayKey, addDays, fmtDate, fmtTime, fmtRange, MONTH_NAMES, atTime, mondayOf, fmtDateShort, agoText, minutesOf
 } from './util.js';
 import {
-  buildDay, dayList, statusNow, nextBothFree, itemTime, itemTitle, itemSub, nameOf, personColour, monthCell, allLayers,
-  layerChipLabel, LAYER_INFO, settingsOf, isWorkingShift, reminderFor, myReminders, reminderLine,
-  countdowns, countdownText, jobsOn, inQuietHours, quietNight, lowCount
+  buildDay, dayList, statusNow, nextBothFree, itemTime, itemTitle, itemSub, nameOf, personColour, monthCell, allLayers, layerChipLabel, LAYER_INFO, settingsOf, reminderFor, myReminders, reminderLine, countdowns, countdownText, jobsOn, inQuietHours, quietNight, lowCount
 } from './logic.js';
 import { jobRow } from './views-extra.js';
-import { icon, avatar, whoChip, seg, empty } from './ui.js';
+import { icon, avatar, whoChip, seg } from './ui.js';
 import { ui } from './uistate.js';
 
 function motif() {
@@ -262,7 +260,6 @@ export function agendaRow(state, it, key) {
   return `<button type="button" class="ag-row ag-tap" data-act="openEv" data-ref="${esc(it.ref)}" data-day="${key}" aria-label="${esc(itemTitle(state, it))}, ${esc(itemTime(it, key))}, ${esc(whoLabel(state, it.who))}">${inner}</button>`;
 }
 
-export function itemRow(state, it, key) { return agendaRow(state, it, key); }
 // a small bell after the name when there's a reminder
 export function bellFor(state, it) {
   if (!it.ref) return '';

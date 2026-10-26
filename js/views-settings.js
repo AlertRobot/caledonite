@@ -1,7 +1,7 @@
 // Settings (with its own menu), plus the sign-in and first-time screens.
 import { esc, dayKey, addDays, mondayOf, fmtDate, agoText, WEEKDAY_NAMES, fmtTime, atTime, MONTH_NAMES, fromDayKey } from './util.js';
-import { isLowCal, nameOf, settingsOf, shiftFor, SHIFT_ORDER, LAYER_INFO, personColour, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours } from './logic.js';
-import { icon, avatar, seg, toggleRow, empty } from './ui.js';
+import { isLowCal, nameOf, settingsOf, shiftFor, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours } from './logic.js';
+import { icon, avatar, seg, toggleRow } from './ui.js';
 import { ui } from './uistate.js';
 import { APP, FIREBASE } from './config.js';
 import { THEMES, PALETTES, getLook } from './theme.js';
@@ -69,10 +69,6 @@ function linkedStatus(state) {
   if (L.peckish && L.peckish.found) names.push('Peckish');
   if (L.budgie && L.budgie.found && !L.budgie.error) names.push('Budgie');
   return names.length ? `${names.join(' and ')} linked` : 'Peckish and Budgie';
-}
-function reminderCount(state) {
-  const n = myReminders(state).length;
-  return n ? `${n} reminder${n === 1 ? '' : 's'} coming up.` : 'No reminders yet.';
 }
 function hasPush() { try { return localStorage.getItem('caledonite.push') === '1' && Notification.permission === 'granted'; } catch (e) { return false; } }
 
@@ -489,4 +485,3 @@ export function viewNotMember(state) {
 export function viewLoading() {
   return `<div class="welcome"><span class="logo spin">${icon.gem(48)}</span><p class="muted">Loading your calendars...</p></div>`;
 }
-export { personColour, LAYER_INFO, SHIFT_ORDER, empty };

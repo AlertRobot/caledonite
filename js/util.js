@@ -2,17 +2,12 @@
 
 export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 export const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-// Monday-first week, used for working days: 1 = Monday ... 7 = Sunday
-export const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
 export const WEEKDAY_NAMES = { 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday' };
 
 export const pad = (n) => String(n).padStart(2, '0');
 
 export function dayKey(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-export function monthKey(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
 export function fromDayKey(k) {
   const [y, m, d] = k.split('-').map(Number);
@@ -55,9 +50,6 @@ export function roundDown(d, mins) {
 export function roundUp(d, mins) {
   const ms = mins * 60000;
   return new Date(Math.ceil(d.getTime() / ms) * ms);
-}
-export function sameDay(a, b) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
 // 7pm, 7:30pm, 12pm, midnight
@@ -112,12 +104,6 @@ export function esc(s) {
 }
 export function uid(prefix = '') {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
-export function clamp(v, a, b) {
-  return Math.max(a, Math.min(b, v));
-}
-export function plural(n, word, many) {
-  return `${n} ${n === 1 ? word : (many || word + 's')}`;
 }
 export function initial(name) {
   return (name || '?').trim().charAt(0).toUpperCase();

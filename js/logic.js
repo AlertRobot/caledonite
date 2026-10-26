@@ -1,8 +1,8 @@
 // What each of you is doing, when you're both free, shifts, dinner.
 // Pure functions over the store's state. No network, no DOM.
 import {
-  dayKey, fromDayKey, addDays, addMinutes, atTime, startOfDay, isoWeekday, fmtTime, fmtHM, fmtRange,
-  relDay, relDayLower, roundDown, roundUp, mergeIntervals, subtractIntervals, intersectIntervals, DAY_NAMES, minutesOf, hhmm
+  dayKey, fromDayKey, addDays, addMinutes, atTime, startOfDay, isoWeekday, fmtTime, fmtRange,
+  relDay, relDayLower, roundDown, roundUp, subtractIntervals, intersectIntervals, DAY_NAMES, minutesOf, hhmm
 } from './util.js';
 
 export const DEFAULT_SHIFT_TYPES = {
@@ -58,9 +58,6 @@ export function settingsOf(state, pid) {
 export function nameOf(state, pid) {
   if (pid === 'both') return 'Both of you';
   return (state.people[pid] && state.people[pid].name) || 'Someone';
-}
-export function youOr(state, pid) {
-  return pid === state.me ? 'You' : nameOf(state, pid);
 }
 export function personColour(state, pid) {
   const p = state.people[pid];
@@ -628,25 +625,6 @@ export function freeSlots(state, now = new Date(), count = 4, days = 21) {
 }
 function hm(d) { return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
 
-// ---------- short lines for "Coming up" ----------
-export function dayLine(state, pid, key) {
-  const d = buildDay(state, key);
-  const p = d.persons[pid];
-  if (!p) return '';
-  const bits = [];
-  for (const it of p.items) {
-    if (it.cont || it.kind === 'sleep') continue;
-    if (it.kind === 'shift') bits.push(it.allDay ? it.title : `${itemTitle(state, it)}, ${fmtRange(it.start, it.end)}`);
-    else if (it.kind === 'work') bits.push(`${it.title}, ${fmtRange(it.start, it.end)}`);
-    else if (bits.length < 3) bits.push(it.allDay ? it.title : `${it.title} at ${fmtTime(it.start)}`);
-  }
-  for (const t of d.together) {
-    if (t.auto && t.title.startsWith('Dinner together')) continue;
-    bits.push(t.allDay ? t.title : `${t.title} at ${fmtTime(t.start)}`);
-  }
-  return bits.length ? bits.join('. ') + '.' : 'Nothing planned.';
-}
-
 // ---------- month cell summary ----------
 export function monthCell(state, key, filter) {
   const d = buildDay(state, key);
@@ -1028,4 +1006,3 @@ export function quietNight(s, now = new Date()) {
   return a > b && m < b ? dayKey(addDays(now, -1)) : dayKey(now);
 }
 
-export { DAY_NAMES, fmtHM };

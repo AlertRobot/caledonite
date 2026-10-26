@@ -61,7 +61,6 @@ export function parseBudgieLink(text) {
     return { u: j.u, k: j.k };
   } catch (e) { return null; }
 }
-export function budgieLinked() { return !!lsGet(BG_LINK); }
 export function setBudgieLink(cfg) { lsSet(BG_LINK, cfg); lsSet(BG_CACHE, null); }
 export function unlinkBudgie() { lsSet(BG_LINK, null); lsSet(BG_CACHE, null); }
 export async function loadBudgie() {

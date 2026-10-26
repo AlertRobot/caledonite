@@ -2,7 +2,7 @@
 // Views read `store.state` and call `actions.*`. Every change re-renders.
 // Each action saves everything it changes in one batch, so nothing is ever half saved.
 import { dayKey, fromDayKey, uid, addDays, startOfDay } from './util.js';
-import { clearDayCache, settingsOf, sleepingUntil, nameOf, DEFAULT_SETTINGS, reminderId, leaveDaysFor, nextJobDay } from './logic.js';
+import { clearDayCache, settingsOf, sleepingUntil, nameOf, reminderId, nextJobDay } from './logic.js';
 import './ops.js';
 
 const Ops = (typeof self !== 'undefined' ? self : window).CaledoniteOps;
@@ -463,4 +463,3 @@ function relDayCap(d) {
   return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
 
-export { DEFAULT_SETTINGS, dayKey, leaveDaysFor };

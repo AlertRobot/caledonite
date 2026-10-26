@@ -1,6 +1,6 @@
 // Requests, asking something, and adding something.
-import { esc, dayKey, addDays, fromDayKey, fmtTime, agoText, relDay, atTime } from './util.js';
-import { nameOf, freeSlots, sleepingUntil, settingsOf, personColour, SHIFT_ORDER, REMIND_OPTIONS, REMIND_NOTES, remindSummary, leaveDaysFor, leaveSummary, JOB_REPEATS } from './logic.js';
+import { esc, dayKey, addDays, fmtTime, agoText, atTime } from './util.js';
+import { nameOf, freeSlots, sleepingUntil, settingsOf, SHIFT_ORDER, REMIND_OPTIONS, REMIND_NOTES, remindSummary, leaveDaysFor, leaveSummary, JOB_REPEATS } from './logic.js';
 import { whenLabel } from './store.js';
 import { icon, avatar, seg, toggleRow, empty } from './ui.js';
 import { ui } from './uistate.js';
@@ -333,4 +333,3 @@ export function addDayKey() {
   if (a.day === 'tomorrow') return dayKey(addDays(new Date(), 1));
   return a.date || dayKey(new Date());
 }
-export { relDay, fromDayKey, personColour };

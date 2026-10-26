@@ -1,7 +1,6 @@
 // The real backend: Firebase sign-in (Google) and Firestore, with offline storage.
 import { FIREBASE, HOUSEHOLD_PATH } from './config.js';
 import { setRaw, setPhase, store, setupOps } from './store.js';
-import { DEFAULT_SETTINGS } from './logic.js';
 
 export async function createFirebaseBackend() {
   const SDK = `https://www.gstatic.com/firebasejs/${FIREBASE.sdk}`;
@@ -206,4 +205,3 @@ async function sha1(s) {
   const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(s));
   return Array.from(new Uint8Array(buf)).map((x) => x.toString(16).padStart(2, '0')).join('');
 }
-export { DEFAULT_SETTINGS };

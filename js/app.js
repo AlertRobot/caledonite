@@ -2,7 +2,7 @@
 import { store, actions, setPhase, setLinked } from './store.js';
 import { ui, resetAsk, resetAdd } from './uistate.js';
 import { viewToday, viewCalendar, waitingForMe, rotateCountdown } from './views-main.js';
-import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey, leaveWhen } from './views-requests.js';
+import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey } from './views-requests.js';
 import { viewSettings, viewSignedOut, viewSetup, viewNotMember, viewLoading } from './views-settings.js';
 import { viewEvent, findEvent } from './views-event.js';
 import { viewJobs, viewJar, STARTER_IDEAS, pickIdea, jarBudget } from './views-extra.js';
@@ -11,7 +11,7 @@ import { applyLook, setLook } from './theme.js';
 import { FIREBASE, APP } from './config.js';
 import { icon } from './ui.js';
 import { dayKey, addDays, fromDayKey, mondayOf, esc, minutesOf, pad } from './util.js';
-import { freeSlots, settingsOf, shiftFor, SHIFT_ORDER, nameOf, reminderFor, reminderId, quietNight, repeatOf, leaveDaysFor, nextBothFree, countdownShared, editTimes } from './logic.js';
+import { freeSlots, settingsOf, nameOf, reminderFor, reminderId, quietNight, repeatOf, leaveDaysFor, nextBothFree, countdownShared, editTimes } from './logic.js';
 import { whenLabel } from './store.js';
 
 const root = document.getElementById('app');
@@ -664,4 +664,3 @@ async function boot() {
 render();
 boot();
 
-export { shiftFor, SHIFT_ORDER };

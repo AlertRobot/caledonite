@@ -1,7 +1,7 @@
 // Jobs (chores, including ones you do together) and the ideas jar.
 import { esc, dayKey, addDays, fromDayKey, fmtDate, fmtTime, atTime, relDay } from './util.js';
-import { nameOf, jobsOn, jobWho, repeatLabel, nextBothFree } from './logic.js';
-import { icon, seg, empty, avatar } from './ui.js';
+import { jobWho, repeatLabel, nextBothFree } from './logic.js';
+import { icon, seg, empty } from './ui.js';
 import { ui } from './uistate.js';
 
 // ---------------- JOBS ----------------
@@ -112,4 +112,3 @@ export function viewJar(state) {
     <p class="small muted">Costs are rough guesses for two. Change one by removing it and adding it again.</p></section>`);
   return out.join('');
 }
-export { avatar };
