@@ -364,3 +364,40 @@ test('a night shift put in by hand on the night the clocks change still ends at 
   const sh = ctx.personDay_(p, '2027-03-27', data).shift;
   assert.equal(sh.e, ctx.localTime_('2027-03-28', '08:00'));
 });
+
+// The rules for notifications, read as text (there's no Firestore emulator here): Peckish's meal reminders
+// ("pk-" ids) can be checked, kept up to date and taken back while waiting; nothing else can be read or changed.
+function notifyRules() {
+  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const block = rules.slice(rules.indexOf('match /notify/{id} {'));
+  const fn = rules.slice(rules.indexOf('function okNotify(id) {'));
+  return { block: block.slice(0, block.indexOf('\n      }\n')), fn: fn.slice(0, fn.indexOf('\n      }\n')) };
+}
+test("the rules let Peckish keep its own waiting reminders up to date, and nothing more", () => {
+  const { block, fn } = notifyRules();
+  const allow = (what) => (block.match(new RegExp(`allow ${what}: if ([^;]+);`)) || [])[1] || '';
+  assert.match(allow('create'), /member\(\) && okNotify\(id\)/);
+  // reading: one at a time, Peckish's only (Caledonite's own ids never start with "pk-"); never a list
+  assert.match(allow('get'), /id\.matches\('pk-\.\*'\)/);
+  assert.match(allow('list'), /^false$/);
+  // changing or taking back: Peckish's only, only while waiting, for the same person, in the same shape
+  for (const w of ['update', 'delete']) {
+    assert.match(allow(w), /id\.matches\('pk-\.\*'\)/, w);
+    assert.match(allow(w), /resource\.data\.sent == false/, w);
+  }
+  assert.match(allow('update'), /okNotify\(id\) && request\.resource\.data\.to == resource\.data\.to/);
+  // what goes in: never already "sent"; only kinds the settings know; a test only for yourself;
+  // Peckish's are always reminders, with just the fields Peckish writes
+  assert.match(fn, /request\.resource\.data\.sent == false/);
+  assert.match(fn, /kind in \['requests', 'rota', 'notes', 'reminders', 'jobs', 'summary', 'test'\]/);
+  assert.match(fn, /kind != 'test' \|\| personEmail\(request\.resource\.data\.to\) == myEmail\(\)/);
+  assert.match(fn, /!id\.matches\('pk-\.\*'\) \|\| \(request\.resource\.data\.kind == 'reminders'/);
+  const fields = JSON.parse((fn.match(/keys\(\)\.hasOnly\((\[[^\]]+\])\)/) || [])[1].replace(/'/g, '"'));
+  // exactly what Peckish's Store.cal.notify saves
+  const peckish = { to: 'sophie', kind: 'reminders', title: 'Dinner tonight', body: '30 minutes.', link: '../es-kitchen/', sendAfter: 1, sent: false, created: 1 };
+  assert.deepEqual(Object.keys(peckish).filter((k) => !fields.includes(k)), []);
+  // and every kind the app and the service worker create is still allowed
+  const kinds = JSON.parse(fn.match(/kind in (\[[^\]]+\])/)[1].replace(/'/g, '"'));
+  const src = ['../js/store.js', '../js/ops.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
+  for (const k of new Set([...src.matchAll(/kind: '([a-z]+)'/g)].map((m) => m[1]).concat([...src.matchAll(/'#[a-z/]+', '([a-z]+)'/g)].map((m) => m[1])))) assert.ok(kinds.includes(k), k);
+});

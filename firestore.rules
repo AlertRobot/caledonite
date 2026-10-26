@@ -91,10 +91,25 @@ service cloud.firestore {
         allow create: if member() && request.resource.data.byEmail == myEmail() && request.resource.data.done == false;
         allow update, delete: if false;
       }
-      // notifications waiting to be sent: write-only
+      function okNotify(id) {
+        return request.resource.data.sent == false
+          && request.resource.data.kind in ['requests', 'rota', 'notes', 'reminders', 'jobs', 'summary', 'test']
+          && (request.resource.data.kind != 'test' || personEmail(request.resource.data.to) == myEmail())
+          && (!id.matches('pk-.*') || (request.resource.data.kind == 'reminders'
+            && request.resource.data.keys().hasOnly(['to', 'kind', 'title', 'body', 'link', 'sendAfter', 'sent', 'created'])));
+      }
+      // notifications waiting to be sent: write-only. Only the kinds your notification settings know, so turning
+      // one off always works; a test (sent straight away, even in quiet hours) only to yourself.
+      // Peckish (on the same website) keeps its meal reminders ("pk-..." ids, never used by Caledonite) up to date
+      // while they wait: it can check one, change it (still a reminder, for the same person) or take it back,
+      // but never one that's been sent.
       match /notify/{id} {
-        allow create: if member();
-        allow read, update, delete: if false;
+        allow create: if member() && okNotify(id);
+        allow get: if member() && id.matches('pk-.*');
+        allow update: if member() && id.matches('pk-.*') && resource.data.sent == false
+          && okNotify(id) && request.resource.data.to == resource.data.to;
+        allow delete: if member() && id.matches('pk-.*') && resource.data.sent == false;
+        allow list: if false;
       }
       match /{coll}/{id} {
         allow read, write: if member() && coll in ['notes', 'shifts', 'jobs', 'ideas'];
