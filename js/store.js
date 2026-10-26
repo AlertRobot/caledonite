@@ -277,9 +277,9 @@ export const actions = {
   },
   async updateMySettings(patch) {
     const st = store.state;
-    const cur = (st.people[st.me] && st.people[st.me].settings) || {};
+    // only what changed: it merges into what's saved, so a change made on your other phone isn't undone
     await commit([
-      { type: 'update', path: `people/${st.me}`, data: { settings: Object.assign({}, cur, patch) } },
+      { type: 'update', path: `people/${st.me}`, data: { settings: patch } },
       { type: 'update', path: '', data: { settingsRev: now() } }
     ], false);
   },
