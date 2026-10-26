@@ -125,7 +125,8 @@ function pendingFor(state, src) {
 function changeBlock(state, item, src, cal) {
   if (!canChange(state, src, cal)) return '';
   const e = ui.ev;
-  const recurring = !!(src.rid);
+  // (your partner's copy of something you share says it repeats, without Google's ids)
+  const recurring = !!(src.rid || src.sid);
   if (e.confirmDelete) {
     return `<section class="card stack-s pad warn-card"><span class="b">Delete “${esc(src.title)}”?</span>
       ${src.tag && (src.tag.startsWith('both:') || src.tag.startsWith('req:')) ? `<span class="small">It comes out of both your calendars, and ${esc(nameOf(state, state.partner))} gets a notification.</span>` : '<span class="small">It comes out of your Google Calendar.</span>'}

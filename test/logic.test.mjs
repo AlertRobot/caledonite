@@ -487,3 +487,34 @@ test('a holiday over several days, not in the calendars yet, shows on every one 
   }
   assert.ok(!L.dayList(st, dayKey(addDays(new Date(sat + 'T12:00'), 3))).some((it) => it.pending));
 });
+
+test("just this one, from your partner's copy of something repeating you share, never changes or deletes every time", async () => {
+  // Sophie's copy, as it reaches Ethan: it repeats (sid), but has none of Google's ids (gid, rid)
+  const start = atTime(sat, '19:00');
+  const ev = { owner: 'sophie', calKey: 'primary', tag: 'both:wk', title: 'Date night', sid: 'u-wk', uid: 'u-wk', start, end: atTime(sat, '21:00') };
+  load({ events: [{ owner: 'sophie', calKey: 'primary', id: 'x1', t: 'Date night', tag: 'both:wk', sid: 'u-wk', uid: 'u-wk', s: start.getTime(), e: atTime(sat, '21:00').getTime() }] });
+  const seen = [];
+  store.backend = { commit: async (ops) => { seen.push(...ops); }, ping() {} };
+  const stamp = start.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  await actions.removeEvent({ ev, scope: 'one' });
+  let out = seen.filter((o) => o.path === 'outbox');
+  assert.equal(out.length, 2);
+  assert.ok(out.every((o) => o.data.inst === stamp), 'only that occurrence, in both copies');
+  seen.length = 0;
+  await actions.editEvent({ ev, changes: { start: '20:00' }, scope: 'one' });
+  out = seen.filter((o) => o.path === 'outbox');
+  assert.ok(out.length && out.every((o) => o.data.inst === stamp));
+  seen.length = 0;
+  await actions.removeEvent({ ev, scope: 'all' });
+  assert.ok(seen.filter((o) => o.path === 'outbox').every((o) => !o.data.inst), 'every time, when asked');
+  // all day: the date, as Google writes it
+  seen.length = 0;
+  await actions.removeEvent({ ev: Object.assign({}, ev, { allDay: true, startKey: sat }), scope: 'one' });
+  assert.ok(seen.filter((o) => o.path === 'outbox').every((o) => o.data.inst === sat.replace(/-/g, '')));
+  // and its page asks which ones
+  const { viewEvent } = await import('../js/views-event.js');
+  const { ui } = await import('../js/uistate.js');
+  Object.assign(ui.ev, { ref: 't:both:wk', day: sat, confirmDelete: true, editing: false, scope: 'one' });
+  assert.match(viewEvent(store.state), /Just this one/);
+  Object.assign(ui.ev, { confirmDelete: false });
+});

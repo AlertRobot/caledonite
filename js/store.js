@@ -511,9 +511,18 @@ export function setupOps(email, { myName, myShifts, partnerName, partnerEmail, p
 // One occurrence of something that repeats: when it first started, as Google writes it at the end of the
 // occurrence's id ("..._20261030T180000Z"). The same in both your copies, so both change just that one.
 export function occurrenceOf(ev) {
-  if (!ev || !ev.rid || !ev.gid) return null;
-  const m = String(ev.gid).match(/_(\d{8}(?:T\d{6}Z)?)$/);
-  return m ? m[1] : null;
+  if (!ev) return null;
+  if (ev.rid && ev.gid) {
+    const m = String(ev.gid).match(/_(\d{8}(?:T\d{6}Z)?)$/);
+    if (m) return m[1];
+  }
+  // your partner's copy has no Google ids, but both copies were made for the same times: when this one starts,
+  // written the same way (an occurrence moved on its own then matches nothing, so nothing else changes)
+  if (ev.sid && ev.start instanceof Date && !isNaN(ev.start)) {
+    if (ev.allDay) return String(ev.startKey || dayKey(ev.start)).replace(/-/g, '');
+    return ev.start.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  }
+  return null;
 }
 
 // The Google account a calendar of yours is in (null for your main one, or one not known yet)
