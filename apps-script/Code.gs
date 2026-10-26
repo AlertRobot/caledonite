@@ -46,6 +46,7 @@ function connectMe() {
   requireSelf_();
   var me = whoAmI_();
   installTrigger_();
+  PropertiesService.getUserProperties().setProperty('me_person', me.person);
   var r = syncAll();
   Logger.log('Connected ' + me.email + ' as ' + me.person + (me.main ? '' : ' (extra account)') + '. ' + r);
   return r;
@@ -99,6 +100,7 @@ function forgetThisAccount_(email) {
 // Stop syncing this account: it stops running, and the copies it wrote go too, so none are left behind that
 // no longer follow your sharing choices. Its calendars' settings stay, for if it's connected again.
 function stopSyncing_() {
+  var had = hasTrigger_();
   removeTriggers_();
   var lock = LockService.getUserLock();
   if (!lock.tryLock(60000)) throw new Error('This account is in the middle of syncing. Try again in a minute.');
@@ -109,6 +111,9 @@ function stopSyncing_() {
     var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
     var props = PropertiesService.getUserProperties();
     var all = props.getProperties();
+    // never connected (or already stopped): nothing written to take out, and nothing to write (anyone with a
+    // Google account can open the connect page, and their address could look like one of yours with dots for dashes)
+    if (!had && !Object.keys(all).some(function (k) { return /^(h|rota)_/.test(k); })) return;
     fsCommit_(copiesWritten_(all, email));
     Object.keys(all).forEach(function (k) { if (/^(h|rota)_/.test(k)) props.deleteProperty(k); });
   } finally {
@@ -117,17 +122,28 @@ function stopSyncing_() {
   }
 }
 
-// Deleting every copy this account remembers writing, and its status
+// Deleting every copy this account remembers writing, and its status. Not a calendar another of your accounts
+// has taken over since (same addresses): those copies are that account's now, and it would never write them again.
 function copiesWritten_(all, email) {
   var writes = [];
   Object.keys(all).forEach(function (k) {
     if (k.indexOf('h_') !== 0) return;
     var old = {};
     try { old = JSON.parse(all[k] || '{}'); } catch (e) { old = {}; }
-    Object.keys(old).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
+    var paths = Object.keys(old);
+    if (!paths.length) return;
+    var ck = k.slice(2);
+    var person = (String(paths[0]).split('/').pop() || '').split('__')[0];
+    if (ck !== 'rotalink' && person && /^[A-Za-z0-9_-]+$/.test(person + ck) && otherAccount_(fsGet_(HOUSEHOLD + '/calendars/' + person + '__' + ck), email)) return;
+    paths.forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
   });
   if (email) writes.push({ 'delete': docName_(HOUSEHOLD + '/status/' + email.replace(/[^a-z0-9]+/g, '_')) });
   return writes;
+}
+// A calendar record saying another of your Google accounts writes its copies now
+function otherAccount_(doc, email) {
+  var acc = String((doc && doc.account) || '').toLowerCase();
+  return !!acc && acc !== 'rota link' && acc !== String(email || '').toLowerCase();
 }
 function hasTrigger_() {
   return ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'syncAll'; });
@@ -202,6 +218,8 @@ function connectFromPage() {
     throw new Error('This Google account is not part of Caledonite yet. Ask Ethan to add it in Caledonite: Settings, then Account.');
   }
   installTrigger_();
+  // its own owner, on the page that says whose it is: from now on it syncs as that person
+  PropertiesService.getUserProperties().setProperty('me_person', me.person);
   var r = syncAll();
   var n = (String(r).match(/(\d+) calendar/) || [])[1];
   return 'Connected. ' + (n ? n + ' calendar' + (n === '1' ? '' : 's') + ' synced. ' : '') + 'Caledonite now keeps ' + (me.main ? 'your' : 'this account\'s') + ' calendars up to date by itself. You can close this page.';
@@ -265,6 +283,16 @@ function syncAll(opts) {
       if (err && err.notMember) forgetThisAccount_(err.email);
       throw err;
     }
+    // An account only ever syncs as the person it was connected as. Anyone can list any address on their own
+    // record, so without this one of your extra accounts, once taken off your list, would be copied in full into
+    // your partner's private copy. Moving it to the other person takes its own owner opening the connect page.
+    var was = PropertiesService.getUserProperties().getProperty('me_person');
+    if (was && was !== me.person) {
+      var moved = new Error(me.email + ' was connected as ' + was + "'s account and is now listed for someone else, so it is not synced. Take it off the wrong person in Settings, Account, or open the connect page signed in to it to connect it again.");
+      try { writeStatus_({ email: me.email, person: was, main: false }, [moved.message], 0); } catch (e3) { /* it's only the status */ }
+      throw moved;
+    }
+    if (!was) PropertiesService.getUserProperties().setProperty('me_person', me.person);
     var ctx = loadCtx_(me);
     var stage = function (name, fn) {
       try { return fn(); } catch (err) {
@@ -279,8 +307,9 @@ function syncAll(opts) {
     if (cal) { n = cal.count; seen = cal.seen; }
     if (me.main) stage('rota link', function () { var url = rotaUrlOf_(me, ctx); if (url) syncRotaLink_(me, ctx, url); else dropRotaLink_(me); });
     var changed = stage('outbox', function () { return processOutbox_(me, ctx); });
-    if (changed) {
-      // let the feeds catch up straight away
+    // let the feeds catch up straight away, unless reading every calendar again could run into Google stopping this
+    // run (and the reminders and notifications after it): the next run catches up
+    if (changed && timeUsed_() < 150e3) {
       var again = stage('calendars after changes', function () { ctx.calDocs = loadCalDocs_(me); return syncCalendars_(me, ctx, errors); });
       if (again) { n = again.count; seen = again.seen; }
     }
@@ -452,13 +481,16 @@ function syncCalendars_(me, ctx, errors) {
     if (k.indexOf('h_') !== 0) return;
     var ck = k.slice(2);
     if (ck === 'rotalink' || seenCalKeys[ck]) return;
-    // now written by the other account, at the same addresses: just forget them here
-    if (!handledElsewhere[ck]) {
+    // now written by the other account, at the same addresses: just forget them here (also when this account
+    // can't see it any more and another of yours took it over meanwhile: those copies are that account's now)
+    if (!handledElsewhere[ck] && !otherAccount_(ctx.calDocs && ctx.calDocs[ck], me.email)) {
       var old = {};
       try { old = JSON.parse(all[k] || '{}'); } catch (e) { old = {}; }
       Object.keys(old).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
     }
     toForget.push(k);
+    // and its rota as it was (if it comes back to this account, it's compared afresh, never with old shifts)
+    if (all['rota_' + ck] !== undefined) toForget.push('rota_' + ck);
   });
   // and their records, once they've been gone a couple of days (so they leave Settings too)
   var listed = me.main ? accountsOf_(me, ctx) : {};
@@ -548,7 +580,9 @@ function readEvents_(cal, id, from, to) {
           pageToken: token || undefined,
           fields: 'nextPageToken,items(id,iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,visibility,attendees(self,responseStatus))'
         });
-        (res.items || []).forEach(function (it) { var o = normApi_(it); if (o) out.push(o); });
+        // (one odd event is left out, never the reason the whole calendar is read the slow way every run, which
+        // can use up the account's daily time for its 10-minute runs)
+        (res.items || []).forEach(function (it) { var o = null; try { o = normApi_(it); } catch (e) { o = null; } if (o) out.push(o); });
         token = res.nextPageToken;
       } while (token);
       return out;
@@ -709,9 +743,16 @@ function rotaUrlOf_(me, ctx) {
 function syncRotaLink_(me, ctx, rotaUrl) {
   var url = String(rotaUrl || '').replace(/^webcal:/i, 'https:');
   if (!/^https:\/\//i.test(url)) return;
-  var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+  // Google's own errors here name the address ("DNS error: https://..."), and what goes wrong ends up in this
+  // account's status, which your partner's phone reads: the link (your whole rota) is never part of the message
+  var res, text;
+  try {
+    res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+    text = res.getResponseCode() < 300 ? res.getContentText() : '';
+  } catch (err) {
+    throw new Error('The rota link could not be reached this time. Trying again next run.');
+  }
   if (res.getResponseCode() >= 300) throw new Error('The rota link returned an error (' + res.getResponseCode() + ').');
-  var text = res.getContentText();
   // a sign-in or error page (or nothing) instead of a calendar is never "no shifts": the ones there stay,
   // and your partner isn't told they've all gone
   if (!/BEGIN:VCALENDAR/i.test(String(text || ''))) throw new Error('The rota link did not send a calendar this time. Trying again next run.');
@@ -776,6 +817,10 @@ function parseIcs_(text) {
     if (line === 'BEGIN:VEVENT') { cur = { exdates: [] }; return; }
     if (line === 'END:VEVENT') { if (cur && cur.start) raw.push(cur); cur = null; return; }
     if (!cur) return;
+    // an alarm inside a shift has its own SUMMARY, DURATION and so on: never the shift's
+    if (/^BEGIN:/i.test(line)) { cur.nest = (cur.nest || 0) + 1; return; }
+    if (/^END:/i.test(line)) { if (cur.nest) cur.nest--; return; }
+    if (cur.nest) return;
     var idx = line.indexOf(':');
     if (idx < 0) return;
     var left = line.slice(0, idx); var val = line.slice(idx + 1);
@@ -783,6 +828,7 @@ function parseIcs_(text) {
     if (name === 'SUMMARY') cur.summary = val.replace(/\\,/g, ',').replace(/\\n/gi, ' ').replace(/\\;/g, ';');
     else if (name === 'UID') cur.uid = val;
     else if (name === 'STATUS') cur.status = val.toUpperCase();
+    else if (name === 'CLASS') cur.priv = /^(PRIVATE|CONFIDENTIAL)$/i.test(String(val).trim());
     else if (name === 'DTSTART') cur.start = icsTime_(left, val);
     else if (name === 'DTEND') cur.end = icsTime_(left, val);
     else if (name === 'DURATION') cur.duration = icsDuration_(val);
@@ -805,7 +851,7 @@ function parseIcs_(text) {
     if (!r.rrule) { pushInst_(out, r, r.start, from, to); return; }
     var ex = {};
     r.exdates.forEach(function (x) { ex[instKey_(x)] = true; if (x.date) ex['d:' + x.v] = true; });
-    icsExpand_(r, to).forEach(function (st) {
+    icsExpand_(r, to, from).forEach(function (st) {
       var k = instKey_(st);
       if (ex[k] || ex['d:' + (st.date ? st.v : st.v.slice(0, 10))]) return;
       if (overrides[(r.uid || '') + '|' + k]) return;
@@ -817,6 +863,8 @@ function parseIcs_(text) {
 function instKey_(t) { return t.date ? 'd:' + t.v : 'm:' + t.ms; }
 function pushInst_(out, r, st, from, to) {
   var o = { id: shortKey_((r.uid || '') + '|' + st.v), uid: shortKey_(r.uid || st.v), t: r.summary || 'Shift' };
+  // marked private in the rota: your partner only ever sees "Busy", as for your own calendars
+  if (r.priv) o.pb = 1;
   if (st.date) {
     o.ad = 1; o.sd = st.v;
     var days = 1;
@@ -867,7 +915,8 @@ function icsRule_(val) {
   };
 }
 // Every start of a repeating entry up to the end of the window (and COUNT/UNTIL).
-function icsExpand_(r, to) {
+// from: the start of the window (a daily entry begun years ago starts counting near it)
+function icsExpand_(r, to, from) {
   var rule = r.rrule;
   var st = r.start;
   var startKey = st.date ? st.v : st.v.slice(0, 10);
@@ -894,7 +943,12 @@ function icsExpand_(r, to) {
   }
   var guard = 0;
   if (rule.freq === 'DAILY') {
-    for (var k = 0; guard++ < 2000; k += rule.interval) { if (!add(keyPlus_(startKey, k))) break; }
+    var k0 = 0;
+    if (!rule.count && from) {
+      var gap = daysBetween_(startKey, Utilities.formatDate(new Date(from - 2 * 864e5), TZ, 'yyyy-MM-dd'));
+      if (gap > 0) k0 = Math.floor(gap / rule.interval) * rule.interval;
+    }
+    for (var k = k0; guard++ < 2000; k += rule.interval) { if (!add(keyPlus_(startKey, k))) break; }
   } else if (rule.freq === 'WEEKLY') {
     var startWd = isoWd_(startKey);
     var days = (rule.byday && rule.byday.length ? rule.byday : [dayCodes[startWd - 1]]).map(function (c) { return dayCodes.indexOf(c) + 1; }).filter(function (x) { return x > 0; }).sort();
@@ -992,9 +1046,13 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
 // Returns true when something in Google Calendar changed, so the feeds can catch up.
 function processOutbox_(me, ctx) {
   var items = fsQuery_('outbox', [['person', me.person], ['done', false]]).filter(function (it) {
-    // your partner's asks always go to your main account: they can't pick your work calendar
-    if (String(it.data.byEmail || '').toLowerCase() !== ctx.appEmail) return me.main;
     var acc = String(it.data.account || '').toLowerCase();
+    // your partner's asks go to your main account: they can't add anything to your work calendar. Only a change
+    // to something you share by its tag (both of you, or a request) is handed to the account whose calendar it's in.
+    if (String(it.data.byEmail || '').toLowerCase() !== ctx.appEmail) {
+      var handedOn = !!acc && acc !== (me.main ? me.email : '') && !!it.data.tag && (it.data.op === 'update' || it.data.op === 'delete');
+      return me.main ? !handedOn : handedOn && acc === me.email;
+    }
     return acc ? acc === me.email : me.main;
   });
   if (!items.length) return false;
@@ -1025,6 +1083,17 @@ function processOutbox_(me, ctx) {
       else if (o.op === 'update' || o.op === 'delete') result = own || partnerMayChange_(o.tag, rs) ? changeByTag_(o, rs) : { refused: 'not yours' };
       else if (o.op === 'edit' || o.op === 'remove') result = own ? editOwn_(o, rs) : { refused: 'not yours' };
       else result = { refused: 'unknown change' };
+      // not in any calendar this account has: your copy may be in one of your other accounts' calendars (your
+      // partner's change to something for you both always comes here first). Handed on to that account.
+      if (result.none && me.main && !o.account) {
+        var holder = holderOf_(me, ctx, o.tag, rs);
+        if (holder) {
+          if (key) stuck[key] = true;
+          writes.push(upd_(HOUSEHOLD + '/outbox/' + it.id, { account: holder }, ['account']));
+          return;
+        }
+      }
+      delete result.none;
       if (!result.refused && !result.already && (result.eventId || result.changed)) changed = true;
       writes.push(upd_(HOUSEHOLD + '/outbox/' + it.id, { done: true, doneAt: Date.now(), result: result }, ['done', 'doneAt', 'result']));
     } catch (err) {
@@ -1182,7 +1251,29 @@ function changeByTag_(o, rs) {
     }
   });
   if (o.op === 'delete' && !inst) rs.tagMap[o.tag] = [];
-  return { changed: n };
+  return found.length ? { changed: n } : { changed: 0, none: true };
+}
+
+// Which other of this person's Google accounts has a copy carrying this tag, going by the copies they wrote
+// (only asked when this account has none; only accounts that write to a calendar of theirs)
+function holderOf_(me, ctx, tag, rs) {
+  rs.holders = rs.holders || {};
+  if (tag in rs.holders) return rs.holders[tag];
+  var accs = {};
+  Object.keys(ctx.calDocs || {}).forEach(function (ck) {
+    var d = ctx.calDocs[ck];
+    if (d && d.canWrite && otherAccount_(d, me.email)) accs[String(d.account).toLowerCase()] = true;
+  });
+  var found = '';
+  Object.keys(accs).some(function (acc) {
+    var has = fsQuery_('privateFeeds', [['owner', me.person], ['account', acc]]).some(function (f) {
+      return (f.data.events || []).some(function (e) { return e && e.tag === tag; });
+    });
+    if (has) found = acc;
+    return has;
+  });
+  rs.holders[tag] = found;
+  return found;
 }
 
 // edit or remove one of your own events (or a whole repeating series)
@@ -1703,17 +1794,19 @@ function nudgeRequests_(me, ctx) {
   var hours = Number(ctx.hh.nudgeHours === undefined ? 24 : ctx.hh.nudgeHours);
   if (!hours) return;
   var waiting = fsQuery_('requests', [['from', me.person], ['status', 'waiting']]);
-  var writes = [];
   waiting.forEach(function (r) {
     var d = r.data;
     if (d.autoNudged || d.type === 'heads') return;
     var since = Math.max(d.created || 0, d.reminded || 0);
     if (Date.now() - since < hours * 3600e3) return;
     var name = (ctx.person && ctx.person.name) || 'Your partner';
-    writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: d.to, kind: 'requests', title: 'Still waiting: ' + name + ' asked you something', body: d.title || '', link: '#requests', reqId: r.id, ask: '1', sendAfter: Date.now(), sent: false, created: Date.now() }));
-    writes.push(upd_(HOUSEHOLD + '/requests/' + r.id, { autoNudged: Date.now() }, ['autoNudged']));
+    // together, and only if it's still as it was read: one answered or called off a moment ago isn't nudged
+    var pair = [
+      upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: d.to, kind: 'requests', title: 'Still waiting: ' + name + ' asked you something', body: d.title || '', link: '#requests', reqId: r.id, ask: '1', sendAfter: Date.now(), sent: false, created: Date.now() }),
+      ifSame_(upd_(HOUSEHOLD + '/requests/' + r.id, { autoNudged: Date.now() }, ['autoNudged']), r)
+    ];
+    try { fsCommit_(pair); } catch (err) { if (!/FAILED_PRECONDITION|^Firestore 409/i.test(String(err && err.message))) throw err; }
   });
-  fsCommit_(writes);
 }
 
 // ===================== notifications =====================
@@ -1876,7 +1969,10 @@ function saToken_() {
   var cache = CacheService.getScriptCache();
   var hit = cache.get('sa_token');
   if (hit) return hit;
-  var sa = JSON.parse(prop_('SA_JSON'));
+  var raw = prop_('SA_JSON');
+  // (the parser's own message quotes the text around the mistake: part of the key, shown on the connect page)
+  var sa;
+  try { sa = JSON.parse(raw); } catch (e) { throw new Error('The script property SA_JSON is not the service account key file. Paste the whole file in again.'); }
   var now = Math.floor(Date.now() / 1000);
   var enc = function (o) { return Utilities.base64EncodeWebSafe(JSON.stringify(o)).replace(/=+$/, ''); };
   var input = enc({ alg: 'RS256', typ: 'JWT' }) + '.' + enc({

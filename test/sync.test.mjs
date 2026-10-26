@@ -1147,3 +1147,241 @@ test("someone who isn't one of you, trying again and again, reads the household 
   asUser('e@x.com');
   assert.equal(ctx.whoAmI_().person, 'ethan');
 });
+
+// ---------- round 7 ----------
+test("the rota link never appears in what went wrong (your partner's phone reads this account's status)", () => {
+  withDigest();
+  const { api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.fsCommit_ = () => {};
+  ctx.docName_ = (p) => p;
+  const link = 'https://rota.example/feed/s3cr3t-token.ics';
+  const c = { calDocs: { rotalink: { share: 'busy', role: 'rota', lastSeen: Date.now() } }, people: { sophie: {}, ethan: {} }, appEmail: 's@x.com' };
+  for (const fail of ['DNS error: ' + link, 'Address unavailable: ' + link, 'Timeout: ' + link]) {
+    ctx.UrlFetchApp = { fetch: () => { throw new Error(fail); } };
+    let err; try { ctx.syncRotaLink_({ person: 'sophie', email: 's@x.com', main: true }, c, link); } catch (e) { err = e; }
+    assert.ok(err, 'still an error');
+    assert.ok(!String(err.message).includes('s3cr3t'), err.message);
+    assert.ok(!String(err.message).includes('rota.example'), err.message);
+  }
+});
+
+test("one of your extra accounts, taken off your list and put on your partner's, is never synced as theirs", () => {
+  asUser('work@x.com');
+  fakeCache();
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.ScriptApp = { getProjectTriggers: () => [{ getHandlerFunction: () => 'syncAll' }], deleteTrigger() {} };
+  const people = [{ id: 'ethan', data: { email: 'e@x.com', linked: [] } }, { id: 'sophie', data: { email: 's@x.com', linked: ['work@x.com'] } }];
+  ctx.fsList_ = () => people;
+  ctx.fsGet_ = () => ({});
+  let queried = 0;
+  ctx.fsQuery_ = () => { queried++; return []; };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const { store, api } = fakeProps({ me_person: 'ethan', h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h' }) });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  assert.throws(() => ctx.syncAll(), /connected as ethan/);
+  assert.equal(queried, 0, 'none of its calendars read or written');
+  assert.deepEqual(writes.map((w) => w.update && w.update.name), ['households/main/status/work_x_com'], 'only its status, saying why');
+  assert.equal(writes[0].update.fields.person.stringValue, 'ethan');
+  assert.equal(store.me_person, 'ethan');
+  // an account connected before this was remembered: remembered from its next run
+  const fresh = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => fresh.api };
+  people[1].data.linked = [];
+  people[0].data.linked = ['work@x.com'];
+  try { ctx.syncAll(); } catch (e) { /* the rest of the run isn't stood in for here */ }
+  assert.equal(fresh.store.me_person, 'ethan');
+});
+test('connecting it again on the connect page (which says whose it is) moves it on purpose', () => {
+  asUser('work@x.com');
+  fakeCache();
+  ctx.ScriptApp = { getProjectTriggers: () => [], deleteTrigger() {}, newTrigger: () => ({ timeBased: () => ({ everyMinutes: () => ({ create() {} }) }) }) };
+  ctx.fsList_ = () => [{ id: 'ethan', data: { email: 'e@x.com', linked: [] } }, { id: 'sophie', data: { email: 's@x.com', linked: ['work@x.com'] } }];
+  ctx.fsGet_ = () => ({});
+  const { store, api } = fakeProps({ me_person: 'ethan' });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const realSync = ctx.syncAll;
+  let seenAs = '';
+  ctx.syncAll = () => { seenAs = store.me_person; return 'Synced 1 calendars.'; };
+  ctx.connectFromPage();
+  ctx.syncAll = realSync;
+  assert.equal(seenAs, 'sophie');
+});
+
+test('stopping or losing an account never deletes the copies another of your accounts took over from it', () => {
+  // the shared calendar "abc" went quiet on work@x.com for a while; e@x.com took it over (same addresses)
+  const props = () => ({ h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h', 'households/main/sharedFeeds/ethan__abc__2026-11': 'h' }), h_own: JSON.stringify({ 'households/main/privateFeeds/ethan__own__2026-11': 'h' }), rota_abc: '{}' });
+  ctx.fsGet_ = (path) => ({ 'households/main/calendars/ethan__abc': { account: 'e@x.com' }, 'households/main/calendars/ethan__own': { account: 'work@x.com' } })[path] || null;
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  // 1. "Stop syncing this account" on the connect page
+  asUser('work@x.com');
+  fakeCache();
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.ScriptApp = { getProjectTriggers: () => [{ getHandlerFunction: () => 'syncAll' }], deleteTrigger() {} };
+  let p = fakeProps(props());
+  ctx.PropertiesService = { getUserProperties: () => p.api };
+  ctx.disconnectFromPage();
+  assert.deepEqual(writes.map((w) => w.delete).sort(), ['households/main/privateFeeds/ethan__own__2026-11', 'households/main/status/work_x_com']);
+  // 2. the account comes back but can't see that calendar any more
+  writes.length = 0;
+  withDigest();
+  p = fakeProps(props());
+  ctx.PropertiesService = { getUserProperties: () => p.api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'w@x', getName: () => 'Work', getColor: () => '#1', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'w@x' }) };
+  ctx.Calendar = { Events: { list: () => ({ items: [] }) } };
+  ctx.fsQuery_ = () => [];
+  ctx.syncCalendars_({ email: 'work@x.com', person: 'ethan', main: false, people: [] }, { appEmail: 'e@x.com', hh: {}, people: {}, calDocs: {
+    abc: { account: 'e@x.com', lastSeen: Date.now() }, own: { account: 'work@x.com', lastSeen: Date.now() - 864e5 }
+  } }, []);
+  const gone = writes.map((w) => w.delete).filter(Boolean);
+  assert.ok(gone.includes('households/main/privateFeeds/ethan__own__2026-11'), 'its own calendar that went is still taken out');
+  assert.ok(!gone.some((x) => x.includes('ethan__abc__')), 'the one taken over is left alone');
+  assert.equal(p.store.h_abc, undefined, 'and forgotten here');
+  assert.equal(p.store.rota_abc, undefined);
+});
+
+test("your partner's change to something for you both reaches your copy, even in one of your other accounts' calendars", () => {
+  ctx.fsGet_ = () => null;
+  const item = { person: 'ethan', op: 'delete', tag: 'both:t1', byEmail: 's@x.com', done: false, created: 1 };
+  const feeds = { 'work@x.com': [{ id: 'ethan__wk__2026-11', data: { calKey: 'wk', events: [{ id: 'x', tag: 'both:t1', t: 'Tea' }] } }] };
+  const calDocs = { wk: { account: 'work@x.com', canWrite: true, calId: 'w@x' }, prim: { account: 'e@x.com', canWrite: true, calId: 'primary@x' } };
+  const run = (email, main, items, calendar, calId) => {
+    const writes = [];
+    ctx.Calendar = calendar;
+    ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => calId, isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => calId }) };
+    ctx.fsQuery_ = (coll, eqs) => (coll === 'outbox' ? items.map((data, i) => ({ id: `o${i}`, data })) : coll === 'privateFeeds' ? (feeds[eqs[1][1]] || []) : []);
+    ctx.fsCommit_ = (w) => writes.push(...w);
+    ctx.docName_ = (p) => p;
+    ctx.processOutbox_({ email, person: 'ethan', main }, { appEmail: 'e@x.com', calDocs });
+    return writes;
+  };
+  // your main account hasn't got it: handed to work@x.com, not marked done
+  let writes = run('e@x.com', true, [item], fakeCalendar([]), 'primary@x');
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].update.fields.account.stringValue, 'work@x.com');
+  assert.ok(!writes[0].update.fields.done);
+  // the work account does it
+  const work = fakeCalendar([{ id: 'w1', calId: 'w@x', tag: 'both:t1', summary: 'Tea' }]);
+  writes = run('work@x.com', false, [Object.assign({}, item, { account: 'work@x.com' })], work, 'w@x');
+  assert.equal(work.events.length, 0, 'deleted there');
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+  // but your partner can never have anything added to (or edited in) your other accounts' calendars
+  const add = { person: 'ethan', op: 'create', tag: 'both:t2', account: 'work@x.com', byEmail: 's@x.com', done: false, created: 2, event: { title: 'X', day: '2026-11-07' } };
+  const mine = { person: 'ethan', op: 'edit', account: 'work@x.com', calId: 'w@x', gid: 'w1', byEmail: 's@x.com', done: false, created: 3, changes: { title: 'Y' } };
+  const w2 = fakeCalendar([]);
+  writes = run('work@x.com', false, [add, mine], w2, 'w@x');
+  assert.equal(writes.length, 0);
+  assert.equal(w2.events.length, 0);
+  // nothing anywhere else: done, as before
+  writes = run('e@x.com', true, [Object.assign({}, item, { tag: 'both:gone' })], fakeCalendar([]), 'primary@x');
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+  assert.ok(!('none' in writes[0].update.fields.result.mapValue.fields));
+});
+
+test('a rota link: alarms inside a shift, shifts marked private, and a daily entry begun years ago', () => {
+  withDigest();
+  const day = (ms) => ctx.Utilities.formatDate(new Date(ms), 'Europe/London', 'yyyy-MM-dd').replace(/-/g, '');
+  const soon = day(Date.now() + 3 * 864e5);
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'BEGIN:VEVENT', 'UID:a1', 'SUMMARY:Long day', `DTSTART;TZID=Europe/London:${soon}T073000`, `DTEND;TZID=Europe/London:${soon}T200000`,
+    'BEGIN:VALARM', 'ACTION:EMAIL', 'SUMMARY:Shift reminder', 'TRIGGER:-PT1H', 'DURATION:PT15M', 'REPEAT:2', 'END:VALARM',
+    'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:a2', 'SUMMARY:Appraisal', 'CLASS:PRIVATE', `DTSTART;TZID=Europe/London:${soon}T210000`, `DTEND;TZID=Europe/London:${soon}T220000`, 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:a3', 'SUMMARY:Handover', 'DTSTART;TZID=Europe/London:20150105T070000', 'DTEND;TZID=Europe/London:20150105T071500', 'RRULE:FREQ=DAILY', 'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+  const evs = ctx.parseIcs_(ics);
+  const long = evs.find((e) => e.t === 'Long day' || e.t === 'Shift reminder');
+  assert.equal(long.t, 'Long day', "the alarm's name isn't the shift's");
+  assert.equal(long.e - long.s, 12.5 * 3600e3, "nor its length");
+  const appr = evs.find((e) => e.t === 'Appraisal');
+  assert.equal(appr.pb, 1);
+  assert.equal(ctx.shareFilter_({ share: 'all' }, [appr])[0].t, 'Busy');
+  const hand = evs.filter((e) => e.t === 'Handover');
+  assert.ok(hand.length > 100, `every day in the window (${hand.length})`);
+});
+
+test('"Stop syncing" from someone who never connected writes nothing (not even taking out a status that looks like theirs)', () => {
+  asUser('e.d@x.com');
+  fakeCache();
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.ScriptApp = { getProjectTriggers: () => [], deleteTrigger() {} };
+  const { api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.disconnectFromPage();
+  assert.equal(writes.length, 0, 'e-d@x.com has the same status address, e_d_x_com');
+});
+
+test('a service account key pasted in wrong never shows any of itself in an error', () => {
+  const c2 = vm.createContext({ Utilities, Logger: { log() {} } });
+  vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8'), c2);
+  c2.CacheService = { getScriptCache: () => ({ get: () => null, put() {} }) };
+  c2.PropertiesService = { getScriptProperties: () => ({ getProperty: () => 'MIIEvQSECRETKEYBYTESxyzxyzxyz' }) }; // part of the key, not the whole file
+  let err; try { c2.saToken_(); } catch (e) { err = e; }
+  assert.ok(err);
+  assert.ok(!/MIIE|SECRET/.test(err.message), err.message);
+});
+
+test('a request answered or called off just as the nudge goes out is not nudged', () => {
+  withDigest();
+  const old = Date.now() - 2 * 864e5;
+  ctx.fsQuery_ = () => [
+    { id: 'r1', data: { from: 'ethan', to: 'sophie', title: 'Cinema', status: 'waiting', created: old }, updateTime: 'T1' },
+    { id: 'r2', data: { from: 'ethan', to: 'sophie', title: 'Walk', status: 'waiting', created: old }, updateTime: 'T2' }
+  ];
+  const commits = [];
+  ctx.fsCommit_ = (w) => {
+    if (w.some((x) => x.currentDocument && x.currentDocument.updateTime === 'T1')) throw new Error('Firestore 400: {"error":{"status":"FAILED_PRECONDITION"}}');
+    commits.push(w);
+  };
+  ctx.docName_ = (p) => p;
+  ctx.nudgeRequests_({ person: 'ethan' }, { hh: {}, person: { name: 'Ethan' } });
+  assert.equal(commits.length, 1, 'only the one still waiting');
+  assert.equal(commits[0][0].update.fields.body.stringValue, 'Walk');
+  assert.equal(commits[0][1].currentDocument.updateTime, 'T2');
+});
+
+test('after slow changes, the calendars are not all read again when the run is short of time', () => {
+  const c2 = vm.createContext({ Utilities, Logger: { log() {} } });
+  vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8'), c2);
+  const cache = {};
+  c2.CacheService = { getScriptCache: () => ({ get: (k) => cache[k] || null, put: (k, v) => { cache[k] = v; }, remove: (k) => { delete cache[k]; } }) };
+  c2.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  c2.Session = { getEffectiveUser: () => ({ getEmail: () => 'e@x.com' }) };
+  const { api } = fakeProps({ me_person: 'ethan' });
+  c2.PropertiesService = { getUserProperties: () => api };
+  c2.whoAmI_ = () => ({ email: 'e@x.com', person: 'ethan', main: false, people: [] });
+  c2.loadCtx_ = () => ({ calDocs: {} });
+  c2.loadCalDocs_ = () => ({});
+  let reads = 0, slow = 0;
+  c2.syncCalendars_ = () => { reads++; return { count: 1, seen: [] }; };
+  c2.processOutbox_ = () => { c2.RUN_STARTED_ -= slow; return true; };
+  for (const n of ['fireReminders_', 'processNotify_', 'writeStatus_']) c2[n] = () => {};
+  c2.syncAll();
+  assert.equal(reads, 2, 'caught up straight away');
+  reads = 0; slow = 200e3;
+  c2.syncAll();
+  assert.equal(reads, 1, 'left for the next run');
+});
+
+test('one odd event from Google never sends the whole calendar the slow way', () => {
+  withDigest();
+  const s = Date.now() + 864e5;
+  ctx.Calendar = { Events: { list: () => ({ items: [
+    { id: 'ok1', iCalUID: 'ok1@x', summary: 'Tea', start: { dateTime: new Date(s).toISOString() }, end: { dateTime: new Date(s + 3600e3).toISOString() } },
+    { id: 'odd', iCalUID: 'odd@x', summary: 'No end', start: { dateTime: new Date(s).toISOString() } }
+  ] }) } };
+  let slow = 0;
+  const cal = { getEvents: () => { slow++; return []; } };
+  const evs = ctx.readEvents_(cal, 'c@x', new Date(), new Date(Date.now() + 5 * 864e5));
+  assert.equal(slow, 0);
+  assert.equal(JSON.stringify(evs.map((e) => e.t)), '["Tea"]');
+});
