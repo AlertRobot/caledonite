@@ -820,15 +820,21 @@ function processOutbox_(me, ctx) {
   var rs = { tagMap: {}, owned: null, defaultId: null };
   var writes = [];
   var changed = false;
-  // in the order they were made; ones made together (take out the pencilled-in event, then add the agreed one) by seq
-  items.sort(function (a, b) { return ((a.data.created || 0) - (b.data.created || 0)) || ((a.data.seq || 0) - (b.data.seq || 0)); });
+  // in the order they reached the database (two phones' clocks can differ: an answer must never come before
+  // the request it answers); ones saved together (take out the pencilled-in event, then add the agreed one) by seq
+  items.sort(function (a, b) {
+    var ta = tsKey_(a.createTime), tb = tsKey_(b.createTime);
+    return (ta && tb && ta !== tb ? (ta < tb ? -1 : 1) : 0) || ((a.data.created || 0) - (b.data.created || 0)) || ((a.data.seq || 0) - (b.data.seq || 0));
+  });
   var stuck = {};
   items.forEach(function (it) {
     var o = it.data;
     var own = !!ctx.appEmail && String(o.byEmail || '').toLowerCase() === ctx.appEmail;
     var result = {};
-    // an earlier change to the same event failed this run: wait, so they still happen in order next time
-    if (o.tag && stuck[o.tag]) return;
+    // an earlier change to the same event (by its tag, or by its Google id: a whole series counts as one) failed
+    // this run: wait, so they still happen in order next time
+    var key = o.tag ? 't:' + o.tag : (o.rid || o.gid) ? 'g:' + (o.calId || '') + '|' + String(o.rid || o.gid) : '';
+    if (key && stuck[key]) return;
     try {
       if (o.op === 'create') result = createEvent_(me, ctx, o, own, rs);
       else if (o.op === 'update' || o.op === 'delete') result = own || partnerMayChange_(o.tag, rs) ? changeByTag_(o, rs) : { refused: 'not yours' };
@@ -837,7 +843,7 @@ function processOutbox_(me, ctx) {
       if (!result.refused && !result.already && (result.eventId || result.changed)) changed = true;
       writes.push(upd_(HOUSEHOLD + '/outbox/' + it.id, { done: true, doneAt: Date.now(), result: result }, ['done', 'doneAt', 'result']));
     } catch (err) {
-      if (o.tag) stuck[o.tag] = true;
+      if (key) stuck[key] = true;
       var tries = (o.tries || 0) + 1;
       var patch = { tries: tries, error: String(err && err.message || err).slice(0, 200) };
       if (tries >= 5) patch.done = true;
@@ -869,6 +875,12 @@ function ownedCals_(rs) {
   rs.defaultId = CalendarApp.getDefaultCalendar().getId();
   rs.owned[rs.defaultId] = true;
   return rs.owned;
+}
+
+// A Firestore time ("2026-10-26T10:00:00.12Z") that sorts as text, whatever its number of decimals
+function tsKey_(t) {
+  var m = String(t || '').match(/^([^.Z]+)(?:\.(\d+))?Z$/);
+  return m ? m[1] + '.' + ((m[2] || '') + '000000000').slice(0, 9) : '';
 }
 
 // Every event carrying this Caledonite tag, in calendars this account can change.
@@ -1656,7 +1668,7 @@ function fsQuery_(collId, eqs) {
   var r = call_('post', base_() + '/' + HOUSEHOLD + ':runQuery', { structuredQuery: { from: [{ collectionId: collId }], where: where, limit: 500 } });
   var out = [];
   (r || []).forEach(function (row) {
-    if (row.document) out.push({ id: row.document.name.split('/').pop(), data: fromFields_(row.document.fields || {}), updateTime: row.document.updateTime });
+    if (row.document) out.push({ id: row.document.name.split('/').pop(), data: fromFields_(row.document.fields || {}), updateTime: row.document.updateTime, createTime: row.document.createTime });
   });
   return out;
 }

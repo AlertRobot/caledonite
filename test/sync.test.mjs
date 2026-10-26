@@ -513,3 +513,35 @@ test("a calendar two of your accounts can see: the one that isn't syncing it nev
   assert.equal(rec.update.fields.account.stringValue, 'e@x.com');
   assert.ok(!rec.updateMask.fieldPaths.includes('share'), 'its sharing choice is kept');
 });
+
+test('two changes to one of your own events: if the first fails, the second waits for it', () => {
+  const patched = [];
+  let fail = true;
+  const calendar = { Events: {
+    get: () => ({ start: { dateTime: '2026-11-06T10:00:00Z' }, end: { dateTime: '2026-11-06T11:00:00Z' } }),
+    patch: (p, calId, id) => { if (fail) { fail = false; throw new Error('Rate Limit Exceeded'); } patched.push(p.start.dateTime); },
+    list: () => ({ items: [] })
+  } };
+  const edit = (start, created) => ({ person: 'ethan', op: 'edit', calId: 'primary@x', gid: 'g1', changes: { day: '2026-11-06', start, end: '23:00' }, byEmail: 'e@x.com', done: false, created });
+  runOutbox([edit('20:00', 1), edit('21:00', 2)], { calendar });
+  assert.deepEqual(patched, [], 'the later change waits');
+  runOutbox([edit('20:00', 1), edit('21:00', 2)], { calendar });
+  assert.deepEqual(patched, ['2026-11-06T20:00:00', '2026-11-06T21:00:00'], 'then both, in order: the later one wins');
+});
+
+test('changes are done in the order they reached the database, whatever the phones’ clocks said', () => {
+  const calendar = fakeCalendar([]);
+  // Sophie's "can't" was saved after Ethan's request reached the database, but her phone's clock is behind
+  const items = [
+    { person: 'ethan', op: 'delete', tag: 'req:r9', byEmail: 'e@x.com', done: false, created: 900, seq: 0 },
+    { person: 'ethan', op: 'create', tag: 'req:r9', byEmail: 'e@x.com', done: false, created: 1000, event: { title: 'Pencilled in: Walk', day: '2026-11-07', start: '10:00', end: '11:00' } }
+  ];
+  const times = ['2026-10-26T10:00:05.5Z', '2026-10-26T10:00:01.123456Z'];
+  ctx.Calendar = calendar;
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'primary@x', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'primary@x' }) };
+  ctx.fsQuery_ = () => items.map((data, i) => ({ id: `o${i}`, data, createTime: times[i] }));
+  ctx.fsCommit_ = () => {};
+  ctx.docName_ = (p) => p;
+  ctx.processOutbox_({ email: 'e@x.com', person: 'ethan', main: true }, { appEmail: 'e@x.com', calDocs: {} });
+  assert.equal(calendar.events.length, 0, 'the pencilled-in event was added, then taken out');
+});
