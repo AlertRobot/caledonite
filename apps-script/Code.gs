@@ -1030,18 +1030,27 @@ function changeByTag_(o, rs) {
   var inst = /^\d{8}(T\d{6}Z)?$/.test(String(o.inst || '')) ? String(o.inst) : '';
   var owned = ownedCals_(rs);
   var targets = findByTag_(rs, o.tag).filter(function (t) { return owned[t.calId] && (!inst || String(t.eventId).indexOf('_') < 0); });
+  // Google lists a time of a series that was changed on its own (an exception, "series_20261113T190000Z")
+  // next to the series itself
+  var series = {};
+  targets.forEach(function (t) { if (String(t.eventId).indexOf('_') < 0) series[t.calId + '|' + t.eventId] = true; });
   var n = 0;
   targets.forEach(function (t) {
     var id = inst ? t.eventId + '_' + inst : t.eventId;
+    var exception = !inst && String(t.eventId).indexOf('_') > 0;
+    // deleting the series takes its changed times with it
+    if (exception && o.op === 'delete' && series[t.calId + '|' + String(t.eventId).split('_')[0]]) return;
     try {
       if (o.op === 'delete') { Calendar.Events.remove(t.calId, id); n++; return; }
       var changes = o.changes || {};
       if (o.event && o.event.title && !changes.title) changes = merge_(changes, { title: o.event.title });
+      // a changed time keeps its own day and time when every time is changed: just the new name
+      if (exception) changes = changes.title ? { title: changes.title } : {};
       var patch = patchFor_(changes, t.calId, id, tzOf_(o));
       if (Object.keys(patch).length) { Calendar.Events.patch(patch, t.calId, id); n++; }
     } catch (err) {
-      // that occurrence is already gone (or this copy doesn't repeat): nothing to do
-      if (inst && /not found|404|410|deleted/i.test(String(err && err.message || err))) return;
+      // already gone (that occurrence, or the whole thing): nothing to do
+      if ((inst || o.op === 'delete') && gone_(err)) return;
       throw err;
     }
   });
@@ -1056,13 +1065,20 @@ function editOwn_(o, rs) {
   var all = o.scope === 'all' && o.rid;
   var target = all ? o.rid : o.gid;
   if (!target) return { refused: 'no event' };
-  if (o.op === 'remove') { Calendar.Events.remove(o.calId, target); return { changed: 1 }; }
+  if (o.op === 'remove') {
+    // deleted in Google Calendar meanwhile, or by an earlier try whose "done" didn't get saved: done
+    try { Calendar.Events.remove(o.calId, target); } catch (err) { if (gone_(err)) return { changed: 0, gone: true }; throw err; }
+    return { changed: 1 };
+  }
   var changes = o.changes || {};
   var patch = all ? (changes.title ? { summary: changes.title } : {}) : patchFor_(changes, o.calId, target, tzOf_(o));
   if (!Object.keys(patch).length) return { changed: 0 };
   Calendar.Events.patch(patch, o.calId, target);
   return { changed: 1 };
 }
+
+// The Calendar API saying an event isn't there (any more)
+function gone_(err) { return /not found|404|410|has been deleted/i.test(String(err && err.message || err)); }
 
 // Times typed in the app are the phone's clock, so a phone abroad sends its time zone with them
 function tzOf_(o) {

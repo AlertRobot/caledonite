@@ -695,3 +695,32 @@ test('someone who was never part of Caledonite opening the connect page writes n
   assert.equal(writes.length, 0);
   assert.equal(queried, 0);
 });
+
+test('deleting every time of something repeating that had one time changed: done in one go, not an error', () => {
+  // Google lists the changed time (an exception) next to the series; deleting the series takes it too
+  const calendar = fakeCalendar([
+    { id: 'm1', calId: 'primary@x', tag: 'both:wk', summary: 'Date night' },
+    { id: 'm1_20261113T190000Z', calId: 'primary@x', tag: 'both:wk', summary: 'Date night (moved)' }
+  ]);
+  calendar.Events.remove = (calId, id) => {
+    if (!calendar.events.some((e) => e.id === id)) throw new Error('API call to calendar.events.delete failed with error: Resource has been deleted');
+    calendar.events = calendar.events.filter((e) => !(e.id === id || e.id.startsWith(id + '_')));
+  };
+  const patched = [];
+  calendar.Events.patch = (p, calId, id) => { patched.push([id, Object.keys(p)]); };
+  const writes = runOutbox([{ person: 'ethan', op: 'delete', tag: 'both:wk', byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+  assert.equal(calendar.events.length, 0);
+  // and a new name for every time renames the changed one too, but never moves it
+  calendar.events.push({ id: 'm2', calId: 'primary@x', tag: 'both:x' }, { id: 'm2_20261113T190000Z', calId: 'primary@x', tag: 'both:x' });
+  ctx.Calendar.Events.get = () => ({ start: { dateTime: '2026-11-06T19:00:00Z' }, end: { dateTime: '2026-11-06T21:00:00Z' } });
+  runOutbox([{ person: 'ethan', op: 'update', tag: 'both:x', changes: { title: 'Film night', day: '2026-11-20', start: '19:00' }, byEmail: 'e@x.com', done: false, created: 2 }], { calendar });
+  assert.deepEqual(patched.find((x) => x[0] === 'm2_20261113T190000Z')[1], ['summary']);
+});
+
+test('removing one of your own events that has already gone from Google Calendar is done, not tried again and again', () => {
+  const calendar = fakeCalendar([]);
+  calendar.Events.remove = () => { throw new Error('API call to calendar.events.delete failed with error: Not Found'); };
+  const writes = runOutbox([{ person: 'ethan', op: 'remove', calId: 'primary@x', gid: 'gone1', byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+});
