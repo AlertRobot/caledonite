@@ -1,5 +1,5 @@
 // One event: what it is, and the reminder you want for it.
-import { esc, fmtDate, fromDayKey, dayKey, fmtTime, hhmm } from './util.js';
+import { esc, fmtDate, fromDayKey, dayKey, fmtTime, fmtRange, hhmm } from './util.js';
 import {
   dayList, itemTime, itemTitle, itemSub, nameOf, settingsOf, reminderFor, fireTimes, evRef, calOf, reminderId,
   REMIND_OPTIONS, REMIND_NOTES, isBirthday, isLowCal
@@ -53,7 +53,7 @@ export function viewEvent(state) {
   out.push(`<h1 class="h1">${esc(itemTitle(state, item))}</h1>`);
   const location = (src && src.location) || item.location || '';
   out.push(`<div class="card stack-s pad">
-    <div class="row">${icon.clock(22)}<span class="grow b">${esc(fmtDate(date))}, ${esc(item.allDay ? 'all day' : itemTime(item, day || dayKey(item.start)).replace(/^All day$/, 'all day'))}</span></div>
+    <div class="row">${icon.clock(22)}<span class="grow b">${esc(fmtDate(date))}, ${esc(item.allDay ? 'all day' : whenOn(item, day || dayKey(item.start)))}</span></div>
     <div class="row-wrap">${whoChip(state, item.who)}${item.calName ? `<span class="small muted">${esc(item.calName)}</span>` : ''}</div>
     ${location ? `<div class="row small-gap">${icon.home(20)}<span class="grow">${esc(location)}</span><a class="btn sec sm" href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(location)}" target="_blank" rel="noopener">Directions</a></div>` : ''}
     ${sub && sub !== location ? `<p class="small muted">${esc(sub)}</p>` : ''}
@@ -87,6 +87,11 @@ export function viewEvent(state) {
   if (!hasPush()) out.push(`<p class="small note-box">Notifications are off on this phone. <a href="#settings/notifications">Turn them on</a> to get reminders on your phone. They always show on Today.</p>`);
   if (isBirthday(base) && !(s.autoRemind.birthdays || []).length) out.push(`<p class="small muted">Tip: you can have a reminder for every birthday, in <a href="#settings/notifications">Settings, Notifications</a>.</p>`);
   return `<div class="stack-l">${out.join('')}</div>`;
+}
+// the whole time, start and end ("4:30pm to 5:15pm"), unless it runs into another day
+function whenOn(item, key) {
+  if (dayKey(item.start) === key && dayKey(new Date(item.end.getTime() - 1)) === key) return fmtRange(item.start, item.end);
+  return itemTime(item, key);
 }
 // Keep this event's whole calendar off Today and the week (or bring it back)
 function priorityLink(state, src) {
