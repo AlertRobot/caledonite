@@ -110,3 +110,17 @@ test('a change that fails holds back later changes to the same event until the n
   assert.equal(writes.length, 1, 'only the failed one is written (with its error)');
   assert.ok(!writes[0].update.fields.done);
 });
+
+test("your partner can't change or delete something you added just for yourself", () => {
+  const calendar = fakeCalendar([
+    { id: 'a1', calId: 'primary@x', tag: 'add:dentist', summary: 'Dentist' },
+    { id: 'b1', calId: 'primary@x', tag: 'both:tea', summary: 'Tea' },
+    { id: 'h1', calId: 'primary@x', tag: 'req:myleave', summary: 'Holiday' },
+    { id: 'p1', calId: 'primary@x', tag: 'req:plan1', summary: 'Cinema' }
+  ]);
+  ctx.fsGet_ = (p) => ({ 'households/main/requests/myleave': { type: 'leave', own: true, people: ['ethan'] }, 'households/main/requests/plan1': { type: 'plan', from: 'sophie', to: 'ethan' } })[p] || null;
+  const byPartner = (op, tag) => ({ person: 'ethan', op, tag, byEmail: 's@x.com', done: false, created: 1, changes: { title: 'Changed' } });
+  const writes = runOutbox([byPartner('delete', 'add:dentist'), byPartner('update', 'add:dentist'), byPartner('delete', 'req:myleave'), byPartner('delete', 'both:tea'), byPartner('delete', 'req:plan1')], { calendar });
+  assert.deepEqual(calendar.events.map((e) => e.summary), ['Dentist', 'Holiday']);
+  assert.equal(writes.filter((w) => JSON.stringify(w).includes('not yours')).length, 3);
+});

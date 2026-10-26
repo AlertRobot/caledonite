@@ -138,3 +138,12 @@ test('the service worker never keeps a failed download of the Firebase library',
   assert.equal(await p, bad);
   assert.deepEqual(puts, []);
 });
+
+test("your partner's own holiday has no Change or Delete for you", async () => {
+  const { canChange } = await import('../js/views-event.js');
+  const st = load({ requests: { lv: { from: 'sophie', to: 'ethan', type: 'leave', own: true, people: ['sophie'], status: 'yes', when: { day: sat, endDay: sat, allDay: true }, created: Date.now() }, pl: { from: 'sophie', to: 'ethan', type: 'plan', status: 'yes', created: Date.now() } } });
+  assert.equal(canChange(st, { owner: 'sophie', tag: 'req:lv' }, {}), false);
+  assert.equal(canChange(st, { owner: 'sophie', tag: 'req:pl' }, {}), true);
+  assert.equal(canChange(st, { owner: 'sophie', tag: 'add:x' }, {}), false);
+  assert.equal(canChange(st, { owner: 'ethan', tag: 'add:x' }, {}), true);
+});

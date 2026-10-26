@@ -105,7 +105,12 @@ function priorityLink(state, src) {
 // Things made in this app, or your own events in a calendar you can edit
 export function canChange(state, src, cal) {
   if (!src) return false;
-  if (src.tag) return src.owner === state.me || (src.tag.startsWith('both:') || src.tag.startsWith('req:'));
+  if (src.tag) {
+    if (src.owner === state.me || src.tag.startsWith('both:')) return true;
+    // a request between you, but not a holiday your partner booked just for themselves
+    const r = src.tag.startsWith('req:') && state.requests.find((x) => `req:${x.id}` === src.tag);
+    return !!r && !r.own && !(r.people && r.people.length === 1);
+  }
   return src.owner === state.me && !!src.gid && cal.canWrite !== false && cal.role !== 'rota';
 }
 function pendingFor(state, src) {

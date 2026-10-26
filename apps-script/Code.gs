@@ -769,7 +769,7 @@ function processOutbox_(me, ctx) {
     if (o.tag && stuck[o.tag]) return;
     try {
       if (o.op === 'create') result = createEvent_(me, ctx, o, own, rs);
-      else if (o.op === 'update' || o.op === 'delete') result = changeByTag_(o, rs);
+      else if (o.op === 'update' || o.op === 'delete') result = own || partnerMayChange_(o.tag, rs) ? changeByTag_(o, rs) : { refused: 'not yours' };
       else if (o.op === 'edit' || o.op === 'remove') result = own ? editOwn_(o, rs) : { refused: 'not yours' };
       else result = { refused: 'unknown change' };
       if (!result.refused && !result.already && (result.eventId || result.changed)) changed = true;
@@ -784,6 +784,19 @@ function processOutbox_(me, ctx) {
   });
   fsCommit_(writes);
   return changed;
+}
+
+// Your partner can change things you share (added for you both, or from a request between you),
+// but not something you added just for yourself, or a holiday you booked on your own.
+function partnerMayChange_(tag, rs) {
+  tag = String(tag || '');
+  if (/^both:/.test(tag)) return true;
+  if (!/^req:/.test(tag)) return false;
+  rs.reqs = rs.reqs || {};
+  var id = tag.slice(4);
+  if (!(id in rs.reqs)) rs.reqs[id] = /^[A-Za-z0-9_-]+$/.test(id) ? fsGet_(HOUSEHOLD + '/requests/' + id) : null;
+  var r = rs.reqs[id];
+  return !!r && !r.own && !(r.people && r.people.length === 1);
 }
 
 // Calendars this account can change, by id
