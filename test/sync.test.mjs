@@ -1486,3 +1486,25 @@ test('rota changes: an all-day entry is named as itself, never as a "night shift
   const s = ctx.localTime_(day, '07:30');
   assert.match(run('hours', [{ t: 'Ward 7', s, e: ctx.localTime_(day, '20:00') }])[0], /long day added/);
 });
+
+test("the weekly backup never copies your partner's rota link, reminders or private countdowns into your Drive", () => {
+  const { api } = fakeProps({ backup_folder: 'f1' });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.ScriptApp = { getOAuthToken: () => 'tok' };
+  ctx.Utilities.getUuid = () => 'u1';
+  ctx.fsList_ = (path) => (path.endsWith('/people') ? [
+    { id: 'ethan', data: { name: 'Ethan', settings: { rotaUrl: 'https://mine.example/r.ics' }, reminders: { r1: { title: 'Mine' } } } },
+    { id: 'sophie', data: { name: 'Sophie', settings: { rotaUrl: 'https://loop.example/s3cr3t.ics', hasShifts: true }, reminders: { r2: { title: 'Therapy' } }, countdowns: { c1: { title: 'Trip', shared: true }, c2: { title: 'Interview', shared: false } } } }
+  ] : []);
+  ctx.fsGet_ = () => ({});
+  let uploaded = '';
+  ctx.UrlFetchApp = { fetch: (url, opt) => {
+    if (/upload/.test(url)) uploaded = opt.payload;
+    return { getResponseCode: () => 200, getContentText: () => (/\/files\/f1/.test(url) ? '{"id":"f1"}' : '{"files":[]}') };
+  } };
+  ctx.backup_({ person: 'ethan' }, { hh: { emails: ['e@x.com'] } }, true);
+  assert.ok(uploaded, 'uploaded');
+  assert.ok(!/s3cr3t|Therapy|Interview/.test(uploaded));
+  assert.match(uploaded, /Trip/);
+  assert.match(uploaded, /mine\.example/, 'your own record is as it is');
+});

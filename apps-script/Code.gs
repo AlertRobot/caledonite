@@ -1763,6 +1763,15 @@ function backup_(me, ctx, force) {
   ['people', 'calendars', 'requests', 'notes', 'shifts', 'jobs', 'ideas'].forEach(function (c) {
     dump[c] = fsList_(HOUSEHOLD + '/' + c).map(function (d) { return merge_({ id: d.id }, d.data); });
   });
+  // nor what your partner's record still holds from before it had a private place (the app moves it there):
+  // their rota link, reminders and private countdowns
+  dump.people.forEach(function (p) {
+    if (p.id === me.person) return;
+    delete p.reminders;
+    if (p.settings && typeof p.settings === 'object') delete p.settings.rotaUrl;
+    var cds = p.countdowns && typeof p.countdowns === 'object' ? p.countdowns : {};
+    Object.keys(cds).forEach(function (k) { if (!cds[k] || cds[k].shared === false) delete cds[k]; });
+  });
   // your own reminders and private countdowns, never your partner's (this goes in your Google Drive)
   dump.mine = { person: me.person, private: fsGet_(HOUSEHOLD + '/people/' + me.person + '/private/main') || {} };
   var token = ScriptApp.getOAuthToken();
