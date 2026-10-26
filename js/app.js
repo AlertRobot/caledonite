@@ -597,6 +597,19 @@ async function refreshLinked() {
   } catch (e) { console.warn('linked', e); }
 }
 
+// The app stays open for days on a phone: after midnight, move the calendar on with today
+let shownDay = dayKey(new Date());
+function newDay() {
+  const k = dayKey(new Date());
+  if (k === shownDay) return;
+  const was = fromDayKey(shownDay); const now = new Date();
+  if (ui.calSel === shownDay) ui.calSel = k;
+  if (ui.weekOpen === shownDay) ui.weekOpen = k;
+  if (dayKey(ui.weekStart) === dayKey(mondayOf(was))) ui.weekStart = mondayOf(now);
+  if (ui.calMonth.getFullYear() === was.getFullYear() && ui.calMonth.getMonth() === was.getMonth()) ui.calMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  shownDay = k;
+}
+
 // ---------- start ----------
 async function boot() {
   applyLook();
@@ -604,9 +617,10 @@ async function boot() {
   store.subscribe(() => render());
   setInterval(rotateCountdown, 5000);
   window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); });
-  setInterval(() => { if (!document.hidden && !isEditing()) { store.state = Object.assign({}, store.state, { rev: store.state.rev + 1 }); render(); } }, 60000);
+  setInterval(() => { newDay(); if (!document.hidden && !isEditing()) { store.state = Object.assign({}, store.state, { rev: store.state.rev + 1 }); render(); } }, 60000);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
+    newDay();
     if (store.backend && store.state.phase === 'ready') store.backend.ping();
     refreshLinked();
   });
