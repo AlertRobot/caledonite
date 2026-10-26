@@ -1757,7 +1757,7 @@ function processNotify_(ctx) {
     var d = n.data;
     // only ever one of the two of you (its address builds the path to their phones)
     if (!Object.prototype.hasOwnProperty.call(ctx.people, String(d.to))) {
-      try { fsCommit_([upd_(HOUSEHOLD + '/notify/' + n.id, { sent: true, sentAt: now, error: 'not for anyone here' }, ['sent', 'sentAt', 'error'])]); } catch (e) { /* the next run tries again */ }
+      try { fsCommit_([ifSame_(upd_(HOUSEHOLD + '/notify/' + n.id, { sent: true, sentAt: now, error: 'not for anyone here' }, ['sent', 'sentAt', 'error']), n)]); } catch (e) { /* the next run tries again */ }
       return;
     }
     var who = ctx.people[d.to] || {};
@@ -1766,7 +1766,8 @@ function processNotify_(ctx) {
     if (d.kind !== 'test') {
       var until = Math.max(quietUntil_(settings, now), asleepUntil_(d.to, who, ctx, now));
       if (until > now) {
-        try { fsCommit_([upd_(HOUSEHOLD + '/notify/' + n.id, { sendAfter: until }, ['sendAfter'])]); } catch (e) { /* the next run tries again */ }
+        // only if it's as it was read: one Peckish has just taken back (or changed) is never made again as a stub
+        try { fsCommit_([ifSame_(upd_(HOUSEHOLD + '/notify/' + n.id, { sendAfter: until }, ['sendAfter']), n)]); } catch (e) { /* the next run tries again */ }
         return;
       }
     }
@@ -1776,16 +1777,42 @@ function processNotify_(ctx) {
     } catch (err) { return; }
     var notif = settings.notif || {};
     if (d.kind && notif[d.kind] === false) return;
-    if (!tokensFor[d.to]) tokensFor[d.to] = fsList_(HOUSEHOLD + '/people/' + d.to + '/tokens');
     // Firebase sends at most 4 KB, so a long note is cut short rather than never arriving
     var msg = { title: cut_(d.title || 'Caledonite', 150), body: cut_(d.body || '', 700), link: cut_(d.link || '#today', 200), tag: String(n.id), kind: String(d.kind || '') };
     if (d.reqId) msg.reqId = String(d.reqId);
     if (d.ask) msg.ask = String(d.ask);
-    tokensFor[d.to].forEach(function (t) {
-      var code = sendPush_(t.data.token, msg);
-      if (code === 404 || code === 410) fsCommit_([{ 'delete': docName_(HOUSEHOLD + '/people/' + d.to + '/tokens/' + t.id) }]);
+    var delivered = 0, again = false;
+    try {
+      if (!tokensFor[d.to]) tokensFor[d.to] = fsList_(HOUSEHOLD + '/people/' + d.to + '/tokens');
+    } catch (err) { again = true; }
+    (tokensFor[d.to] || []).forEach(function (t) {
+      var code = 0;
+      try { code = sendPush_(t.data.token, msg); } catch (err) { code = 0; }
+      if (code >= 200 && code < 300) delivered++;
+      else if (code === 404 || code === 410) { try { fsCommit_([{ 'delete': docName_(HOUSEHOLD + '/people/' + d.to + '/tokens/' + t.id) }]); } catch (err) { /* next time */ } }
+      else if (!code || code === 429 || code >= 500) again = true;
     });
+    // Firebase (or the network) having a moment, and it reached none of their phones: tried again in a few minutes,
+    // a couple of times, rather than lost. Never when one phone has it (it would arrive twice there).
+    if (!delivered && again) unclaim_(n.id, now);
   });
+}
+// Back to waiting, as it was before it was claimed (no fields of its own added, so Peckish can still keep its ones
+// up to date). How many times is kept in the script's cache, shared by every account's run.
+function unclaim_(id, now) {
+  var cache = CacheService.getScriptCache();
+  var key = 'push_retry_' + id;
+  var n = (+cache.get(key) || 0) + 1;
+  if (n > 3) return;
+  cache.put(key, String(n), 21600);
+  try {
+    fsCommit_([{ update: { name: docName_(HOUSEHOLD + '/notify/' + id), fields: toFields_({ sent: false, sendAfter: now + n * 5 * 60e3 }) }, updateMask: { fieldPaths: ['sent', 'sendAfter', 'sentAt'] }, currentDocument: { exists: true } }]);
+  } catch (err) { Logger.log('notify retry: ' + err.message); }
+}
+// A write that only goes through if the document is still exactly as it was read
+function ifSame_(w, doc) {
+  if (doc && doc.updateTime) w.currentDocument = { updateTime: doc.updateTime };
+  return w;
 }
 function cut_(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 function sendPush_(token, msg) {

@@ -1006,3 +1006,45 @@ test('a new time sent for every time of something repeating only renames it, nev
   runOutbox([{ person: 'ethan', op: 'update', tag: 'add:x', changes: { day: '2026-11-20', start: '20:00', end: '22:00' }, byEmail: 'e@x.com', done: false, created: 2 }], { calendar });
   assert.equal(patched[0][1].start.dateTime, '2026-11-20T20:00:00');
 });
+
+function notifyHarness(codeFor) {
+  const cache = fakeCache();
+  const sent = [];
+  ctx.UrlFetchApp = { fetch: (url, opt) => { const c = codeFor(sent.length); sent.push(opt.payload); if (c === 'throw') throw new Error('Address unavailable'); return { getResponseCode: () => c }; } };
+  ctx.saToken_ = () => 't'; ctx.prop_ = () => 'proj';
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  return { cache, sent, writes };
+}
+test('a notification Firebase could not take (or the network failed) is tried again, not lost', () => {
+  const realToken = ctx.saToken_, realProp = ctx.prop_;
+  for (const fail of [503, 429, 'throw']) {
+    const { writes } = notifyHarness(() => fail);
+    ctx.fsQuery_ = (coll) => (coll === 'notify' ? [{ id: 'pk-n1', data: { to: 'sophie', kind: 'reminders', title: 'Dinner', sendAfter: 0, sent: false, created: 1 }, updateTime: 't' }] : []);
+    ctx.fsList_ = () => [{ id: 't1', data: { token: 'tok' } }];
+    ctx.processNotify_({ people: { sophie: { settings: { quiet: { on: false } } } } });
+    const back = writes.find((w) => w.update && w.update.fields.sent && w.update.fields.sent.booleanValue === false);
+    assert.ok(back, `put back to wait (${fail})`);
+    assert.deepEqual([...back.updateMask.fieldPaths], ['sent', 'sendAfter', 'sentAt'], 'nothing of its own added');
+    assert.equal(JSON.stringify(back.currentDocument), '{"exists":true}');
+  }
+  // one phone has it: never sent again
+  const { writes } = notifyHarness((i) => (i === 0 ? 200 : 503));
+  ctx.fsList_ = () => [{ id: 't1', data: { token: 'a' } }, { id: 't2', data: { token: 'b' } }];
+  ctx.processNotify_({ people: { sophie: { settings: { quiet: { on: false } } } } });
+  assert.ok(!writes.some((w) => w.update && w.update.fields.sent && w.update.fields.sent.booleanValue === false));
+  ctx.saToken_ = realToken; ctx.prop_ = realProp;
+});
+test('holding a notification for quiet hours never makes again one that was just taken back', () => {
+  const writes = [];
+  ctx.fsQuery_ = (coll) => (coll === 'notify' ? [{ id: 'pk-n2', data: { to: 'sophie', kind: 'reminders', title: 'x', sendAfter: 0, sent: false }, updateTime: '2026-10-26T10:00:00.1Z' }] : []);
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const realQuiet = ctx.quietUntil_;
+  ctx.quietUntil_ = () => Date.now() + 3600e3;
+  ctx.processNotify_({ people: { sophie: { settings: {} } } });
+  ctx.quietUntil_ = realQuiet;
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].currentDocument.updateTime, '2026-10-26T10:00:00.1Z');
+});
