@@ -908,12 +908,25 @@ export function jobWho(state, j) {
 }
 
 // ---------- holidays and allowances ----------
-// Bank holidays in England and Wales
-export const BANK_HOLIDAYS = [
-  '2026-01-01', '2026-04-03', '2026-04-06', '2026-05-04', '2026-05-25', '2026-08-31', '2026-12-25', '2026-12-28',
-  '2027-01-01', '2027-03-26', '2027-03-29', '2027-05-03', '2027-05-31', '2027-08-30', '2027-12-27', '2027-12-28',
-  '2028-01-03', '2028-04-14', '2028-04-17', '2028-05-01', '2028-05-29', '2028-08-28', '2028-12-25', '2028-12-26'
-];
+// Bank holidays in England and Wales, worked out for any year (one-off extra ones, like a coronation, aren't known)
+const bankHolCache = {};
+export function bankHolidays(y) {
+  if (bankHolCache[y]) return bankHolCache[y];
+  const d = (m, day) => new Date(y, m, day);
+  const monOnOrAfter = (x) => addDays(x, (8 - x.getDay()) % 7);
+  const lastMon = (m) => { const end = new Date(y, m + 1, 0); return addDays(end, -((end.getDay() + 6) % 7)); };
+  const weekend = (x) => x.getDay() === 0 || x.getDay() === 6;
+  const easter = fromDayKey(easterKey(y));
+  const xmas = d(11, 25); const boxing = d(11, 26);
+  // Christmas and Boxing Day at a weekend: the next weekdays that aren't already one of them
+  let xs = xmas; let bs = boxing;
+  if (weekend(xmas)) { xs = monOnOrAfter(xmas); if (dayKey(xs) === dayKey(boxing)) xs = addDays(boxing, 1); }
+  if (weekend(boxing) || dayKey(bs) === dayKey(xs)) { bs = monOnOrAfter(boxing); if (dayKey(bs) === dayKey(xs)) bs = addDays(xs, 1); }
+  const list = [weekend(d(0, 1)) ? monOnOrAfter(d(0, 1)) : d(0, 1), addDays(easter, -2), addDays(easter, 1), monOnOrAfter(d(4, 1)), lastMon(4), lastMon(7), xs, bs];
+  bankHolCache[y] = list.map(dayKey);
+  return bankHolCache[y];
+}
+export function isBankHoliday(k) { return bankHolidays(Number(k.slice(0, 4))).includes(k); }
 // The working days a holiday takes from someone's allowance
 export function leaveDaysFor(state, pid, fromK, toK) {
   const s = settingsOf(state, pid);
@@ -921,7 +934,7 @@ export function leaveDaysFor(state, pid, fromK, toK) {
   for (let d = fromDayKey(fromK); dayKey(d) <= toK; d = addDays(d, 1)) {
     const k = dayKey(d);
     const wd = isoWeekday(d);
-    if (!s.leave.bankHolsCount && BANK_HOLIDAYS.includes(k)) continue;
+    if (!s.leave.bankHolsCount && isBankHoliday(k)) continue;
     if (s.hasShifts) {
       // a shift worker: the days they'd be on shift, or weekdays when the rota isn't known yet
       const sh = shiftFor(state, pid, k);

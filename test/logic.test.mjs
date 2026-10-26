@@ -282,6 +282,19 @@ test("with tonight's meal from Peckish, dinner moved earlier for a night shift s
   } finally { store.linked = {}; }
 });
 
+test('bank holidays are known for every year, so a holiday booked for 2029 or later still skips them', () => {
+  // as gov.uk lists them
+  assert.deepEqual([2026, 2027, 2028].flatMap((y) => L.bankHolidays(y)).sort(), [
+    '2026-01-01', '2026-04-03', '2026-04-06', '2026-05-04', '2026-05-25', '2026-08-31', '2026-12-25', '2026-12-28',
+    '2027-01-01', '2027-03-26', '2027-03-29', '2027-05-03', '2027-05-31', '2027-08-30', '2027-12-27', '2027-12-28',
+    '2028-01-03', '2028-04-14', '2028-04-17', '2028-05-01', '2028-05-29', '2028-08-28', '2028-12-25', '2028-12-26']);
+  assert.deepEqual(L.bankHolidays(2022).slice().sort().slice(-2), ['2022-12-26', '2022-12-27'], 'Christmas on a Sunday');
+  // Ethan, Monday to Friday: the weeks of Good Friday (30 March 2029) and Easter Monday (2 April) take 4 days each, not 5
+  const st = load();
+  assert.equal(L.leaveDaysFor(st, 'ethan', '2029-03-26', '2029-03-30'), 4);
+  assert.equal(L.leaveDaysFor(st, 'ethan', '2029-04-02', '2029-04-06'), 4);
+});
+
 test('a late shift that ends at midnight is not a night: no sleeping the next morning', () => {
   const st = load({ events: [timed('sophie', 'rota', k(8), '16:00', '16:00', { t: 'Shift', e: atTime(k(9), '00:00').getTime() })] });
   assert.equal(L.shiftFor(st, 'sophie', k(8)).type, 'late');
