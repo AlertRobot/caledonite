@@ -364,7 +364,7 @@ const H = {
     const st = store.state;
     const who = ui.add.shiftWho || (settingsOf(st, st.me).hasShifts ? st.me : st.partner);
     const day = addDayKey();
-    await run(actions.setShift(who, day, ui.add.shiftType));
+    try { await actions.setShift(who, day, ui.add.shiftType); } catch (e) { console.error(e); return toast('That didn’t save. Check your connection and try again.'); }
     const label = settingsOf(st, who).shiftTypes[ui.add.shiftType].label;
     ui.add.done = `Saved: ${label} on ${whenLabel({ day, allDay: true }).replace(', all day', '')}${who === st.me ? '' : ` for ${nameOf(st, who)}`}.`;
     render();
