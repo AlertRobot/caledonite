@@ -31,10 +31,12 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
-  // our own files: always the newest from the network (never a half-updated mix), the saved copy when offline
+  // our own files: always the newest from the network (never a half-updated mix), the saved copy when offline.
+  // Only Caledonite's own folder is saved: another app's files on this website (Peckish's recipes) are its own
   if (url.origin === location.origin) {
+    const ours = url.href.startsWith(self.registration.scope);
     e.respondWith(fetch(e.request, { cache: 'no-cache' }).then((res) => {
-      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
+      if (res.ok && ours) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
       return res;
     }).catch(() => caches.open(VERSION).then((c) => c.match(e.request, { ignoreSearch: true })
       // only Caledonite's own saved copies (Peckish keeps its own on this website), and the app page only for a page

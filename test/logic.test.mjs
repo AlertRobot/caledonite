@@ -441,6 +441,13 @@ test('offline, the service worker answers only from Caledonite’s own saved cop
   assert.equal(await ask('https://alertrobot.github.io/caledonite/', 'navigate'), 'APP PAGE');
 });
 
+test("the service worker never saves another app's files from this website (Peckish's recipes) as its own", async () => {
+  const ok = { ok: true, status: 200, clone() { return this; } };
+  const fetchOf = async (url) => { const sw = await loadSw({ fetchRes: ok }); let p; sw.handlers.fetch({ request: { method: 'GET', url, mode: 'cors' }, respondWith: (x) => { p = x; } }); await p; await new Promise((r) => setTimeout(r, 0)); return sw.puts; };
+  assert.deepEqual(await fetchOf('https://alertrobot.github.io/es-kitchen/data/library.json'), []);
+  assert.equal((await fetchOf('https://alertrobot.github.io/caledonite/js/app.js')).length, 1);
+});
+
 test('opening the second day of something repeating that runs overnight changes that occurrence, not another', async () => {
   const { findEvent } = await import('../js/views-event.js');
   const sat2 = dayKey(addDays(new Date(sat + 'T12:00'), 7));
