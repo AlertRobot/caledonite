@@ -206,10 +206,10 @@ function secShifts(state) {
     const type = sh ? sh.type : null;
     const label = sh ? sh.label : 'No shift';
     const times = sh && !sh.allDay ? `${fmtTime(sh.start)} to ${fmtTime(sh.end)}` : (sh ? (type === 'leave' ? 'Annual leave' : 'Not working') : 'Tap to add a shift');
-    rows.push(`<button type="button" class="list-row btn-row" data-act="cycleShift" data-p="${esc(who)}" data-day="${k}" data-type="${type || ''}" aria-label="${esc(fmtDate(d))}: ${esc(label)}. Tap to change.">
+    rows.push(`<button type="button" class="list-row btn-row" data-act="cycleShift" data-p="${esc(who)}" data-day="${k}" data-type="${esc(type || '')}" aria-label="${esc(fmtDate(d))}: ${esc(label)}. Tap to change.">
       <span class="grow col"><span class="b">${esc(fmtDate(d))}</span><span class="small muted">${esc(times)}</span></span>
       ${ov ? `<span class="small b link" data-act="clearShift" data-p="${esc(who)}" data-day="${k}" role="button" tabindex="0">Undo</span>` : ''}
-      <span class="shift-pill sp-${type || 'none'}">${esc(label)}</span></button>`);
+      <span class="shift-pill sp-${esc(type || 'none')}">${esc(label)}</span></button>`);
   }
   out.push(`<section class="stack-s"><h2 class="h4">Change a shift</h2>
     <p class="small muted">Swapped a shift or picked up an extra one? Tap a day to change it. Changes win over the rota for that day.</p>

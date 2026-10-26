@@ -194,3 +194,18 @@ test('an overnight event can be moved to another day, and still ends the next mo
   assert.equal(ch.endDay, after);
   await page.context().close();
 });
+
+test("a shift your partner saved with HTML in its kind can't add anything to the page", async () => {
+  const page = await open('sophie', '#settings/shifts');
+  await mods(page, (store) => {
+    const d = new Date(); const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return store.store.backend.commit([{ type: 'set', path: `shifts/sophie_${day}`, data: { person: 'sophie', day, type: '"><b id="pwn">x</b><span class="', by: 'ethan', updated: Date.now() } }]);
+  });
+  await page.waitForTimeout(200);
+  await go(page, '#settings/shifts');
+  assert.equal(await page.locator('#pwn').count(), 0);
+  await go(page, '#today');
+  assert.equal(await page.locator('#pwn').count(), 0);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});

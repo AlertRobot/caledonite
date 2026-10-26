@@ -30,6 +30,7 @@ const COLOURS = ['blue', 'orange', 'green', 'purple', 'pink', 'teal', 'red', 'gr
 const LAYERS = ['own', 'family', 'friends', 'other'];
 const ROLES = ['normal', 'work', 'rota'];
 const SHARES = ['all', 'busy', 'none', 'hours'];
+const SHIFT_TYPES = ['long', 'night', 'early', 'late', 'off', 'leave'];
 const pick = (v, list, d) => (list.includes(v) ? v : d);
 const safeColour = (c) => (typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c) ? c : '');
 
@@ -85,7 +86,10 @@ export function setRaw(raw, extra = {}) {
   }
   s.events = evs;
   s.shifts = {};
-  for (const sh of Object.values(raw.shifts || {})) if (sh && sh.person && sh.day) s.shifts[`${sh.person}|${sh.day}`] = sh;
+  // either of you can change the other's shifts, so only the known kinds (they end up in class names)
+  for (const sh of Object.values(raw.shifts || {})) {
+    if (sh && sh.person && sh.day && SHIFT_TYPES.includes(sh.type)) s.shifts[`${sh.person}|${sh.day}`] = sh;
+  }
   s.requests = Object.entries(raw.requests || {}).map(([id, r]) => Object.assign({ id }, r)).sort((a, b) => (b.created || 0) - (a.created || 0));
   s.notes = Object.entries(raw.notes || {}).map(([id, x]) => Object.assign({ id }, x)).sort((a, b) => (b.created || 0) - (a.created || 0));
   s.outbox = Object.entries(raw.outbox || {}).map(([id, o]) => Object.assign({ id }, o)).filter((o) => !o.done);
