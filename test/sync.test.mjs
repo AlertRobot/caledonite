@@ -217,3 +217,17 @@ test('taking the rota link out removes its shifts', () => {
   // and the sync calls it when there's no link
   assert.match(ctx.syncAll.toString(), /else if \(me\.main\) stage\('rota link', function \(\) \{ dropRotaLink_\(me\); \}\)/);
 });
+
+test("a calendar that's gone from Google leaves Settings after a couple of days", () => {
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.PropertiesService = { getUserProperties: () => ({ getProperty: () => null, getProperties: () => ({}), setProperties() {}, deleteProperty() {} }) };
+  ctx.CalendarApp = { getAllCalendars: () => [], getDefaultCalendar: () => ({ getId: () => 'p@x' }) };
+  const old = Date.now() - 5 * 864e5;
+  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true }, { calDocs: {
+    gone: { account: 'e@x.com', lastSeen: old }, recent: { account: 'e@x.com', lastSeen: Date.now() - 3600e3 },
+    other: { account: 'work@x.com', lastSeen: old }, rotalink: { account: 'Rota link', lastSeen: old }
+  } }, []);
+  assert.deepEqual(writes.map((w) => w.delete), ['households/main/calendars/ethan__gone']);
+});

@@ -326,6 +326,12 @@ function syncCalendars_(me, ctx, errors) {
     Object.keys(old).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
     toForget.push(k);
   });
+  // and their records, once they've been gone a couple of days (so they leave Settings too)
+  Object.keys(ctx.calDocs || {}).forEach(function (ck) {
+    var d = ctx.calDocs[ck];
+    if (ck === 'rotalink' || seenCalKeys[ck] || String(d.account || '') !== me.email || Date.now() - (d.lastSeen || 0) < 2 * 864e5) return;
+    writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + me.person + '__' + ck) });
+  });
   fsCommit_(writes);
   // only now that the writes went through, remember what was written
   if (Object.keys(pending).length) props.setProperties(pending);
