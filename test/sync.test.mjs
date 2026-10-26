@@ -863,3 +863,18 @@ test('your own copies follow a corrected email (set before you joined), not just
   assert.ok(priv, 'written again');
   assert.equal(priv.update.fields.ownerEmail.stringValue, 's@x.com');
 });
+
+test("yes to the other time: the agreed event is added even if Google's search still lists the pencilled-in one just deleted", () => {
+  const calendar = fakeCalendar([{ id: 'hold1', calId: 'primary@x', tag: 'req:r7', summary: 'Pencilled in: Walk' }]);
+  const gone = new Set();
+  // the search lags: what was deleted a moment ago is still found by its tag
+  const list = calendar.Events.list;
+  calendar.Events.remove = (calId, id) => { gone.add(id); };
+  calendar.Events.list = (calId, q) => list(calId, q);
+  runOutbox([
+    { person: 'ethan', op: 'delete', tag: 'req:r7', byEmail: 'e@x.com', done: false, created: 5, seq: 0 },
+    { person: 'ethan', op: 'create', tag: 'req:r7', byEmail: 'e@x.com', done: false, created: 5, seq: 1, event: { title: 'Walk', day: '2026-11-07', start: '10:00', end: '11:00' } }
+  ], { calendar });
+  assert.ok(gone.has('hold1'));
+  assert.ok(calendar.events.some((e) => e.summary === 'Walk'), 'the agreed one was added');
+});

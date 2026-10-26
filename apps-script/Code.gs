@@ -949,7 +949,7 @@ function processOutbox_(me, ctx) {
     return acc ? acc === me.email : me.main;
   });
   if (!items.length) return false;
-  var rs = { tagMap: {}, owned: null, defaultId: null };
+  var rs = { tagMap: {}, owned: null, defaultId: null, removed: {} };
   var writes = [];
   var changed = false;
   // in the order they reached the database (two phones' clocks can differ: an answer must never come before
@@ -1035,6 +1035,8 @@ function findByTag_(rs, tag) {
       (res.items || []).forEach(function (x) { if (x.status !== 'cancelled' && String(x.description || '').indexOf(marker) >= 0) found.push({ calId: calId, eventId: x.id }); });
     });
   }
+  // never something this run has just deleted (Google's search can take a moment to catch up)
+  found = found.filter(function (x) { return !(rs.removed || {})[x.calId + '|' + x.eventId]; });
   rs.tagMap[tag] = found;
   return found;
 }
@@ -1097,7 +1099,7 @@ function changeByTag_(o, rs) {
     // deleting the series takes its changed times with it
     if (exception && o.op === 'delete' && series[t.calId + '|' + String(t.eventId).split('_')[0]]) return;
     try {
-      if (o.op === 'delete') { Calendar.Events.remove(t.calId, id); n++; return; }
+      if (o.op === 'delete') { Calendar.Events.remove(t.calId, id); rs.removed[t.calId + '|' + id] = true; n++; return; }
       var changes = o.changes || {};
       if (o.event && o.event.title && !changes.title) changes = merge_(changes, { title: o.event.title });
       // a changed time keeps its own day and time when every time is changed: just the new name
@@ -1124,6 +1126,7 @@ function editOwn_(o, rs) {
   if (o.op === 'remove') {
     // deleted in Google Calendar meanwhile, or by an earlier try whose "done" didn't get saved: done
     try { Calendar.Events.remove(o.calId, target); } catch (err) { if (gone_(err)) return { changed: 0, gone: true }; throw err; }
+    rs.removed[o.calId + '|' + target] = true;
     return { changed: 1 };
   }
   var changes = o.changes || {};
