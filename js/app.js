@@ -1,7 +1,7 @@
 // Caledonite: start-up, screens, taps and typing.
 import { store, actions, setPhase, setLinked } from './store.js';
 import { ui, resetAsk, resetAdd } from './uistate.js';
-import { viewToday, viewCalendar, waitingForMe } from './views-main.js';
+import { viewToday, viewCalendar, waitingForMe, rotateCountdown } from './views-main.js';
 import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey, leaveWhen } from './views-requests.js';
 import { viewSettings, viewSignedOut, viewSetup, viewNotMember, viewLoading } from './views-settings.js';
 import { viewEvent, findEvent } from './views-event.js';
@@ -360,6 +360,14 @@ const H = {
   addWho: (el) => { ui.add.who = el.dataset.v; render(); },
   addDay: (el) => { ui.add.day = el.dataset.v; if (el.dataset.v === 'pick' && !ui.add.date) ui.add.date = dayKey(new Date()); render(); },
   addBusy: (el) => { ui.add.busyOnly = el.dataset.v === 'busy'; render(); },
+  calPriority: (el) => {
+    const s = settingsOf(store.state, store.state.me);
+    const set = new Set(s.lowCals || []);
+    if (el.dataset.v === 'low') set.add(el.dataset.k); else set.delete(el.dataset.k);
+    const c = store.state.calendars[el.dataset.k];
+    run(actions.updateMySettings({ lowCals: [...set] }), el.dataset.v === 'low' ? `${c ? c.name : 'That calendar'} is now low priority.` : `${c ? c.name : 'That calendar'} is back on Today and the week.`);
+  },
+  cdNext: () => rotateCountdown(),
   addAllDayT: () => { ui.add.allDay = !ui.add.allDay; render(); },
   addMore: () => { ui.add.more = !ui.add.more; render(); },
   addSave: async () => {
@@ -522,6 +530,12 @@ const C = {
   askLeaveDate: () => render(),
   addLeaveDate: () => render(),
   addRerender: () => render(),
+  hhBday: (el) => {
+    const h = store.state.household || {};
+    const b = Object.assign({}, h.birthdays || {});
+    if (el.value) b[el.dataset.p] = el.value.slice(5); else delete b[el.dataset.p];
+    run(actions.updateHousehold({ birthdays: b }), 'Saved.');
+  },
   hhField: (el) => run(actions.updateHousehold({ [el.dataset.f]: el.dataset.f === 'nudgeHours' ? Number(el.value) : el.value }))
 };
 
@@ -574,6 +588,7 @@ async function boot() {
   applyLook();
   if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyLook());
   store.subscribe(() => render());
+  setInterval(rotateCountdown, 5000);
   window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); });
   setInterval(() => { if (!document.hidden && !isEditing()) { store.state = Object.assign({}, store.state, { rev: store.state.rev + 1 }); render(); } }, 60000);
   document.addEventListener('visibilitychange', () => {

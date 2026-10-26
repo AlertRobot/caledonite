@@ -5,7 +5,7 @@ import {
 import {
   buildDay, dayList, statusNow, nextBothFree, itemTime, itemTitle, itemSub, nameOf, personColour, monthCell, allLayers,
   layerChipLabel, LAYER_INFO, settingsOf, isWorkingShift, reminderFor, myReminders, reminderLine,
-  countdowns, countdownText, jobsOn, inQuietHours, quietNight
+  countdowns, countdownText, jobsOn, inQuietHours, quietNight, lowCount
 } from './logic.js';
 import { jobRow } from './views-extra.js';
 import { icon, avatar, whoChip, seg, empty } from './ui.js';
@@ -38,8 +38,8 @@ export function viewToday(state) {
   const P = state.partner;
   const me = state.me;
   const out = [];
-  const cd = countdowns(state, now)[0];
-  out.push(pageHeader(state, 'Today', `${fmtDate(now)}${cd ? ` · ${countdownText(cd)}` : ''}`));
+  out.push(pageHeader(state, 'Today', fmtDate(now)));
+  out.push(milestones(state, now));
 
   // something wrong with the sync or this phone's notifications
   out.push(...warnings(state, now));
@@ -97,11 +97,12 @@ export function viewToday(state) {
   }
 
   // the day
-  let items = dayList(state, key, layerFilter());
+  let items = dayList(state, key, Object.assign(layerFilter(), { hideLow: true }));
   items = items.filter((it) => !(it.kind === 'shift' && it.allDay && it.who === me && myShift));
   const free = freeTonight(state, d);
+  const more = moreLink(state, key);
   out.push(`<section class="stack-s"><h2 class="label">The day</h2>
-    ${items.length || free ? `<div class="card flush agenda">${items.map((it) => agendaRow(state, it, key)).join('')}${free}</div>` : `<div class="card pad muted">Nothing planned today.</div>`}
+    ${items.length || free || more ? `<div class="card flush agenda">${items.length || free ? '' : '<p class="muted pad">Nothing planned today.</p>'}${items.map((it) => agendaRow(state, it, key)).join('')}${free}${more}</div>` : `<div class="card pad muted">Nothing planned today.</div>`}
   </section>`);
 
   // next time you're both free (when it isn't tonight)
@@ -122,6 +123,34 @@ export function viewToday(state) {
   }
   out.push(`<a href="#calendar" class="small-link center-link" data-act="calGo" data-day="${dayKey(addDays(now, 1))}">See the rest of the week ${icon.next(16)}</a>`);
   return out.join('');
+}
+// "2 more from low-priority calendars", opening that day in the month
+function moreLink(state, key) {
+  const n = lowCount(state, key, layerFilter());
+  return n ? `<a href="#calendar" class="ag-add ag-more" data-act="calGo" data-day="${key}">${n} more from low-priority calendars ${icon.next(16)}</a>` : '';
+}
+// Christmas, birthdays, the anniversary...: one line at the top of Today, taking turns
+let cdIdx = 0;
+function milestones(state, now) {
+  const list = countdowns(state, now).slice(0, 6).map(countdownText);
+  if (!list.length) return '';
+  const i = cdIdx % list.length;
+  return `<button type="button" class="cd-strip" data-act="cdNext" aria-label="Countdowns. Tap for the next one.">${icon.gift(18)}<span id="cd-rot" class="cd-rot" aria-live="off" data-list="${esc(JSON.stringify(list))}">${esc(list[i])}</span>${list.length > 1 ? `<span class="cd-dots" aria-hidden="true">${list.map((_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('')}</span>` : ''}</button>`;
+}
+export function rotateCountdown() {
+  const el = document.getElementById('cd-rot');
+  if (!el || document.hidden) return;
+  let list = [];
+  try { list = JSON.parse(el.dataset.list || '[]'); } catch (e) { return; }
+  if (list.length < 2) return;
+  cdIdx = (cdIdx + 1) % list.length;
+  el.classList.add('out');
+  setTimeout(() => {
+    el.textContent = list[cdIdx];
+    el.classList.remove('out');
+    const dots = el.parentElement && el.parentElement.querySelectorAll('.cd-dots i');
+    if (dots) dots.forEach((d, k) => d.classList.toggle('on', k === cdIdx));
+  }, 220);
 }
 function hm(d) { return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
 
@@ -340,7 +369,8 @@ function monthView(state) {
   <section class="stack-s">
     <h2 class="label">${esc(fmtDate(selDate))}${selKey === dayKey(new Date()) ? ' (today)' : ''}</h2>
     <div class="card flush agenda">
-      ${items.length ? items.map((it) => agendaRow(state, it, selKey)).join('') : '<p class="muted pad">Nothing planned.</p>'}
+      ${items.length ? items.filter((it) => !it.low).map((it) => agendaRow(state, it, selKey)).join('') : '<p class="muted pad">Nothing planned.</p>'}
+      ${items.some((it) => it.low) ? `<div class="ag-divider">Low priority</div>${items.filter((it) => it.low).map((it) => agendaRow(state, it, selKey)).join('')}` : ''}
       ${P && d.freeEvening && selKey >= dayKey(new Date()) ? `<div class="ag-row ag-free"><span class="ag-time"><b>Evening</b></span><span class="ag-bar"></span><span class="ag-main"><span class="b ink-tog">You're both free</span></span><a href="#ask" class="btn tog sm" data-act="askFrom" data-day="${selKey}" data-start="19:00">Plan</a></div>` : ''}
       <a href="#add" class="ag-add" data-act="addFor" data-day="${selKey}">${icon.plus(18)} Add on this day</a>
     </div>
@@ -388,12 +418,17 @@ function weekView(state) {
       const p = d.persons[pid];
       const col = `var(--${personColour(state, pid)})`;
       const list = [];
+      const lines = [];
       for (const it of p.items) {
-        if (it.allDay) continue;
+        if (it.low || it.kind === 'money') continue;
+        if (it.allDay) { lines.push(col); continue; }
         list.push([it.start.getTime(), it.end.getTime(), it.kind === 'sleep' ? `var(--${personColour(state, pid)}-sleep)` : col]);
       }
-      for (const t of d.together) if (!t.allDay) list.push([t.start.getTime(), t.end.getTime(), t.kind === 'hold' ? 'var(--tog-hold)' : 'var(--tog)']);
-      rows.push(`<span class="strip-label ink-${personColour(state, pid)}">${pid === state.me ? 'You' : esc(nameOf(state, pid))}</span><div class="strip">${segs(list)}</div>`);
+      for (const t of d.together) {
+        if (t.allDay) lines.push('var(--tog)');
+        else list.push([t.start.getTime(), t.end.getTime(), t.kind === 'hold' ? 'var(--tog-hold)' : 'var(--tog)']);
+      }
+      rows.push(`<span class="strip-label ink-${personColour(state, pid)}">${pid === state.me ? 'You' : esc(nameOf(state, pid))}</span><div class="strip">${allDayLine(lines)}${segs(list)}</div>`);
     }
     if (P) {
       const list = d.bothFree.map(([s, e]) => [s, e, 'var(--free)']);
@@ -404,11 +439,12 @@ function weekView(state) {
       if (f[lk] === false) continue;
       const layer = lk.split(':')[1];
       const col = `var(--layer-${layer}, ${(LAYER_INFO[layer] || LAYER_INFO.other).colour})`;
-      const timed = d.layers[lk].filter((x) => !x.allDay);
-      if (!timed.length && !d.layers[lk].length) continue;
-      rows.push(`<span class="strip-label" style="color:var(--layer-${layer}-ink, ${(LAYER_INFO[layer] || LAYER_INFO.other).ink})">${esc(layerChipLabel(state, lk).replace(/^Your /, '').replace(/^\w/, (c) => c.toUpperCase()))}</span><div class="strip">${segs(timed.map((x) => [x.start.getTime(), x.end.getTime(), col]))}</div>`);
+      const shown = d.layers[lk].filter((x) => !x.low);
+      if (!shown.length) continue;
+      const timed = shown.filter((x) => !x.allDay);
+      rows.push(`<span class="strip-label" style="color:var(--layer-${layer}-ink, ${(LAYER_INFO[layer] || LAYER_INFO.other).ink})">${esc(layerChipLabel(state, lk).replace(/^Your /, '').replace(/^\w/, (c) => c.toUpperCase()))}</span><div class="strip">${allDayLine(shown.some((x) => x.allDay) ? [col] : [])}${segs(timed.map((x) => [x.start.getTime(), x.end.getTime(), col]))}</div>`);
     }
-    const items = dayList(state, k, f);
+    const items = dayList(state, k, Object.assign({}, f, { hideLow: true }));
     cards.push(`<article class="card wday ${k === todayK ? 'is-today' : ''}">
       <button type="button" class="wday-head" aria-expanded="${open}" data-act="weekOpen" data-day="${k}">
         <span class="h3 grow">${esc(fmtDate(date).replace(/ \w+$/, ''))}</span>
@@ -417,7 +453,7 @@ function weekView(state) {
       </button>
       <div class="strips">${rows.join('')}</div>
       ${P ? `<p class="b small ink-tog">${esc(freeText(d))}</p>` : ''}
-      ${open ? `<div class="wday-list agenda">${items.length ? items.map((it) => agendaRow(state, it, k)).join('') : '<p class="muted">Nothing planned.</p>'}</div>` : ''}
+      ${open ? `<div class="wday-list agenda">${items.length ? items.map((it) => agendaRow(state, it, k)).join('') : '<p class="muted pad">Nothing planned.</p>'}${moreLink(state, k)}</div>` : ''}
     </article>`);
   }
   return `<div class="row between week-nav">
@@ -427,6 +463,11 @@ function weekView(state) {
     </div>
     <div class="scale"><span></span><div><span style="left:0">6am</span><span style="left:33.3%;transform:translateX(-50%)">Noon</span><span style="left:66.7%;transform:translateX(-50%)">6pm</span><span style="right:0">Midnight</span></div></div>
     ${cards.join('')}`;
+}
+// all-day things: a thin line through the whole strip, one per colour
+function allDayLine(cols) {
+  const u = [...new Set(cols)].slice(0, 3);
+  return u.map((c, i) => `<span class="seg-line" style="background:${c};top:${u.length === 1 ? 7 : 3 + i * 5}px"></span>`).join('');
 }
 function freeText(d) {
   const tog = d.together.filter((t) => !t.auto && !t.allDay);

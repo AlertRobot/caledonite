@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS = {
   morning: { on: true, at: '07:30' },
   weekAhead: { on: true, day: 7, at: '18:00' },
   christmas: true,
+  lowCals: [], // calendars (owner__calKey) kept off Today and the week, for this viewer
   leave: { allowance: 25, yearStart: '01-01', bankHolsCount: false },
   notif: { quiet: true, requests: true, rota: true, notes: true, reminders: true, jobs: true, summary: true }
 };
@@ -64,6 +65,10 @@ export function youOr(state, pid) {
 export function personColour(state, pid) {
   const p = state.people[pid];
   return (p && p.colour) || (pid === state.me ? 'blue' : 'orange');
+}
+// Low priority: kept off Today and the week for whoever chose it. Still there when you look at a day.
+export function isLowCal(state, cid) {
+  return (settingsOf(state, state.me).lowCals || []).includes(cid);
 }
 export function calOf(state, ev) {
   return state.calendars[`${ev.owner}__${ev.calKey}`] || { role: 'normal', layer: 'own', show: true, share: 'all' };
@@ -320,7 +325,7 @@ export function buildDay(state, key, now = new Date()) {
       const c = calOf(state, ev);
       if (pid === state.me && c.show === false) continue;
       if (c.role === 'rota') continue;
-      if (c.role === 'work' && (pid === state.me || /^working$/i.test(ev.title || ''))) continue;
+      if (c.role === 'work' && /^working$/i.test(ev.title || '')) continue;
       if (ev.tag) {
         (tagEvents[ev.tag] = tagEvents[ev.tag] || []).push(ev);
         continue;
@@ -328,7 +333,7 @@ export function buildDay(state, key, now = new Date()) {
       const it = {
         kind: 'event', who: pid, title: ev.busy ? 'Busy' : (ev.title || 'Busy'), sub: c.role === 'work' ? 'Work' : '',
         start: ev.start, end: ev.end, allDay: ev.allDay, calName: c.name, location: ev.location || '', busyOnly: !!ev.busy,
-        ref: evRef(ev), owner: ev.owner, repeats: !!ev.sid, src: ev
+        ref: evRef(ev), owner: ev.owner, repeats: !!ev.sid, src: ev, cal: `${ev.owner}__${ev.calKey}`, low: isLowCal(state, `${ev.owner}__${ev.calKey}`)
       };
       if (c.layer && c.layer !== 'own') {
         const lk = layerKey(pid, c.layer);
@@ -450,6 +455,7 @@ function byTime(a, b) {
 }
 
 // Everything for a day as one list, filtered by who you want to see.
+// filter.hideLow leaves out low-priority calendars (Today and the week do this)
 export function dayList(state, key, filter = {}) {
   const d = buildDay(state, key);
   const out = [];
@@ -462,7 +468,11 @@ export function dayList(state, key, filter = {}) {
     if (filter[lk] === false) continue;
     out.push(...d.layers[lk]);
   }
-  return out.sort(byTime);
+  return (filter.hideLow ? out.filter((it) => !it.low) : out).sort(byTime);
+}
+// how many things a low-priority calendar has on this day (shown as "2 more")
+export function lowCount(state, key, filter = {}) {
+  return dayList(state, key, Object.assign({}, filter, { hideLow: false })).filter((it) => it.low).length;
 }
 
 export function itemTime(it, key) {
@@ -486,7 +496,7 @@ export function itemSub(state, it) {
   if (it.kind === 'work') {
     if (it.who === state.me) {
       const n = it.meetings ? it.meetings.length : 0;
-      return n ? `${n} meeting${n === 1 ? '' : 's'}. Only you see the details.` : 'Working hours';
+      return n ? `Working hours, ${n} meeting${n === 1 ? '' : 's'}` : 'Working hours';
     }
     return 'Working hours';
   }
@@ -633,14 +643,14 @@ export function monthCell(state, key, filter) {
   const me = d.persons[state.me];
   const pa = state.partner ? d.persons[state.partner] : null;
   if (me && filter[state.me] !== false) {
-    if (me.items.some((it) => (it.kind === 'event' && !it.allDay) || (it.kind === 'shift' && !it.allDay))) bars.push('me');
+    if (me.items.some((it) => !it.low && ((it.kind === 'event' && !it.allDay) || (it.kind === 'shift' && !it.allDay)))) bars.push('me');
   }
   if (pa && filter[state.partner] !== false) {
     if (pa.sleep) bars.push('sleep');
-    if (pa.items.some((it) => (it.kind === 'shift' && !it.allDay && !it.cont) || (it.kind === 'event' && !it.allDay))) bars.push('partner');
+    if (pa.items.some((it) => !it.low && ((it.kind === 'shift' && !it.allDay && !it.cont) || (it.kind === 'event' && !it.allDay)))) bars.push('partner');
   }
   if (d.together.some((t) => !t.auto)) bars.push(d.together.some((t) => !t.auto && t.kind !== 'hold') ? 'together' : 'hold');
-  for (const lk of Object.keys(d.layers)) if (filter[lk] !== false && d.layers[lk].length) bars.push(lk);
+  for (const lk of Object.keys(d.layers)) if (filter[lk] !== false && d.layers[lk].some((it) => !it.low)) bars.push(lk);
   return { bars: bars.slice(0, 4), freeEvening: d.freeEvening };
 }
 
@@ -889,18 +899,38 @@ export function countdowns(state, now = new Date()) {
     }
   }
   const s = settingsOf(state, state.me);
+  const todayK = dayKey(now);
+  const y0 = now.getFullYear();
+  // the next time a yearly date (MM-DD) comes round
+  const nextOf = (mmdd) => (`${y0}-${mmdd}` >= todayK ? `${y0}-${mmdd}` : `${y0 + 1}-${mmdd}`);
+  const nextBy = (fn) => { const k = fn(y0); return k >= todayK ? k : fn(y0 + 1); };
   if (s.christmas !== false) {
-    let y = now.getFullYear();
-    if (dayKey(now) > `${y}-12-25`) y++;
-    add('christmas', 'Christmas', `${y}-12-25`, 'both', false);
+    add('christmas', 'Christmas', nextOf('12-25'), 'both', false);
+    add('newyear', 'New Year', nextOf('01-01'), 'both', false);
+    add('valentines', "Valentine's Day", nextOf('02-14'), 'both', false);
+    add('easter', 'Easter', nextBy(easterKey), 'both', false);
+    add('mothers', "Mother's Day", nextBy((y) => dayKey(addDays(fromDayKey(easterKey(y)), -21))), 'both', false);
+    add('fathers', "Father's Day", nextBy(fathersDayKey), 'both', false);
   }
+  // birthdays: from Our routine, or a "Sophie's birthday" event in either calendar
+  const bdays = state.household.birthdays || {};
+  for (const pid of [state.me, state.partner].filter(Boolean)) {
+    const name = nameOf(state, pid);
+    const title = pid === state.me ? 'Your birthday' : `${name}'s birthday`;
+    if (/^\d{2}-\d{2}$/.test(bdays[pid] || '')) { add(`bday:${pid}`, title, nextOf(bdays[pid]), pid, false); continue; }
+    const re = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(['’]s)?\\s+(birthday|bday)\\b`, 'i');
+    const ev = state.events.filter((e) => e.allDay && re.test(e.title || '') && dayKey(e.start) >= todayK).sort((x, z) => x.start - z.start)[0];
+    if (ev) add(`bday:${pid}`, title, dayKey(ev.start), pid, false);
+  }
+  // the anniversary: from Our routine, or an "anniversary" event in either calendar
   const ann = state.household.anniversary;
   if (ann && /^\d{4}-\d{2}-\d{2}$/.test(ann)) {
-    let y = now.getFullYear();
-    let k = `${y}${ann.slice(4)}`;
-    if (k < dayKey(now)) k = `${y + 1}${ann.slice(4)}`;
+    const k = nextOf(ann.slice(5));
     const years = Number(k.slice(0, 4)) - Number(ann.slice(0, 4));
     add('anniversary', years > 0 ? `Your anniversary (${years} ${years === 1 ? 'year' : 'years'})` : 'Your anniversary', k, 'both', false);
+  } else {
+    const ev = state.events.filter((e) => /anniversary/i.test(e.title || '') && [state.me, state.partner].includes(e.owner) && dayKey(e.start) >= todayK).sort((x, z) => x.start - z.start)[0];
+    if (ev) add('anniversary', 'Your anniversary', dayKey(ev.start), 'both', false);
   }
   // holidays you've booked together count down by themselves
   for (const r of state.requests) {
@@ -910,6 +940,19 @@ export function countdowns(state, now = new Date()) {
   const seen = new Set();
   return out.filter((c) => { const k = `${c.title}|${c.date}`; if (seen.has(k)) return false; seen.add(k); return true; })
     .sort((a, b) => a.days - b.days);
+}
+// Easter Sunday (the Anonymous Gregorian method)
+function easterKey(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+  return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+// the third Sunday in June
+function fathersDayKey(y) {
+  const first = new Date(y, 5, 1);
+  return dayKey(new Date(y, 5, 1 + ((7 - first.getDay()) % 7) + 14));
 }
 export function countdownText(c) {
   if (c.days === 0) return `${c.title} is today`;

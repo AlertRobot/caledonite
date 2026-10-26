@@ -1,6 +1,6 @@
 // Settings (with its own menu), plus the sign-in and first-time screens.
 import { esc, dayKey, addDays, mondayOf, fmtDate, agoText, WEEKDAY_NAMES, fmtTime, atTime, MONTH_NAMES, fromDayKey } from './util.js';
-import { nameOf, settingsOf, shiftFor, SHIFT_ORDER, LAYER_INFO, personColour, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours } from './logic.js';
+import { isLowCal, nameOf, settingsOf, shiftFor, SHIFT_ORDER, LAYER_INFO, personColour, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours } from './logic.js';
 import { icon, avatar, seg, toggleRow, empty } from './ui.js';
 import { ui } from './uistate.js';
 import { APP, FIREBASE } from './config.js';
@@ -122,8 +122,11 @@ function secCalendars(state) {
   }
   if (P) {
     const theirs = Object.values(state.calendars).filter((c) => c.owner === P);
+    const visible = theirs.filter((c) => c.share !== 'none' && c.role !== 'rota');
     out.push(`<h2 class="h4">${esc(nameOf(state, P))}'s calendars</h2>
-      <div class="card flush">${theirs.length ? theirs.map((c) => `<div class="list-row"><span class="dot" style="background:${esc(c.color || 'var(--orange)')}"></span><span class="grow col"><span class="b">${esc(c.name)}</span><span class="small muted">You see ${esc(SHORT[c.share] || 'nothing')}. ${esc(nameOf(state, P))} chooses this.</span></span></div>`).join('') : `<p class="pad muted">${esc(nameOf(state, P))} hasn't connected a calendar yet.</p>`}</div>`);
+      <div class="card flush">${visible.length ? visible.map((c) => `<div class="list-row wrap"><span class="dot" style="background:${esc(c.color || 'var(--orange)')}"></span><span class="grow col"><span class="b">${esc(c.name)}</span><span class="small muted">You see ${esc(SHORT[c.share] || 'nothing')}. ${esc(nameOf(state, P))} chooses this.</span></span>
+        ${priorityToggle(state, c)}</div>`).join('') : `<p class="pad muted">${esc(nameOf(state, P))} hasn't shared a calendar yet.</p>`}</div>
+      <p class="small muted pad-x">Low priority keeps a calendar off Today and the week. Tap a day in the month to see everything, including those.</p>`);
   }
   out.push(`<div class="card stack-s"><span class="b">Moving from TimeTree?</span><p class="small muted">TimeTree no longer lets other apps link to it, so it can't sync. Put upcoming TimeTree events into Google Calendar (or add them here) once, then Caledonite takes over.</p></div>`);
   return out.join('');
@@ -141,15 +144,21 @@ function calRow(state, c) {
   return `<div class="cal-row">
     <button type="button" class="cal-head" aria-expanded="${open}" data-act="openCal" data-k="${esc(c.key)}">
       <span class="dot" style="background:${esc(c.color || 'var(--blue)')};opacity:${c.show === false ? 0.3 : 1}"></span>
-      <span class="grow col"><span class="b">${esc(c.name)}</span><span class="small muted">${c.show === false ? 'Hidden from you.' : 'Shown to you.'}${P ? ` ${esc(nameOf(state, P))} sees ${esc(SHORT[c.share] || 'nothing')}.` : ''}</span></span>
+      <span class="grow col"><span class="b">${esc(c.name)}</span><span class="small muted">${c.show === false ? 'Hidden from you.' : isLowCal(state, c.key) ? 'Low priority for you.' : 'Shown to you.'}${P ? ` ${esc(nameOf(state, P))} sees ${esc(SHORT[c.share] || 'nothing')}.` : ''}</span></span>
       <span class="chev ${open ? 'open' : ''}">${icon.next(20)}</span></button>
     ${open ? `<div class="cal-body stack">
       ${toggleRow({ act: 'calShow', on: c.show !== false, label: 'Show it in my calendar', data: `data-k="${esc(c.key)}"` })}
+      ${c.show !== false ? `<div class="row between"><span class="col"><span class="b">Priority</span><span class="small muted">Low keeps it off Today and the week. It's still there when you tap a day in the month.</span></span>${priorityToggle(state, c)}</div>` : ''}
       <div class="field"><label for="role-${esc(c.key)}">This calendar is</label>
         <select id="role-${esc(c.key)}" data-act="calRole" data-k="${esc(c.key)}">${ROLE_OPTIONS.map(([v, l]) => `<option value="${v}" ${role === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       ${P ? `<div class="stack-s"><span class="b">${esc(nameOf(state, P))} sees</span>${seg(shareOptions(c).map(([v, l]) => ({ v, label: l, on: c.share === v, extra: ` data-k="${esc(c.key)}"` })), { act: 'calShare', label: `${nameOf(state, P)} sees`, cls: 'seg-3' })}<span class="small muted">${esc(shareHelp(state, c))}</span></div>` : ''}
     </div>` : ''}
   </div>`;
+}
+// Normal or Low, for whoever is looking (saved in your own settings)
+export function priorityToggle(state, c) {
+  const low = isLowCal(state, c.key);
+  return seg([{ v: 'normal', label: 'Normal', on: !low }, { v: 'low', label: 'Low', on: low }].map((o) => Object.assign(o, { extra: ` data-k="${esc(c.key)}"` })), { act: 'calPriority', label: `Priority of ${c.name}`, cls: 'seg-sm' });
 }
 function connectGuide(state) {
   const url = state.household.connectUrl || '';
@@ -244,8 +253,9 @@ function secRoutine(state) {
     </div></section>
     <section class="stack-s"><h2 class="h4">Countdowns on Today</h2>
     <div class="card flush">
-      ${toggleRow({ act: 'myToggle', on: s.christmas !== false, label: 'Count down to Christmas', data: 'data-f="christmas"' })}
-      <div class="list-row"><label for="anniv" class="grow col"><span class="b">Your anniversary</span><span class="small muted">The date you got together. It counts down every year, for you both.</span></label><input id="anniv" type="date" class="time-sm" value="${esc(h.anniversary || '')}" data-act="hhField" data-f="anniversary"></div>
+      ${toggleRow({ act: 'myToggle', on: s.christmas !== false, label: 'Christmas, Easter and other big days', sub: 'Also New Year, Valentine’s, Mother’s Day and Father’s Day. They take turns at the top of Today.', data: 'data-f="christmas"' })}
+      ${[state.me, state.partner].filter(Boolean).map((pid) => { const b = (h.birthdays || {})[pid] || ''; return `<div class="list-row"><label for="bd-${esc(pid)}" class="grow col"><span class="b">${pid === state.me ? 'Your birthday' : `${esc(nameOf(state, pid))}'s birthday`}</span><span class="small muted">${b ? 'Counts down every year.' : 'Or put it in Google Calendar as an all-day “' + esc(nameOf(state, pid)) + '’s birthday”.'}</span></label><input id="bd-${esc(pid)}" type="date" class="time-sm" value="${b ? `2000-${esc(b)}` : ''}" data-act="hhBday" data-p="${esc(pid)}"></div>`; }).join('')}
+      <div class="list-row"><label for="anniv" class="grow col"><span class="b">Your anniversary</span><span class="small muted">The date you got together. Or an all-day event with “anniversary” in the name.</span></label><input id="anniv" type="date" class="time-sm" value="${esc(h.anniversary || '')}" data-act="hhField" data-f="anniversary"></div>
       <p class="pad small muted">To count down to anything else, like a holiday, tap it in the calendar and choose “Count down to this”. Holidays you book together count down by themselves.</p>
     </div></section>
     <section class="stack-s"><h2 class="h4">Dinner</h2>

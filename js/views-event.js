@@ -2,7 +2,7 @@
 import { esc, fmtDate, fromDayKey, dayKey, fmtTime, hhmm } from './util.js';
 import {
   dayList, itemTime, itemTitle, itemSub, nameOf, settingsOf, reminderFor, fireTimes, evRef, calOf, reminderId,
-  REMIND_OPTIONS, REMIND_NOTES, isBirthday
+  REMIND_OPTIONS, REMIND_NOTES, isBirthday, isLowCal
 } from './logic.js';
 import { icon, whoChip, seg } from './ui.js';
 import { ui } from './uistate.js';
@@ -61,9 +61,11 @@ export function viewEvent(state) {
     ${pendingFor(state, src) ? '<p class="small note-box">Saving your change to Google Calendar. It shows here within a few minutes.</p>' : ''}
   </div>`);
   out.push(changeBlock(state, item, src, cal));
+  const pri = priorityLink(state, src);
   if (!canRemind) {
     out.push(`<p class="small note-box">${esc(nameOf(state, owner))} shares this as “Busy”, so you can't set a reminder on it.</p>`);
     out.push(countdownBlock(state, ref, item, date));
+    out.push(pri);
     return `<div class="stack-l">${out.join('')}</div>`;
   }
   out.push(`<section class="stack-s"><h2 class="h4">Remind me</h2>
@@ -81,9 +83,19 @@ export function viewEvent(state) {
     if (!(rem && rem.auto)) out.push(`<button type="button" class="btn sec self-start" data-act="evRemOff">No reminder for this</button>`);
   }
   out.push(countdownBlock(state, ref, item, date));
+  out.push(pri);
   if (!hasPush()) out.push(`<p class="small note-box">Notifications are off on this phone. <a href="#settings/notifications">Turn them on</a> to get reminders on your phone. They always show on Today.</p>`);
   if (isBirthday(base) && !(s.autoRemind.birthdays || []).length) out.push(`<p class="small muted">Tip: you can have a reminder for every birthday, in <a href="#settings/notifications">Settings, Notifications</a>.</p>`);
   return `<div class="stack-l">${out.join('')}</div>`;
+}
+// Keep this event's whole calendar off Today and the week (or bring it back)
+function priorityLink(state, src) {
+  if (!src || !src.calKey || src.tag) return '';
+  const cid = `${src.owner}__${src.calKey}`;
+  const c = state.calendars[cid];
+  if (!c || (c.primary && c.owner === state.me)) return '';
+  const low = isLowCal(state, cid);
+  return `<button type="button" class="btn link-btn self-start" data-act="calPriority" data-k="${esc(cid)}" data-v="${low ? 'normal' : 'low'}">${low ? `Show “${esc(c.name)}” on Today and the week again` : `Keep “${esc(c.name)}” off Today and the week`}</button>`;
 }
 // Things made in this app, or your own events in a calendar you can edit
 export function canChange(state, src, cal) {
