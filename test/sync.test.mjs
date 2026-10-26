@@ -878,3 +878,23 @@ test("yes to the other time: the agreed event is added even if Google's search s
   assert.ok(gone.has('hold1'));
   assert.ok(calendar.events.some((e) => e.summary === 'Walk'), 'the agreed one was added');
 });
+
+// ---------- round 6 checks ----------
+test('finding an event by its tag reads every page Google hands back, even an empty first one', () => {
+  // Google may return a page with no matches and a nextPageToken, with the match on the next page
+  const calls = [];
+  const calendar = { Events: {
+    list(calId, q) {
+      calls.push(q.pageToken || null);
+      if (q.privateExtendedProperty && !q.pageToken) return { items: [], nextPageToken: 'p2' };
+      if (q.privateExtendedProperty && q.pageToken === 'p2') return { items: [{ id: 'ev1', status: 'confirmed' }] };
+      return { items: [] };
+    },
+    insert() { throw new Error('should not add a second copy'); },
+    remove() {}, patch() {}, get() { return {}; }
+  } };
+  const writes = runOutbox([{ person: 'ethan', op: 'create', tag: 'add:x1', byEmail: 'e@x.com', done: false, created: 1, event: { title: 'Gym', day: '2026-11-07', start: '10:00', end: '11:00' } }], { calendar });
+  assert.ok(calls.includes('p2'), 'the second page was read');
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+  assert.equal(writes[0].update.fields.result.mapValue.fields.eventId.stringValue, 'ev1');
+});

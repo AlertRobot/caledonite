@@ -1024,15 +1024,22 @@ function findByTag_(rs, tag) {
   var timeMin = new Date(Date.now() - DAYS_BACK * 864e5 - 864e5).toISOString();
   var timeMax = new Date(Date.now() + (DAYS_AHEAD + 365) * 864e5).toISOString();
   var marker = '[caledonite:' + tag + ']';
+  // every page: Google can hand back a page with fewer matches than asked for, or none, and more to come
+  var each = function (calId, q, fn) {
+    var token = null, guard = 0;
+    do {
+      var res = Calendar.Events.list(calId, merge_(q, { timeMin: timeMin, timeMax: timeMax, singleEvents: false, showDeleted: false, maxResults: 250, pageToken: token || undefined }));
+      (res.items || []).forEach(fn);
+      token = res.nextPageToken;
+    } while (token && ++guard < 20);
+  };
   Object.keys(owned).forEach(function (calId) {
-    var res = Calendar.Events.list(calId, { privateExtendedProperty: 'caledonite=' + tag, timeMin: timeMin, timeMax: timeMax, singleEvents: false, showDeleted: false, maxResults: 50, fields: 'items(id,status)' });
-    (res.items || []).forEach(function (x) { if (x.status !== 'cancelled') found.push({ calId: calId, eventId: x.id }); });
+    each(calId, { privateExtendedProperty: 'caledonite=' + tag, fields: 'nextPageToken,items(id,status)' }, function (x) { if (x.status !== 'cancelled') found.push({ calId: calId, eventId: x.id }); });
   });
   if (!found.length) {
     // older events, made before the tag was stored as a property, only have it in the description
     Object.keys(owned).forEach(function (calId) {
-      var res = Calendar.Events.list(calId, { q: tag, timeMin: timeMin, timeMax: timeMax, singleEvents: false, showDeleted: false, maxResults: 50, fields: 'items(id,status,description)' });
-      (res.items || []).forEach(function (x) { if (x.status !== 'cancelled' && String(x.description || '').indexOf(marker) >= 0) found.push({ calId: calId, eventId: x.id }); });
+      each(calId, { q: tag, fields: 'nextPageToken,items(id,status,description)' }, function (x) { if (x.status !== 'cancelled' && String(x.description || '').indexOf(marker) >= 0) found.push({ calId: calId, eventId: x.id }); });
     });
   }
   // never something this run has just deleted (Google's search can take a moment to catch up)
