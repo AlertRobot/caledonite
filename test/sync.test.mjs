@@ -1165,3 +1165,47 @@ test("the rota link never appears in what went wrong (your partner's phone reads
     assert.ok(!String(err.message).includes('rota.example'), err.message);
   }
 });
+
+test("one of your extra accounts, taken off your list and put on your partner's, is never synced as theirs", () => {
+  asUser('work@x.com');
+  fakeCache();
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.ScriptApp = { getProjectTriggers: () => [{ getHandlerFunction: () => 'syncAll' }], deleteTrigger() {} };
+  const people = [{ id: 'ethan', data: { email: 'e@x.com', linked: [] } }, { id: 'sophie', data: { email: 's@x.com', linked: ['work@x.com'] } }];
+  ctx.fsList_ = () => people;
+  ctx.fsGet_ = () => ({});
+  let queried = 0;
+  ctx.fsQuery_ = () => { queried++; return []; };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const { store, api } = fakeProps({ me_person: 'ethan', h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h' }) });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  assert.throws(() => ctx.syncAll(), /connected as ethan/);
+  assert.equal(queried, 0, 'none of its calendars read or written');
+  assert.deepEqual(writes.map((w) => w.update && w.update.name), ['households/main/status/work_x_com'], 'only its status, saying why');
+  assert.equal(writes[0].update.fields.person.stringValue, 'ethan');
+  assert.equal(store.me_person, 'ethan');
+  // an account connected before this was remembered: remembered from its next run
+  const fresh = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => fresh.api };
+  people[1].data.linked = [];
+  people[0].data.linked = ['work@x.com'];
+  try { ctx.syncAll(); } catch (e) { /* the rest of the run isn't stood in for here */ }
+  assert.equal(fresh.store.me_person, 'ethan');
+});
+test('connecting it again on the connect page (which says whose it is) moves it on purpose', () => {
+  asUser('work@x.com');
+  fakeCache();
+  ctx.ScriptApp = { getProjectTriggers: () => [], deleteTrigger() {}, newTrigger: () => ({ timeBased: () => ({ everyMinutes: () => ({ create() {} }) }) }) };
+  ctx.fsList_ = () => [{ id: 'ethan', data: { email: 'e@x.com', linked: [] } }, { id: 'sophie', data: { email: 's@x.com', linked: ['work@x.com'] } }];
+  ctx.fsGet_ = () => ({});
+  const { store, api } = fakeProps({ me_person: 'ethan' });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const realSync = ctx.syncAll;
+  let seenAs = '';
+  ctx.syncAll = () => { seenAs = store.me_person; return 'Synced 1 calendars.'; };
+  ctx.connectFromPage();
+  ctx.syncAll = realSync;
+  assert.equal(seenAs, 'sophie');
+});

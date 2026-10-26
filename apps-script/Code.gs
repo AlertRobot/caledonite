@@ -46,6 +46,7 @@ function connectMe() {
   requireSelf_();
   var me = whoAmI_();
   installTrigger_();
+  PropertiesService.getUserProperties().setProperty('me_person', me.person);
   var r = syncAll();
   Logger.log('Connected ' + me.email + ' as ' + me.person + (me.main ? '' : ' (extra account)') + '. ' + r);
   return r;
@@ -202,6 +203,8 @@ function connectFromPage() {
     throw new Error('This Google account is not part of Caledonite yet. Ask Ethan to add it in Caledonite: Settings, then Account.');
   }
   installTrigger_();
+  // its own owner, on the page that says whose it is: from now on it syncs as that person
+  PropertiesService.getUserProperties().setProperty('me_person', me.person);
   var r = syncAll();
   var n = (String(r).match(/(\d+) calendar/) || [])[1];
   return 'Connected. ' + (n ? n + ' calendar' + (n === '1' ? '' : 's') + ' synced. ' : '') + 'Caledonite now keeps ' + (me.main ? 'your' : 'this account\'s') + ' calendars up to date by itself. You can close this page.';
@@ -265,6 +268,16 @@ function syncAll(opts) {
       if (err && err.notMember) forgetThisAccount_(err.email);
       throw err;
     }
+    // An account only ever syncs as the person it was connected as. Anyone can list any address on their own
+    // record, so without this one of your extra accounts, once taken off your list, would be copied in full into
+    // your partner's private copy. Moving it to the other person takes its own owner opening the connect page.
+    var was = PropertiesService.getUserProperties().getProperty('me_person');
+    if (was && was !== me.person) {
+      var moved = new Error(me.email + ' was connected as ' + was + "'s account and is now listed for someone else, so it is not synced. Take it off the wrong person in Settings, Account, or open the connect page signed in to it to connect it again.");
+      try { writeStatus_({ email: me.email, person: was, main: false }, [moved.message], 0); } catch (e3) { /* it's only the status */ }
+      throw moved;
+    }
+    if (!was) PropertiesService.getUserProperties().setProperty('me_person', me.person);
     var ctx = loadCtx_(me);
     var stage = function (name, fn) {
       try { return fn(); } catch (err) {
