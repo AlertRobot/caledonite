@@ -260,8 +260,10 @@ function withPeckish(state, key, din) {
   const meal = pk && pk.days && pk.days[key];
   if (!din && !meal) return din;
   const out = din ? Object.assign({}, din) : null;
+  // moved from the usual time: it still says why (that matters more than how long it takes to cook)
+  const moved = !!din && din.title !== 'Dinner together';
   if (out && meal) {
-    out.title = meal.takeaway ? 'Takeaway night' : `Dinner: ${meal.title}`;
+    out.title = meal.takeaway ? 'Takeaway night' : `${/^Early/.test(din.title) ? 'Early dinner' : 'Dinner'}: ${meal.title}`;
     out.meal = meal;
   }
   // a long day, early or night shift tomorrow: make extra for a packed lunch
@@ -273,7 +275,7 @@ function withPeckish(state, key, din) {
   if (out && lunch && meal && !meal.takeaway) {
     out.lunchFor = lunch;
     out.sub = `${lunch === state.me ? 'You have' : nameOf(state, lunch) + ' has'} a long shift tomorrow: make extra for a packed lunch.`;
-  } else if (out && meal) {
+  } else if (out && meal && !moved) {
     out.sub = meal.time ? `${meal.time} minutes, from Peckish.` : 'From Peckish.';
   }
   return out;

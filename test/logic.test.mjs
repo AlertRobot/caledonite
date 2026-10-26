@@ -267,6 +267,21 @@ test('a countdown to something your partner sees only as "Busy" stays on your ow
   assert.equal(L.countdownShared(st3, L.dayList(st3, sat).find((it) => it.title === 'Party')), true);
 });
 
+test("with tonight's meal from Peckish, dinner moved earlier for a night shift still says why", () => {
+  store.linked = { peckish: { found: true, days: { [sat]: { title: 'Chicken fajitas', time: 30 } } } };
+  try {
+    const night = timed('sophie', 'rota', sat, '19:30', '08:00', { t: 'Night', e: atTime(dayKey(addDays(new Date(sat + 'T12:00'), 1)), '08:00').getTime() });
+    const st = load({ events: [night] });
+    const din = L.buildDay(st, sat).together.find((t) => t.auto);
+    assert.equal(din.title, 'Early dinner: Chicken fajitas');
+    assert.match(din.sub, /Moved from your usual 7pm, as Sophie leaves for work/);
+    // on a usual night, the meal's own line
+    const plain = L.buildDay(load(), sat).together.find((t) => t.auto);
+    assert.equal(plain.title, 'Dinner: Chicken fajitas');
+    assert.equal(plain.sub, '30 minutes, from Peckish.');
+  } finally { store.linked = {}; }
+});
+
 test('a late shift that ends at midnight is not a night: no sleeping the next morning', () => {
   const st = load({ events: [timed('sophie', 'rota', k(8), '16:00', '16:00', { t: 'Shift', e: atTime(k(9), '00:00').getTime() })] });
   assert.equal(L.shiftFor(st, 'sophie', k(8)).type, 'late');
