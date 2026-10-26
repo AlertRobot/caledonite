@@ -628,3 +628,28 @@ test("the rules: an answer saved offline can't bring back a request already call
   const c = Ops.buildAnswer({ req, id: 'r1', answer: 'cancel', me: 'ethan', byEmail: 'e@x.com', names: {} });
   assert.deepEqual(c.outbox.map((o) => [o.person, o.op, o.tag]), [['ethan', 'delete', 'req:r1'], ['sophie', 'delete', 'req:r1']]);
 });
+
+test('something agreed and then moved to another day is only on its new day, not still "saving" on the old one', () => {
+  const sun = dayKey(addDays(new Date(sat + 'T12:00'), 1));
+  const agreed = { from: 'ethan', to: 'sophie', type: 'plan', title: 'Cinema', status: 'yes', when: { day: sat, start: '19:00', end: '21:00', allDay: false }, created: Date.now() - 2 * 86400000, answeredAt: Date.now() - 86400000 };
+  const copy = (owner) => timed(owner, 'primary', sun, '19:00', '21:00', { t: 'Cinema', tag: 'req:cin', id: `${owner}cin` });
+  let st = load({ requests: { cin: agreed }, events: [copy('ethan'), copy('sophie')] });
+  assert.ok(!L.dayList(st, sat).some((it) => it.title === 'Cinema'), 'not left behind on Saturday');
+  assert.equal(freeAt(st, sat, '20:00'), true, 'and Saturday evening is free again');
+  assert.equal(L.dayList(st, sun).filter((it) => it.title === 'Cinema').length, 1);
+  // taken out in Google Calendar, after the sync has run: gone, not "saving" for ever
+  st = load({ requests: { cin: agreed } });
+  st.status = { a: { person: 'ethan', ok: true, lastRun: Date.now() - 60000 } };
+  L.clearDayCache();
+  assert.ok(!L.dayList(st, sat).some((it) => it.title === 'Cinema'));
+  // just agreed, not synced yet: still shows, as saving
+  st = load({ requests: { cin: Object.assign({}, agreed, { answeredAt: Date.now() - 60000 }) } });
+  assert.ok(L.dayList(st, sat).some((it) => it.title === 'Cinema' && it.pending));
+  // further ahead than the sync copies: shown from the request, and not "saving"
+  const far = k(200);
+  st = load({ requests: { cin: Object.assign({}, agreed, { when: { day: far, start: '19:00', end: '21:00', allDay: false } }) } });
+  st.status = { a: { person: 'ethan', ok: true, lastRun: Date.now() - 60000 } };
+  L.clearDayCache();
+  const it = L.dayList(st, far).find((x) => x.title === 'Cinema');
+  assert.ok(it && !it.pending && !/Saving/.test(it.sub));
+});

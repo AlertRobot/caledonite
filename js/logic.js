@@ -397,10 +397,19 @@ export function buildDay(state, key, now = new Date()) {
     else if (persons[who]) addOwn(persons[who], it);
   }
   // requests not in the calendars yet
+  const tags = allTags(state);
+  const synced = inSyncedDays(key, now);
   for (const r of state.requests) {
     if (!r.when || !r.when.day || !onDayOf(r.when, key)) continue;
     const tag = `req:${r.id}`;
     if (seenTags.has(tag)) continue;
+    // already in the calendars on another day (moved, in the app or in Google Calendar): only there
+    if (tags.has(tag)) continue;
+    // agreed a while ago and in the days the calendar sync copies, but in neither calendar: taken out in Google
+    // Calendar, so no longer "saving". Further ahead than the sync copies, it shows from the request itself.
+    const answered = r.answeredAt || r.created || 0;
+    if (r.status === 'yes' && synced && now.getTime() - answered > 3600000 && syncedSince(state, answered)) continue;
+    const saving = synced;
     const start = r.when.allDay ? new Date(dayStart) : atTime(key, r.when.start || '19:00');
     const end = r.when.allDay ? new Date(dayEnd) : atTime(key, r.when.end || addHM(r.when.start || '19:00', 60));
     if ((r.status === 'waiting' || r.status === 'maybe') && r.hold) {
@@ -408,15 +417,15 @@ export function buildDay(state, key, now = new Date()) {
     } else if (r.status === 'yes' && r.type !== 'heads') {
       if (r.type === 'favour') {
         const doer = r.to;
-        if (persons[doer]) addOwn(persons[doer], { kind: 'event', who: doer, title: r.title, start, end, allDay: r.when.allDay, sub: `${nameOf(state, r.from)} asked`, pending: true });
+        if (persons[doer]) addOwn(persons[doer], { kind: 'event', who: doer, title: r.title, start, end, allDay: r.when.allDay, sub: `${nameOf(state, r.from)} asked`, pending: saving });
       } else if (r.type === 'add') {
-        if (persons[r.to]) addOwn(persons[r.to], { kind: 'event', who: r.to, title: r.title, start, end, allDay: r.when.allDay, sub: `Added by ${nameOf(state, r.from)}`, pending: true });
+        if (persons[r.to]) addOwn(persons[r.to], { kind: 'event', who: r.to, title: r.title, start, end, allDay: r.when.allDay, sub: `Added by ${nameOf(state, r.from)}`, pending: saving });
       } else if (justOne(r)) {
         // a holiday booked just for yourself
         const who = r.people[0] || r.from;
-        if (persons[who]) addOwn(persons[who], { kind: 'event', who, title: reqTitle(r), start, end, allDay: r.when.allDay, sub: 'Saving to the calendar', pending: true, reqId: r.id });
+        if (persons[who]) addOwn(persons[who], { kind: 'event', who, title: reqTitle(r), start, end, allDay: r.when.allDay, sub: saving ? 'Saving to the calendar' : 'Holiday', pending: saving, reqId: r.id });
       } else {
-        together.push({ kind: 'together', who: 'both', title: reqTitle(r), start, end, allDay: r.when.allDay, sub: 'Saving to your calendars', pending: true, reqId: r.id });
+        together.push({ kind: 'together', who: 'both', title: reqTitle(r), start, end, allDay: r.when.allDay, sub: saving ? 'Saving to your calendars' : 'Agreed together', pending: saving, reqId: r.id });
       }
     }
   }
@@ -469,6 +478,21 @@ export function buildDay(state, key, now = new Date()) {
   cache.set(ck, out);
   if (cache.size > 400) cache.delete(cache.keys().next().value);
   return out;
+}
+// Every tag on something in the calendars, on any day (worked out once for each set of events)
+let tagSet = { events: null, tags: new Set() };
+function allTags(state) {
+  if (tagSet.events !== state.events) tagSet = { events: state.events, tags: new Set(state.events.map((e) => e.tag).filter(Boolean)) };
+  return tagSet.tags;
+}
+// The days the calendar sync copies into the app (2 weeks back to 120 days ahead, as in apps-script/Code.gs)
+const SYNC_DAYS_BACK = 14; const SYNC_DAYS_AHEAD = 120;
+function inSyncedDays(key, now) {
+  return key >= dayKey(addDays(startOfDay(now), -SYNC_DAYS_BACK + 1)) && key <= dayKey(addDays(startOfDay(now), SYNC_DAYS_AHEAD - 1));
+}
+// a calendar sync has run without a problem since then
+function syncedSince(state, ms) {
+  return Object.values(state.status || {}).some((x) => x && x.ok !== false && (x.lastRun || 0) > ms + 60000);
 }
 // a day something not yet in the calendars covers (all-day things can run over several days)
 function onDayOf(w, key) {
