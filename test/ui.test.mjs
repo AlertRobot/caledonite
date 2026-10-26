@@ -365,3 +365,16 @@ test('a settings switch saves just that setting, so one changed on your other ph
   assert.deepEqual(sent, [{ notif: { notes: false } }, { quiet: { on: false, skip: null } }, { morning: { on: false } }, { leave: { bankHolsCount: true } }]);
   await page.context().close();
 });
+
+test("odd values in the household record (dinner time, favours, birthdays) can't break your screens", async () => {
+  const page = await open('ethan');
+  await mods(page, (store) => store.store.backend.commit([{ type: 'update', path: '', data: { dinnerTime: 1900, favours: 'bins', birthdays: 7 } }]));
+  await page.waitForTimeout(200);
+  for (const h of ['#today', '#calendar', '#ask', '#settings', '#settings/routine', '#settings/requests']) {
+    await go(page, h);
+    if (h === '#ask') await page.click('[data-act="askType"][data-v="favour"]');
+    assert.doesNotMatch(await page.textContent('main'), /Something went wrong|NaN|undefined/, h);
+  }
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});

@@ -56,12 +56,12 @@ export function settingsOf(state, pid) {
   return tidySettings(s);
 }
 // Either of you can change some of the other's settings (shift times, sleep), so only shapes the screens can use
-const isHMs = (v) => typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v);
+const isHMs = (v) => typeof v === 'string' && /^([01]?\d|2[0-3]):[0-5]\d$/.test(v);
 function tidySettings(s) {
   for (const k of ['workStart', 'workEnd', 'sleepUntil', 'remindAt']) if (!isHMs(s[k])) s[k] = DEFAULT_SETTINGS[k];
   for (const k of ['from', 'to']) if (!isHMs(s.quiet[k])) s.quiet[k] = DEFAULT_SETTINGS.quiet[k];
   s.workDays = Array.isArray(s.workDays) ? s.workDays.map(Number).filter((d) => d >= 1 && d <= 7) : DEFAULT_SETTINGS.workDays;
-  s.travelMins = Number(s.travelMins) || 0;
+  s.travelMins = Math.max(0, Math.min(240, Number(s.travelMins) || 0));
   s.lowCals = Array.isArray(s.lowCals) ? s.lowCals : [];
   if (s.altOff && (typeof s.altOff !== 'object' || typeof s.altOff.from !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s.altOff.from))) s.altOff = null;
   for (const [k, t] of Object.entries(s.shiftTypes)) {

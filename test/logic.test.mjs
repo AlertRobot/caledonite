@@ -433,3 +433,11 @@ test('"Not tonight" works for quiet hours that start after midnight, tapped in t
   assert.equal(L.quietNight(s, atTime(sun, '00:10')), sun, 'before they start that night');
   assert.equal(L.quietNight(s, atTime(sun, '03:00')), sun, 'while they are on');
 });
+
+test("shift times and travel your partner saved are kept to ones that make sense", () => {
+  const st = load({ sophie: { travelMins: 1e9, sleepUntil: '99:99', shiftTypes: { night: { label: 'Night', start: '25:00', end: '08:00' } } } });
+  const s = L.settingsOf(st, 'sophie');
+  assert.equal(s.travelMins, 240);
+  assert.equal(s.sleepUntil, '14:00');
+  assert.equal(s.shiftTypes.night.start, '19:30');
+});

@@ -51,6 +51,16 @@ function cleanRequest(r) {
 function cleanJob(j) {
   return Object.assign({}, j, { title: str(j.title), day: isDay(j.day) ? j.day : null, time: isHM(j.time) ? j.time : null, who: str(j.who) });
 }
+// The household record either of you can change: only shapes the screens can use
+function cleanHousehold(h) {
+  const out = Object.assign({}, h && typeof h === 'object' ? h : {});
+  if (out.dinnerTime !== undefined && out.dinnerTime !== '' && !isHM(out.dinnerTime)) delete out.dinnerTime;
+  out.favours = Array.isArray(out.favours) ? out.favours.filter((f) => typeof f === 'string' && f.trim()) : [];
+  if (!out.birthdays || typeof out.birthdays !== 'object') out.birthdays = {};
+  if (out.anniversary !== undefined && !isDay(out.anniversary)) delete out.anniversary;
+  if (!Array.isArray(out.emails)) out.emails = [];
+  return out;
+}
 const safeColour = (c) => (typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c) ? c : '');
 
 // Raw backend data -> tidy state
@@ -59,7 +69,7 @@ export function setRaw(raw, extra = {}) {
   const s = emptyState();
   Object.assign(s, extra);
   s.rev = (store.state.rev || 0) + 1;
-  s.household = raw.household || {};
+  s.household = cleanHousehold(raw.household);
   s.people = {};
   let n = 0;
   for (const [pid, p] of Object.entries(raw.people || {})) {
