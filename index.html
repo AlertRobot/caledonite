@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en-GB" data-theme="classic" data-palette="ocean" data-mode="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Calendite</title>
+<meta name="description" content="Your two calendars, side by side.">
+<meta name="theme-color" content="#F3F5F8">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Calendite">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Chakra+Petch:wght@600;700&family=Cinzel:wght@700&family=Grenze+Gotisch:wght@700&display=swap">
+<link rel="stylesheet" href="css/app.css">
+<script>
+  // apply the saved theme before anything draws, so there's no flash
+  try { var l = JSON.parse(localStorage.getItem('calendite.look') || '{}'); var r = document.documentElement;
+    if (l.theme) r.dataset.theme = l.theme; if (l.palette) r.dataset.palette = l.palette;
+    var dark = l.theme === 'starship' || l.theme === 'dragonfire' || ((!l.theme || l.theme === 'classic') && (l.mode === 'dark' || ((!l.mode || l.mode === 'auto') && matchMedia('(prefers-color-scheme: dark)').matches)));
+    r.dataset.mode = dark ? 'dark' : 'light'; } catch (e) {}
+</script>
+</head>
+<body>
+<div id="app"></div>
+<noscript>Calendite needs JavaScript turned on.</noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

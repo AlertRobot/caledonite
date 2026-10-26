@@ -1,0 +1,229 @@
+// Requests, asking something, and adding something.
+import { esc, dayKey, addDays, fromDayKey, fmtTime, agoText, relDay, atTime } from './util.js';
+import { nameOf, freeSlots, sleepingUntil, settingsOf, personColour, SHIFT_ORDER } from './logic.js';
+import { whenLabel } from './store.js';
+import { icon, avatar, seg, toggleRow, empty } from './ui.js';
+import { ui } from './uistate.js';
+import { pageHeader } from './views-main.js';
+
+const TYPE_LABEL = { plan: 'Plan together', favour: 'Favour', free: 'Keep time free', heads: 'Heads up', add: 'Added for you' };
+
+// ---------------- REQUESTS ----------------
+export function viewRequests(state) {
+  const P = state.partner;
+  const forMe = state.requests.filter((r) => r.to === state.me && r.status !== 'cancelled');
+  const sent = state.requests.filter((r) => r.from === state.me && r.status !== 'cancelled');
+  const openForMe = forMe.filter((r) => r.status === 'waiting' || r.status === 'maybe' || r.status === 'sent').length;
+  const openSent = sent.filter((r) => r.status === 'waiting' || r.status === 'maybe' || r.status === 'other').length;
+  const list = ui.reqTab === 'for' ? forMe : sent;
+  const recent = list.filter((r) => isOpen(r) || (Date.now() - (r.answeredAt || r.created || 0)) < 7 * 86400000);
+  const older = list.filter((r) => !recent.includes(r));
+  return `${pageHeader(state, 'Requests', 'Between you two')}
+    ${P ? `<a href="#ask" class="btn big-btn" data-act="askNew">${icon.plus(20)} Ask ${esc(nameOf(state, P))} something</a>` : ''}
+    ${seg([{ v: 'for', label: `For you (${openForMe})`, on: ui.reqTab === 'for' }, { v: 'sent', label: `You sent (${openSent})`, on: ui.reqTab === 'sent' }], { act: 'reqTab', label: 'Which requests', cls: 'seg-full' })}
+    <div class="stack">${recent.length ? recent.map((r) => reqCard(state, r)).join('') : empty(ui.reqTab === 'for' ? 'Nothing waiting for you.' : 'You haven’t asked anything lately.')}</div>
+    ${older.length ? `<details class="older"><summary class="b">Older (${older.length})</summary><div class="stack">${older.slice(0, 20).map((r) => reqCard(state, r)).join('')}</div></details>` : ''}`;
+}
+function isOpen(r) { return r.status === 'waiting' || r.status === 'maybe' || r.status === 'other' || r.status === 'sent'; }
+
+function reqCard(state, r) {
+  const mine = r.from === state.me;
+  const other = mine ? r.to : r.from;
+  const on = nameOf(state, other);
+  const head = `<div class="row">${mine ? '' : avatar(state, r.from, 32)}<span class="grow b small muted">${mine ? 'You asked' : esc(nameOf(state, r.from))}, ${esc(agoText(r.created))}</span><span class="pill">${esc(TYPE_LABEL[r.type] || 'Request')}</span></div>`;
+  const when = r.when ? `<p class="row small-gap b">${icon.clock(18)}${esc(r.when.label || whenLabel(r.when))}</p>` : '';
+  let body = '';
+  const id = esc(r.id);
+  if (!mine) {
+    if (r.status === 'waiting' || r.status === 'maybe') {
+      const maybeNote = r.status === 'maybe' ? '<p class="small muted">You said you’re not sure yet.</p>' : '';
+      if (ui.suggestFor === r.id) {
+        const slots = freeSlots(state, new Date(), 4);
+        body = `<div class="stack-s"><span class="b small">Suggest a time you're both free:</span>
+          ${slots.map((s, i) => `<button type="button" class="slot" data-act="suggest" data-id="${id}" data-i="${i}">${esc(s.label)}</button>`).join('') || '<p class="muted small">No shared free time in the next three weeks.</p>'}
+          <button type="button" class="btn link-btn self-start" data-act="suggestCancel">Cancel</button></div>`;
+      } else if (r.type === 'favour') {
+        body = `${maybeNote}<div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="yes" data-id="${id}">Yes, I'll do it</button><button type="button" class="btn sec" data-act="answer" data-a="no" data-id="${id}">I can't</button></div>`;
+      } else {
+        body = `${maybeNote}<div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="yes" data-id="${id}">${r.type === 'add' ? 'Yes, add it' : 'Yes, add it'}</button>
+          ${r.when ? `<button type="button" class="btn sec" data-act="suggestOpen" data-id="${id}">Another time</button>` : ''}
+          ${r.status === 'waiting' ? `<button type="button" class="btn link-btn" data-act="answer" data-a="maybe" data-id="${id}">Not sure yet</button>` : ''}
+          <button type="button" class="btn link-btn" data-act="answer" data-a="no" data-id="${id}">Not this time</button></div>`;
+      }
+    } else if (r.status === 'sent') {
+      body = `<p class="small muted">No answer needed.</p><button type="button" class="btn sec self-start" data-act="answer" data-a="seen" data-id="${id}">Got it</button>`;
+    } else if (r.status === 'other') {
+      body = `<p class="note-box">You suggested ${esc(r.counter && r.counter.label)}. Waiting for ${esc(on)}.</p>`;
+    } else body = resultLine(state, r, false);
+  } else {
+    if (r.status === 'waiting') {
+      const asleep = sleepingUntil(state, r.to);
+      body = `<p class="small muted">Waiting for ${esc(on)}.${r.hold ? ' Pencilled into both calendars until there\u2019s an answer.' : ''}${asleep ? ` ${esc(on)} is asleep, so the notification waits until about ${esc(fmtTime(asleep))}.` : ''}</p>
+        <div class="row-wrap">${(!r.reminded || Date.now() - r.reminded > 6 * 3600000) ? `<button type="button" class="btn sec" data-act="answer" data-a="remind" data-id="${id}">Remind ${esc(on)}</button>` : '<span class="small b muted">Reminder sent.</span>'}
+        <button type="button" class="btn link-btn" data-act="answer" data-a="cancel" data-id="${id}">Cancel request</button></div>`;
+    } else if (r.status === 'maybe') {
+      body = `<p class="note-box">${esc(on)} isn't sure yet.${r.hold ? ' It stays pencilled in.' : ''}</p>`;
+    } else if (r.status === 'other') {
+      body = `<p class="note-box">${esc(on)} suggested <b>${esc(r.counter && r.counter.label)}</b> instead.</p>
+        <div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="accept-counter" data-id="${id}">That works</button><button type="button" class="btn link-btn" data-act="answer" data-a="cancel" data-id="${id}">Not this time</button></div>`;
+    } else if (r.status === 'sent') {
+      body = `<p class="small muted">Sent. No answer needed.</p>`;
+    } else body = resultLine(state, r, true);
+  }
+  return `<article class="card stack ${isOpen(r) ? '' : 'faded'}">${head}<h3 class="h3">${esc(r.title)}</h3>${when}${body}</article>`;
+}
+function resultLine(state, r, mine) {
+  const on = nameOf(state, mine ? r.to : r.from);
+  const who = mine ? on : 'You';
+  if (r.status === 'yes') {
+    const where = r.type === 'favour' ? (mine ? `${on} will do it.` : 'Done. It’s in your calendar as a reminder.') : r.when ? 'It’s in both your calendars.' : '';
+    return `<p class="ok-box">${esc(who)} said yes. ${esc(where)}</p>`;
+  }
+  if (r.status === 'no') return `<p class="note-box">${esc(who)} ${mine ? 'can’t' : 'said not'} this time.</p>`;
+  if (r.status === 'seen') return `<p class="small b ink-tog">${mine ? `${esc(on)} has seen it.` : 'Seen.'}</p>`;
+  return '';
+}
+
+// ---------------- ASK ----------------
+const TYPES = [
+  ['plan', 'Plan something together', 'A date, a trip, seeing people'],
+  ['favour', 'Ask a favour', 'Can you do something for me?'],
+  ['free', 'Keep time free', 'Please don’t book anything then'],
+  ['heads', 'Heads up', 'Just so you know. No answer needed']
+];
+export function viewAsk(state) {
+  const P = state.partner;
+  if (!P) return `${pageHeader(state, 'Ask', '')}${empty('Your partner hasn’t joined yet.')}`;
+  const a = ui.ask;
+  const pn = nameOf(state, P);
+  if (a.sent) {
+    const asleep = sleepingUntil(state, P);
+    return `<a href="#requests" class="back-link">${icon.back(20)}Requests</a>
+      <section class="card stack done-card">
+        <span class="tick">${icon.check(26)}</span>
+        <h1 class="h2">Sent to ${esc(pn)}</h1>
+        <p>${asleep ? `${esc(pn)} is asleep after a night shift, so the notification waits until about ${esc(fmtTime(asleep))}.` : `${esc(pn)} gets a notification now.`}</p>
+        ${a.heldNote ? '<p class="muted">Pencilled into both calendars until there’s an answer.</p>' : ''}
+        <div class="row-wrap"><a href="#requests" class="btn">Back to requests</a><button type="button" class="btn sec" data-act="askAgain">Ask something else</button></div>
+      </section>`;
+  }
+  const slots = freeSlots(state, new Date(), 4);
+  const holdDefault = state.household.pencilDefault !== false;
+  const hold = a.hold === null ? holdDefault : a.hold;
+  const favours = state.household.favours || [];
+  const needsWhen = a.type !== 'heads';
+  const placeholder = { plan: 'Cinema, then food', favour: 'Pick up a parcel', free: 'My friends are visiting', heads: "I'll be home late" }[a.type];
+  return `<a href="#requests" class="back-link">${icon.back(20)}Requests</a>
+    <h1 class="h1">Ask ${esc(pn)}</h1>
+    <section class="stack">
+      <h2 class="h4">What kind of request?</h2>
+      <div class="grid2">${TYPES.map(([v, t, d]) => `<button type="button" class="type-card ${a.type === v ? 'on' : ''}" aria-pressed="${a.type === v}" data-act="askType" data-v="${v}"><span class="b">${t}</span><span class="small muted">${d}</span></button>`).join('')}</div>
+    </section>
+    <section class="stack-s">
+      <label for="ask-title" class="h4">What is it?</label>
+      ${a.type === 'favour' && favours.length ? `<div class="row-wrap">${favours.map((f) => `<button type="button" class="chip-btn" data-act="askFav" data-v="${esc(f)}">${esc(f)}</button>`).join('')}</div>` : ''}
+      <input id="ask-title" type="text" data-bind="ask.title" value="${esc(a.title)}" placeholder="For example: ${esc(placeholder)}" autocomplete="off">
+    </section>
+    ${needsWhen ? `<section class="stack-s">
+      <h2 class="h4">When?</h2>
+      ${slots.length ? `<span class="small muted">Times you're both free, from both your calendars${settingsOf(state, P).hasShifts || settingsOf(state, state.me).hasShifts ? ' and the rota' : ''}:</span>` : ''}
+      ${slots.map((s, i) => `<button type="button" class="slot ${!a.custom && a.slot === i ? 'on' : ''}" aria-pressed="${!a.custom && a.slot === i}" data-act="askSlot" data-i="${i}">${esc(s.label)}</button>`).join('')}
+      <button type="button" class="btn link-btn self-start" data-act="askCustom">${slots.length ? 'Choose a different time' : 'Choose a time'}</button>
+      ${a.custom || !slots.length ? `<div class="grid3">
+        <div class="field"><label for="ask-day">Day</label><input id="ask-day" type="date" data-bind="ask.cday" value="${esc(a.cday || dayKey(addDays(new Date(), 1)))}"></div>
+        <div class="field"><label for="ask-start">From</label><input id="ask-start" type="time" data-bind="ask.cstart" value="${esc(a.cstart)}"></div>
+        <div class="field"><label for="ask-end">To</label><input id="ask-end" type="time" data-bind="ask.cend" value="${esc(a.cend)}"></div>
+      </div>` : ''}
+    </section>` : ''}
+    ${a.type === 'plan' || a.type === 'free' ? `<div class="card flush">${toggleRow({ act: 'askHold', on: hold, label: 'Pencil it in while I wait', sub: 'Shows in both calendars as "Pencilled in", so nothing else gets booked.' })}</div>` : ''}
+    <button type="button" class="btn big-btn" data-act="askSend">${a.type === 'heads' ? 'Send heads up' : `Send to ${esc(pn)}`}</button>`;
+}
+export function askWhen(state) {
+  const a = ui.ask;
+  if (a.type === 'heads') return null;
+  const slots = freeSlots(state, new Date(), 4);
+  if (!a.custom && slots[a.slot]) {
+    const s = slots[a.slot];
+    return { day: s.key, start: s.start, end: s.end, allDay: false, label: s.label };
+  }
+  const day = a.cday || dayKey(addDays(new Date(), 1));
+  const w = { day, start: a.cstart || '19:00', end: a.cend || '', allDay: false };
+  if (w.end && w.end <= w.start) w.end = '';
+  w.label = whenLabel(w);
+  return w;
+}
+
+// ---------------- ADD ----------------
+export function viewAdd(state) {
+  const a = ui.add;
+  const P = state.partner;
+  const me = state.me;
+  const meShifts = settingsOf(state, me).hasShifts;
+  const paShifts = P && settingsOf(state, P).hasShifts;
+  const out = [pageHeader(state, 'Add something', '')];
+  if (a.done) {
+    out.push(`<section class="card stack done-card"><span class="tick">${icon.check(26)}</span><p class="b">${esc(a.done)}</p>
+      <div class="row-wrap"><button type="button" class="btn" data-act="addAgain">Add another</button><a href="#calendar" class="btn sec">See the calendar</a></div></section>`);
+    return out.join('');
+  }
+  if (meShifts || paShifts) {
+    out.push(seg([{ v: 'event', label: 'Something on', on: a.kind === 'event' }, { v: 'shift', label: 'A shift', on: a.kind === 'shift' }], { act: 'addKind', label: 'What are you adding?', cls: 'seg-full' }));
+  }
+  if (a.kind === 'shift') {
+    const who = a.shiftWho || (meShifts ? me : P);
+    const types = settingsOf(state, who).shiftTypes;
+    const options = [me, P].filter((x) => x && settingsOf(state, x).hasShifts);
+    out.push(`${options.length > 1 ? seg(options.map((x) => ({ v: x, label: x === me ? 'My shift' : `${nameOf(state, x)}'s shift`, on: who === x })), { act: 'addShiftWho', label: 'Whose shift', cls: 'seg-full' }) : `<p class="muted">${who === me ? 'Your shifts' : `${esc(nameOf(state, who))}'s shifts`}. Changes here win over the rota for that day.</p>`}
+      ${dayPicker(a)}
+      <section class="stack-s"><h2 class="h4">Which shift?</h2>
+      <div class="grid2">${SHIFT_ORDER.map((t) => {
+        const def = types[t] || {};
+        return `<button type="button" class="type-card ${a.shiftType === t ? 'on' : ''}" aria-pressed="${a.shiftType === t}" data-act="addShiftType" data-v="${t}"><span class="b">${esc(def.label)}</span><span class="small muted">${def.allDay ? (t === 'off' ? 'Not working' : 'Annual leave') : esc(`${fmtHMs(def.start)} to ${fmtHMs(def.end)}`)}</span></button>`;
+      }).join('')}</div></section>
+      <button type="button" class="btn big-btn" data-act="addShiftSave">Save shift</button>`);
+    return out.join('');
+  }
+  // who
+  const whos = [['me', 'Me', [me]]];
+  if (P) { whos.push(['partner', nameOf(state, P), [P]]); whos.push(['both', 'Both of us', [me, P]]); }
+  out.push(`<section class="stack-s"><h2 class="h4">Who is it for?</h2>
+    <div class="grid${whos.length}">${whos.map(([v, l, ids]) => `<button type="button" class="who-card ${a.who === v ? 'on' : ''}" aria-pressed="${a.who === v}" data-act="addWho" data-v="${v}"><span class="row avs">${ids.map((x) => avatar(state, x, 32)).join('')}</span>${esc(l)}</button>`).join('')}</div>
+    <p class="note-box">${esc(whoNote(state, a.who))}</p></section>`);
+  out.push(`<section class="stack-s"><label for="add-title" class="h4">What is it?</label><input id="add-title" type="text" data-bind="add.title" value="${esc(a.title)}" placeholder="For example: Dentist" autocomplete="off"></section>`);
+  out.push(dayPicker(a));
+  out.push(`<section class="stack-s">
+    ${a.allDay ? '' : `<div class="grid2">
+      <div class="field"><label for="add-start">Starts</label><input id="add-start" type="time" data-bind="add.start" value="${esc(a.start)}"></div>
+      <div class="field"><label for="add-end">Ends</label><input id="add-end" type="time" data-bind="add.end" value="${esc(a.end)}"></div></div>`}
+    <label class="check"><input type="checkbox" data-act="addAllDay" ${a.allDay ? 'checked' : ''}> All day</label></section>`);
+  if (a.who === 'me') {
+    const cals = Object.values(state.calendars).filter((c) => c.owner === me && c.canWrite && c.role !== 'rota');
+    if (cals.length > 1) {
+      out.push(`<section class="stack-s"><label for="add-cal" class="h4">Which calendar?</label><select id="add-cal" data-bind="add.cal">${cals.map((c) => `<option value="${esc(c.calKey)}" ${a.cal === c.calKey || (!a.cal && c.primary) ? 'selected' : ''}>${esc(c.name)}${c.account ? ` (${esc(c.account)})` : ''}</option>`).join('')}</select></section>`);
+    }
+    if (P) out.push(`<section class="stack-s"><span class="h4">${esc(nameOf(state, P))} sees it as</span>${seg([{ v: 'all', label: 'Full details', on: !a.busyOnly }, { v: 'busy', label: 'Just “Busy”', on: a.busyOnly }], { act: 'addBusy', label: 'What your partner sees', cls: 'seg-full' })}</section>`);
+  }
+  const label = a.who === 'me' ? 'Add to my calendar' : a.who === 'both' ? 'Add for both of us' : `Send to ${nameOf(state, P)}`;
+  out.push(`<button type="button" class="btn big-btn" data-act="addSave">${esc(label)}</button>`);
+  return out.join('');
+}
+function fmtHMs(hm) { return fmtTime(atTime('2000-01-01', hm)); }
+function whoNote(state, who) {
+  const P = state.partner;
+  if (who === 'me') return 'Saves to your Google Calendar.';
+  if (who === 'both') return `Goes in both your Google Calendars. ${nameOf(state, P)} gets a notification.`;
+  return `${nameOf(state, P)}'s calendar is theirs, so this goes to them as a request. It's added when they say yes.`;
+}
+function dayPicker(a) {
+  return `<section class="stack-s"><h2 class="h4">When?</h2>
+    <div class="row-wrap">${[['today', 'Today'], ['tomorrow', 'Tomorrow'], ['pick', 'Choose a date']].map(([v, l]) => `<button type="button" class="chip-btn ${a.day === v ? 'on' : ''}" aria-pressed="${a.day === v}" data-act="addDay" data-v="${v}">${l}</button>`).join('')}</div>
+    ${a.day === 'pick' ? `<div class="field"><label for="add-date">Date</label><input id="add-date" type="date" data-bind="add.date" value="${esc(a.date || dayKey(new Date()))}"></div>` : ''}
+  </section>`;
+}
+export function addDayKey() {
+  const a = ui.add;
+  if (a.day === 'today') return dayKey(new Date());
+  if (a.day === 'tomorrow') return dayKey(addDays(new Date(), 1));
+  return a.date || dayKey(new Date());
+}
+export { relDay, fromDayKey, personColour };

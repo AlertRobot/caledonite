@@ -1,0 +1,46 @@
+rules_version = '2';
+// Calendite: only the two people listed in the household can read or write.
+// The calendar sync script writes the calendar copies with a service account, which these rules don't apply to.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function household() { return get(/databases/$(database)/documents/households/main).data; }
+    function member() { return signedIn() && myEmail() in household().emails; }
+
+    match /households/main {
+      allow read: if signedIn() && (resource == null || myEmail() in resource.data.emails);
+      allow create: if signedIn() && myEmail() in request.resource.data.emails && request.resource.data.emails.size() <= 2;
+      allow update: if member() && request.resource.data.emails.size() <= 2 && myEmail() in request.resource.data.emails;
+      allow delete: if false;
+
+      // each person's own full calendar copy
+      match /privateFeeds/{id} {
+        allow read: if member() && resource.data.ownerEmail == myEmail();
+        allow write: if false;
+      }
+      // the privacy-filtered copy the partner sees
+      match /sharedFeeds/{id} {
+        allow read: if member();
+        allow write: if false;
+      }
+      match /status/{id} {
+        allow read: if member();
+        allow write: if false;
+      }
+      match /calendars/{id} {
+        allow read: if member();
+        // only the owner of a calendar decides what's shared from it
+        allow update: if member() && get(/databases/$(database)/documents/households/main/people/$(resource.data.owner)).data.email.lower() == myEmail();
+        allow create, delete: if false;
+      }
+      match /people/{pid} {
+        allow read, write: if member();
+        match /tokens/{t} { allow read, write: if member(); }
+      }
+      match /{coll}/{id} {
+        allow read, write: if member() && coll in ['requests', 'notes', 'shifts', 'outbox', 'notify'];
+      }
+    }
+  }
+}
