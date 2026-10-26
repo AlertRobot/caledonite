@@ -395,9 +395,11 @@ export function buildDay(state, key, now = new Date()) {
       }
     }
   }
-  // things just added in this app, not synced yet
+  // things just added in this app, not synced yet (only your own: your partner's may be private)
+  const myEmail = ((state.people[state.me] || {}).email || '').toLowerCase();
   for (const o of state.outbox) {
     if (o.op !== 'create' || o.done || !o.event || o.event.day !== key) continue;
+    if (o.byEmail && String(o.byEmail).toLowerCase() !== myEmail) continue;
     if (!o.tag || seenTags.has(o.tag) || o.tag.startsWith('req:')) continue;
     if (together.some((t) => t.tag === o.tag)) continue;
     const ev = o.event;

@@ -81,7 +81,7 @@ export async function createFirebaseBackend() {
     // a year and a bit: holiday bookings count towards the year's allowance
     mapColl('requests', fs.query(c('requests'), fs.where('created', '>=', since(400))), 'requests');
     mapColl('notes', fs.query(c('notes'), fs.where('created', '>=', since(30))), 'notes');
-    mapColl('outbox', fs.query(c('outbox'), fs.where('done', '==', false)), 'outbox');
+    mapColl('outbox', fs.query(c('outbox'), fs.where('byEmail', '==', email), fs.where('done', '==', false)), 'outbox');
     mapColl('status', c('status'), 'status');
     mapColl('jobs', c('jobs'), 'jobs');
     mapColl('ideas', c('ideas'), 'ideas');

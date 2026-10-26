@@ -69,9 +69,10 @@ service cloud.firestore {
           allow read, write: if member() && personEmail(pid) == myEmail();
         }
       }
-      // asks to add, change or remove things in Google Calendar: always signed with who asked
+      // asks to add, change or remove things in Google Calendar: always signed with who asked.
+      // Only your own: they can hold the names of things you share with your partner only as "Busy".
       match /outbox/{id} {
-        allow read: if member();
+        allow read: if member() && resource.data.byEmail == myEmail();
         allow create: if member() && request.resource.data.byEmail == myEmail() && request.resource.data.done == false;
         allow update, delete: if false;
       }

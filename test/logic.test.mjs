@@ -170,3 +170,21 @@ test('the rules: no new person records once the household exists, and your other
   assert.doesNotMatch(create, /member\(\)/);
   assert.match(people, /linked', \[\]\)\.hasAny\(household\(\)\.emails\)/);
 });
+
+test("your partner's own things waiting to sync never show their names to you", () => {
+  const st = load({ outbox: {
+    o1: { person: 'sophie', op: 'create', tag: 'add:p1', byEmail: 's@x.com', done: false, event: { title: 'Job interview', day: sat, start: '10:00', end: '11:00', allDay: false, busyOnly: true } },
+    o2: { person: 'ethan', op: 'create', tag: 'add:p2', byEmail: 'e@x.com', done: false, event: { title: 'Gym', day: sat, start: '12:00', end: '13:00', allDay: false } }
+  } });
+  const titles = L.dayList(st, sat).map((it) => it.title);
+  assert.ok(!titles.includes('Job interview'));
+  assert.ok(titles.includes('Gym'));
+});
+
+test('the rules: you read only your own outbox, and the app asks only for that', async () => {
+  const { readFileSync } = await import('node:fs');
+  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const ob = rules.slice(rules.indexOf('match /outbox/{id}'), rules.indexOf('match /notify/{id}'));
+  assert.match(ob, /allow read: if member\(\) && resource\.data\.byEmail == myEmail\(\);/);
+  assert.match(readFileSync(new URL('../js/firebase.js', import.meta.url), 'utf8'), /c\('outbox'\), fs\.where\('byEmail', '==', email\)/);
+});
