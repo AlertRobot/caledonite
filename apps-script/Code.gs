@@ -1964,7 +1964,10 @@ function saToken_() {
   var cache = CacheService.getScriptCache();
   var hit = cache.get('sa_token');
   if (hit) return hit;
-  var sa = JSON.parse(prop_('SA_JSON'));
+  var raw = prop_('SA_JSON');
+  // (the parser's own message quotes the text around the mistake: part of the key, shown on the connect page)
+  var sa;
+  try { sa = JSON.parse(raw); } catch (e) { throw new Error('The script property SA_JSON is not the service account key file. Paste the whole file in again.'); }
   var now = Math.floor(Date.now() / 1000);
   var enc = function (o) { return Utilities.base64EncodeWebSafe(JSON.stringify(o)).replace(/=+$/, ''); };
   var input = enc({ alg: 'RS256', typ: 'JWT' }) + '.' + enc({

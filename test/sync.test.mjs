@@ -1319,3 +1319,13 @@ test('"Stop syncing" from someone who never connected writes nothing (not even t
   ctx.disconnectFromPage();
   assert.equal(writes.length, 0, 'e-d@x.com has the same status address, e_d_x_com');
 });
+
+test('a service account key pasted in wrong never shows any of itself in an error', () => {
+  const c2 = vm.createContext({ Utilities, Logger: { log() {} } });
+  vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8'), c2);
+  c2.CacheService = { getScriptCache: () => ({ get: () => null, put() {} }) };
+  c2.PropertiesService = { getScriptProperties: () => ({ getProperty: () => 'MIIEvQSECRETKEYBYTESxyzxyzxyz' }) }; // part of the key, not the whole file
+  let err; try { c2.saToken_(); } catch (e) { err = e; }
+  assert.ok(err);
+  assert.ok(!/MIIE|SECRET/.test(err.message), err.message);
+});
