@@ -578,7 +578,7 @@ function readEvents_(cal, id, from, to) {
         var res = Calendar.Events.list(id, {
           timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: true, showDeleted: false, maxResults: 2500,
           pageToken: token || undefined,
-          fields: 'nextPageToken,items(id,iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,visibility,attendees(self,responseStatus))'
+          fields: 'nextPageToken,items(id,iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,visibility,birthdayProperties(type),attendees(self,responseStatus))'
         });
         // (one odd event is left out, never the reason the whole calendar is read the slow way every run, which
         // can use up the account's daily time for its 10-minute runs)
@@ -630,6 +630,9 @@ function normApi_(it) {
   if (m) o.tag = m[1];
   // "#busy", or marked Private in Google Calendar: your partner only ever sees "Busy"
   if (/#busy\b/i.test(desc) || it.visibility === 'private' || it.visibility === 'confidential') o.pb = 1;
+  // your contacts' birthdays and anniversaries, which Google now puts in your own calendar: never in your
+  // partner's copy (they're other people's dates, as the old Birthdays calendar was). Your own birthday is.
+  if (it.eventType === 'birthday' && !(it.birthdayProperties && it.birthdayProperties.type === 'self')) o.np = 1;
   return o;
 }
 
@@ -660,6 +663,7 @@ function norm_(ev) {
     var vis = ev.getVisibility();
     if (vis === CalendarApp.Visibility.PRIVATE || vis === CalendarApp.Visibility.CONFIDENTIAL) o.pb = 1;
   } catch (e) { /* ignore */ }
+  try { if (CalendarApp.EventType && ev.getEventType() === CalendarApp.EventType.BIRTHDAY) o.np = 1; } catch (e) { /* older events */ }
   return o;
 }
 
@@ -688,7 +692,8 @@ function feedWrites_(me, ctx, calKey, doc, events, props, known) {
     var list = byMonth[mk];
     var base = { owner: me.person, ownerEmail: ctx.appEmail, calKey: calKey, month: mk, account: me.email };
     if (doc.show !== false) {
-      var priv = list.map(function (e) { var c = clone_(e); delete c.pb; return c; });
+      // (pb stays: the app never shows the names of things you share only as "Busy", say in a shared countdown)
+      var priv = list.map(function (e) { var c = clone_(e); delete c.np; return c; });
       put_(HOUSEHOLD + '/privateFeeds/' + me.person + '__' + calKey + '__' + mk, base, priv);
     }
     var shared = shareFilter_(doc, list);
@@ -707,6 +712,7 @@ function feedWrites_(me, ctx, calKey, doc, events, props, known) {
 function shareFilter_(doc, list) {
   var share = doc.share || 'busy';
   if (share === 'none') return null;
+  list = list.filter(function (e) { return !e.np; });
   if (share === 'hours') {
     var days = {};
     list.forEach(function (e) {
@@ -720,7 +726,7 @@ function shareFilter_(doc, list) {
   return list.map(function (e) {
     var c = clone_(e);
     if (share === 'busy' || c.pb) { c.t = 'Busy'; c.b = 1; delete c.l; }
-    delete c.pb; delete c.gid; delete c.rid;
+    delete c.pb; delete c.np; delete c.gid; delete c.rid;
     return c;
   });
 }
@@ -986,14 +992,21 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   var now = Date.now();
   var win = { from: now - 864e5, to: now + 21 * 864e5 };
   var map = {};
-  events.forEach(function (e) {
-    var s = e.ad ? Utilities.parseDate(e.sd, TZ, 'yyyy-MM-dd').getTime() : e.s;
+  // in time order, so a day's second shift is always its second, however Google listed them
+  // (each start worked out once: Utilities calls aren't free)
+  events = events.map(function (e) { return { e: e, s: e.ad ? Utilities.parseDate(e.sd, TZ, 'yyyy-MM-dd').getTime() : e.s }; })
+    .sort(function (a, b) { return a.s - b.s || (a.e.ad ? -1 : 0) - (b.e.ad ? -1 : 0); });
+  events.forEach(function (x) {
+    var e = x.e, s = x.s;
     var en = e.ad ? Utilities.parseDate(e.ed || keyPlus_(e.sd, 1), TZ, 'yyyy-MM-dd').getTime() : e.e;
     if (s < win.from || s > win.to) return;
+    // shared as working hours: your partner never sees all-day entries or very long ones, so never hears of them
+    if (share === 'hours' && (e.ad || en - s > 14 * 3600e3)) return;
     var k = evStartKey_(e);
     while (map[k]) k += '+';
     // a shift marked Private or #busy is never named, not even by a change to its name
     map[k] = [s, en, e.pb ? '' : String(e.t || 'Shift').slice(0, 40)];
+    if (e.ad) map[k].push(1);
   });
   // a saved value can't be bigger than about 9 KB: a very full calendar keeps the nearest days only
   // (and says so, so the days past them are never compared)
@@ -1008,6 +1021,9 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   try { before = JSON.parse(props.getProperty(key) || 'null'); } catch (err) { before = null; }
   props.setProperty(key, JSON.stringify({ from: win.from, to: win.to, map: map }));
   if (!before || typeof before !== 'object' || !before.map || share === 'none') return;
+  // saved before working-hours sharing left out all-day and very long entries: compared the same way, so they
+  // never come up as removed (each day's entries numbered again in time order, as now)
+  before.map = rotaRekey_(before.map, function (v) { return !!v && (share !== 'hours' || (!v[3] && v[1] - v[0] <= 14 * 3600e3)); });
   var named = share === 'all';
   var lo = Math.max(before.from, win.from), hi = Math.min(before.to, win.to);
   var inside = function (v) { return v && v[0] >= lo && v[0] <= hi && v[1] > now; };
@@ -1029,7 +1045,8 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   if (!changes.length) return;
   var name = (ctx.person && ctx.person.name) || 'Your partner';
   var parts = changes.slice(0, 2).map(function (c) {
-    var label = shiftWords_({ t: named ? c.v[2] : '', s: c.v[0], e: c.v[1] });
+    // an all-day entry (leave, a day off) by its name, never as a shift worked out from its times
+    var label = c.v[3] ? ((named && c.v[2]) || 'an all-day entry') : shiftWords_({ t: named ? c.v[2] : '', s: c.v[0], e: c.v[1] });
     return dayLabel_(c.k.replace(/\+*$/, '')) + ': ' + label + ' ' + c.what + '.';
   });
   if (changes.length > 2) parts.push('And ' + (changes.length - 2) + ' more.');
@@ -1039,6 +1056,21 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: pid, kind: 'rota', title: name + "'s rota has changed", body: parts.join(' '), link: '#calendar', sendAfter: now, sent: false, created: now }));
   });
   if (writes.length) fsCommit_(writes);
+}
+
+// A saved rota with only the entries keep() allows, each day's numbered again in time order ("day", "day+", ...)
+function rotaRekey_(m, keep) {
+  var byDay = {};
+  Object.keys(m || {}).forEach(function (k) {
+    if (!keep(m[k])) return;
+    var d = k.replace(/\+*$/, '');
+    (byDay[d] = byDay[d] || []).push(m[k]);
+  });
+  var out = {};
+  Object.keys(byDay).forEach(function (d) {
+    byDay[d].sort(function (a, b) { return a[0] - b[0] || (b[3] || 0) - (a[3] || 0); }).forEach(function (v, i) { out[d + new Array(i + 1).join('+')] = v; });
+  });
+  return out;
 }
 
 // ===================== the app's to-do list for your calendars =====================
@@ -1100,7 +1132,10 @@ function processOutbox_(me, ctx) {
       if (key) stuck[key] = true;
       var tries = (o.tries || 0) + 1;
       var patch = { tries: tries, error: String(err && err.message || err).slice(0, 200) };
-      if (tries >= 5) patch.done = true;
+      // given up on after 5 tries, but not while Google is only having a moment (busy, a quota for the day, the
+      // network): those keep trying for a day after the change was made, so an hour's outage loses nothing
+      var age = Date.now() - (Date.parse(it.createTime || '') || o.created || 0);
+      if (tries >= 5 && (!transient_(err) || age > 864e5)) patch.done = true;
       writes.push(upd_(HOUSEHOLD + '/outbox/' + it.id, patch, Object.keys(patch)));
     }
   });
@@ -1294,6 +1329,11 @@ function editOwn_(o, rs) {
   if (!Object.keys(patch).length) return { changed: 0 };
   Calendar.Events.patch(patch, o.calId, target);
   return { changed: 1 };
+}
+
+// An error that's Google or the network having a moment, not something wrong with the change itself
+function transient_(err) {
+  return /rate limit|backend error|internal error|service unavailable|unavailable|timed out|timeout|try again|too many|quota|limit exceeded|\b(429|500|502|503|504)\b|address unavailable|dns error|unexpected error/i.test(String(err && err.message || err));
 }
 
 // The Calendar API saying an event isn't there (any more)
@@ -1753,6 +1793,15 @@ function backup_(me, ctx, force) {
   ['people', 'calendars', 'requests', 'notes', 'shifts', 'jobs', 'ideas'].forEach(function (c) {
     dump[c] = fsList_(HOUSEHOLD + '/' + c).map(function (d) { return merge_({ id: d.id }, d.data); });
   });
+  // nor what your partner's record still holds from before it had a private place (the app moves it there):
+  // their rota link, reminders and private countdowns
+  dump.people.forEach(function (p) {
+    if (p.id === me.person) return;
+    delete p.reminders;
+    if (p.settings && typeof p.settings === 'object') delete p.settings.rotaUrl;
+    var cds = p.countdowns && typeof p.countdowns === 'object' ? p.countdowns : {};
+    Object.keys(cds).forEach(function (k) { if (!cds[k] || cds[k].shared === false) delete cds[k]; });
+  });
   // your own reminders and private countdowns, never your partner's (this goes in your Google Drive)
   dump.mine = { person: me.person, private: fsGet_(HOUSEHOLD + '/people/' + me.person + '/private/main') || {} };
   var token = ScriptApp.getOAuthToken();
@@ -1797,6 +1846,8 @@ function nudgeRequests_(me, ctx) {
   waiting.forEach(function (r) {
     var d = r.data;
     if (d.autoNudged || d.type === 'heads') return;
+    // its time has gone by: nothing left to say yes to (the app offers "Not this time" or Cancel instead)
+    if (whenOver_(d.when, Date.now())) return;
     var since = Math.max(d.created || 0, d.reminded || 0);
     if (Date.now() - since < hours * 3600e3) return;
     var name = (ctx.person && ctx.person.name) || 'Your partner';
@@ -1807,6 +1858,18 @@ function nudgeRequests_(me, ctx) {
     ];
     try { fsCommit_(pair); } catch (err) { if (!/FAILED_PRECONDITION|^Firestore 409/i.test(String(err && err.message))) throw err; }
   });
+}
+
+// A request's time ({ day, start, end, allDay, endDay }) is over: past the end of its last day, or its end time
+function whenOver_(w, now) {
+  if (!w || !/^\d{4}-\d{2}-\d{2}$/.test(String(w.day || ''))) return false;
+  var last = /^\d{4}-\d{2}-\d{2}$/.test(String(w.endDay || '')) && w.endDay > w.day ? w.endDay : w.day;
+  if (w.allDay) return now >= localTime_(keyPlus_(last, 1), '00:00');
+  var st = hm_(w.start) || '19:00';
+  var en = hm_(w.end) || addMins_(st, 60);
+  // overnight (an end before the start, on the same day): the next morning
+  if (last === w.day && mins_(en) <= mins_(st)) last = keyPlus_(w.day, 1);
+  return now >= localTime_(last, en);
 }
 
 // ===================== notifications =====================

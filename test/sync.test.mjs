@@ -1385,3 +1385,174 @@ test('one odd event from Google never sends the whole calendar the slow way', ()
   assert.equal(slow, 0);
   assert.equal(JSON.stringify(evs.map((e) => e.t)), '["Tea"]');
 });
+
+// ---------- round 8 ----------
+test("your contacts' birthdays (which Google now puts in your own calendar) never reach your partner's copy", () => {
+  withDigest();
+  const bday = (type) => ctx.normApi_({ id: 'b1', iCalUID: 'b1@google.com', summary: "Jane Doe's birthday", eventType: 'birthday', birthdayProperties: { type }, start: { date: '2026-11-06' }, end: { date: '2026-11-07' } });
+  const tea = ctx.normApi_({ id: 't1', iCalUID: 't1@google.com', summary: 'Tea', start: { dateTime: '2026-11-06T10:00:00Z' }, end: { dateTime: '2026-11-06T11:00:00Z' } });
+  for (const share of ['all', 'busy']) {
+    const shared = ctx.shareFilter_({ share }, [bday('birthday'), bday('anniversary'), tea]);
+    assert.equal(shared.length, 1, share);
+    assert.ok(!('np' in shared[0]));
+  }
+  // your own birthday is yours to share
+  assert.equal(ctx.shareFilter_({ share: 'all' }, [bday('self')]).length, 1);
+  // still in your own copy
+  const { api } = fakeProps();
+  const w = ctx.feedWrites_({ person: 'ethan', email: 'e@x.com' }, { appEmail: 'e@x.com' }, 'k', { share: 'all' }, [bday('birthday')], api).writes;
+  const priv = w.find((x) => x.update.name.includes('/privateFeeds/'));
+  const shared = w.find((x) => x.update.name.includes('/sharedFeeds/'));
+  assert.equal(priv.update.fields.events.arrayValue.values.length, 1);
+  assert.equal((shared.update.fields.events.arrayValue.values || []).length, 0);
+  // and the slow way (CalendarApp) too
+  ctx.CalendarApp = { Visibility: { PRIVATE: 'P', CONFIDENTIAL: 'C' }, GuestStatus: { NO: 'NO' }, EventType: { BIRTHDAY: 'BIRTHDAY' } };
+  const old = { getMyStatus: () => null, getDescription: () => '', getStartTime: () => new Date('2026-11-06T00:00:00Z'), getId: () => 'b@google.com', getTitle: () => "Jane's birthday", isRecurringEvent: () => true, isAllDayEvent: () => true, getAllDayStartDate: () => new Date('2026-11-06T00:00:00Z'), getAllDayEndDate: () => new Date('2026-11-07T00:00:00Z'), getLocation: () => '', getVisibility: () => 'D', getEventType: () => 'BIRTHDAY' };
+  assert.equal(ctx.shareFilter_({ share: 'all' }, [ctx.norm_(old)]).length, 0);
+  // so your partner's reminder on it never goes off either
+  const now = Date.now();
+  const { api: a2 } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => a2 };
+  const writes = [];
+  ctx.fsCommit_ = (x) => writes.push(...x);
+  ctx.docName_ = (p) => p;
+  ctx.fsGet_ = (path) => (path === 'households/main/people/sophie/private/main' ? { reminders: { r1: { ref: 'e:ethan:primary:u1', owner: 'ethan', times: ['h1'] } } } : null);
+  const me = { person: 'ethan', email: 'e@x.com', main: true, people: [{ id: 'ethan', data: { settings: {} } }, { id: 'sophie', data: { settings: {} } }] };
+  ctx.fireReminders_(me, {}, [{ calKey: 'primary', shown: true, share: 'all', doc: { share: 'all' }, ev: { id: 'e1', uid: 'u1', t: "Jane's birthday", np: 1, s: now + 30 * 60e3, e: now + 90 * 60e3 } }]);
+  assert.equal(writes.length, 0);
+});
+
+test('your own copy keeps the "seen only as Busy" mark (the app uses it); your partner\'s copy never has it', () => {
+  withDigest();
+  const s = ctx.localTime_('2026-11-10', '09:00');
+  const { api } = fakeProps();
+  const w = ctx.feedWrites_({ person: 'ethan', email: 'e@x.com' }, { appEmail: 'e@x.com' }, 'k', { share: 'all' }, [{ id: 'a', t: 'Therapy', pb: 1, s, e: s + 3600e3 }], api).writes;
+  const ev = (path) => w.find((x) => x.update.name.includes(path)).update.fields.events.arrayValue.values[0].mapValue.fields;
+  assert.equal(ev('/privateFeeds/').pb.integerValue, '1');
+  assert.equal(ev('/privateFeeds/').t.stringValue, 'Therapy');
+  assert.ok(!('pb' in ev('/sharedFeeds/')));
+  assert.equal(ev('/sharedFeeds/').t.stringValue, 'Busy');
+});
+
+test('no "Still waiting" nudge once the time asked about has gone by', () => {
+  withDigest();
+  const now = Date.now();
+  const day = (n) => ctx.Utilities.formatDate(new Date(now + n * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const old = now - 2 * 864e5;
+  const req = (id, when) => ({ id, data: { from: 'ethan', to: 'sophie', title: id, status: 'waiting', created: old, when }, updateTime: 'T' + id });
+  ctx.fsQuery_ = () => [
+    req('past', { day: day(-1), start: '19:00', end: '21:00' }),
+    req('pastAllDay', { day: day(-3), endDay: day(-1), allDay: true }),
+    req('soon', { day: day(1), start: '19:00', end: '21:00' }),
+    req('holidayOn', { day: day(-1), endDay: day(2), allDay: true }),
+    req('noTime', null)
+  ];
+  const sent = [];
+  ctx.fsCommit_ = (w) => sent.push(w[0].update.fields.body.stringValue);
+  ctx.docName_ = (p) => p;
+  ctx.nudgeRequests_({ person: 'ethan' }, { hh: {}, person: { name: 'Ethan' } });
+  assert.deepEqual(sent.sort(), ['holidayOn', 'noTime', 'soon']);
+  // an evening that runs past midnight is still on until it ends
+  const L = (d, hm) => ctx.localTime_(d, hm);
+  assert.equal(ctx.whenOver_({ day: '2026-11-06', start: '22:00', end: '01:00' }, L('2026-11-07', '00:30')), false);
+  assert.equal(ctx.whenOver_({ day: '2026-11-06', start: '22:00', end: '01:00' }, L('2026-11-07', '01:00')), true);
+  assert.equal(ctx.whenOver_({ day: '2026-11-06', start: '19:00' }, L('2026-11-06', '19:59')), false);
+});
+
+test('rota changes: an all-day entry is named as itself, never as a "night shift", and one your partner can\'t see is never mentioned', () => {
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 3 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const run = (share, after) => {
+    const { api } = smallProps();
+    ctx.PropertiesService = { getUserProperties: () => api };
+    ctx.Utilities.getUuid = () => 'u' + Math.random();
+    const writes = [];
+    ctx.fsCommit_ = (w) => writes.push(...w);
+    ctx.docName_ = (p) => p;
+    const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+    ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', [], api, { share });
+    ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', after, api, { share });
+    return writes.map((w) => w.update.fields.body.stringValue);
+  };
+  const leave = [{ ad: 1, sd: day, ed: ctx.keyPlus_(day, 1), t: 'Annual leave' }];
+  const all = run('all', leave);
+  assert.match(all[0], /Annual leave added/);
+  assert.doesNotMatch(all[0], /night/);
+  const busy = run('busy', leave);
+  assert.match(busy[0], /an all-day entry added/);
+  assert.doesNotMatch(busy[0], /Annual|night/);
+  assert.deepEqual(run('hours', leave), [], 'not in the working hours your partner sees');
+  // shifts are still told as before
+  const s = ctx.localTime_(day, '07:30');
+  assert.match(run('hours', [{ t: 'Ward 7', s, e: ctx.localTime_(day, '20:00') }])[0], /long day added/);
+});
+
+test("the weekly backup never copies your partner's rota link, reminders or private countdowns into your Drive", () => {
+  const { api } = fakeProps({ backup_folder: 'f1' });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.ScriptApp = { getOAuthToken: () => 'tok' };
+  ctx.Utilities.getUuid = () => 'u1';
+  ctx.fsList_ = (path) => (path.endsWith('/people') ? [
+    { id: 'ethan', data: { name: 'Ethan', settings: { rotaUrl: 'https://mine.example/r.ics' }, reminders: { r1: { title: 'Mine' } } } },
+    { id: 'sophie', data: { name: 'Sophie', settings: { rotaUrl: 'https://loop.example/s3cr3t.ics', hasShifts: true }, reminders: { r2: { title: 'Therapy' } }, countdowns: { c1: { title: 'Trip', shared: true }, c2: { title: 'Interview', shared: false } } } }
+  ] : []);
+  ctx.fsGet_ = () => ({});
+  let uploaded = '';
+  ctx.UrlFetchApp = { fetch: (url, opt) => {
+    if (/upload/.test(url)) uploaded = opt.payload;
+    return { getResponseCode: () => 200, getContentText: () => (/\/files\/f1/.test(url) ? '{"id":"f1"}' : '{"files":[]}') };
+  } };
+  ctx.backup_({ person: 'ethan' }, { hh: { emails: ['e@x.com'] } }, true);
+  assert.ok(uploaded, 'uploaded');
+  assert.ok(!/s3cr3t|Therapy|Interview/.test(uploaded));
+  assert.match(uploaded, /Trip/);
+  assert.match(uploaded, /mine\.example/, 'your own record is as it is');
+});
+
+test('a change Google keeps turning away for a moment is tried for a day, not dropped after five tries', () => {
+  const run = (msg, createTime) => {
+    const calendar = fakeCalendar([]);
+    calendar.Events.insert = () => { throw new Error(msg); };
+    ctx.Calendar = calendar;
+    ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'primary@x', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'primary@x' }) };
+    const writes = [];
+    ctx.fsQuery_ = () => [{ id: 'o1', createTime, data: { person: 'ethan', op: 'create', tag: 'add:z', byEmail: 'e@x.com', done: false, created: 1, tries: 4, event: { title: 'Gym', day: '2026-11-07', start: '10:00', end: '11:00' } } }];
+    ctx.fsCommit_ = (w) => writes.push(...w);
+    ctx.docName_ = (p) => p;
+    ctx.processOutbox_({ email: 'e@x.com', person: 'ethan', main: true }, { appEmail: 'e@x.com', calDocs: {} });
+    return writes[0].update.fields;
+  };
+  const recent = new Date(Date.now() - 3600e3).toISOString();
+  for (const m of ['API call to calendar.events.insert failed with error: Backend Error', 'Rate Limit Exceeded', 'Service invoked too many times for one day: calendar.', 'Address unavailable: https://www.googleapis.com']) {
+    const f = run(m, recent);
+    assert.ok(!f.done, m);
+    assert.equal(f.tries.integerValue, '5');
+  }
+  // a day on, it's given up on
+  assert.equal(run('Backend Error', new Date(Date.now() - 25 * 3600e3).toISOString()).done.booleanValue, true);
+  // something wrong with the change itself: after 5 tries, as before
+  assert.equal(run('API call to calendar.events.insert failed with error: Invalid start time.', recent).done.booleanValue, true);
+});
+
+test('a rota shared as working hours, saved before all-day entries were left out of it, never says they were removed', () => {
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 3 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const L = (hm) => ctx.localTime_(day, hm);
+  // as an earlier version saved it: a study day (all day) listed first, then a long day
+  const saved = { from: now - 864e5, to: now + 21 * 864e5, map: { [day]: [L('00:00'), ctx.localTime_(ctx.keyPlus_(day, 1), '00:00'), 'Study day'], [day + '+']: [L('07:30'), L('20:00'), 'Long day'] } };
+  const { api } = smallProps({ rota_rota: JSON.stringify(saved) });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  const evs = [{ t: 'Long day', s: L('07:30'), e: L('20:00') }, { ad: 1, sd: day, ed: ctx.keyPlus_(day, 1), t: 'Study day' }];
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'hours' });
+  assert.deepEqual(writes.map((w) => w.update.fields.body.stringValue), []);
+  // and the same shifts listed in another order are no change, whatever the sharing
+  api.setProperty('rota_rota', JSON.stringify(Object.assign({}, saved, { map: { [day]: saved.map[day + '+'], [day + '+']: saved.map[day] } })));
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs.slice().reverse(), api, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'all' });
+  assert.equal(writes.length, 0);
+});
