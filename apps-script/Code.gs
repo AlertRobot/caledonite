@@ -1360,7 +1360,7 @@ function nudgeRequests_(me, ctx) {
     var since = Math.max(d.created || 0, d.reminded || 0);
     if (Date.now() - since < hours * 3600e3) return;
     var name = (ctx.person && ctx.person.name) || 'Your partner';
-    writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: d.to, kind: 'requests', title: 'Still waiting: ' + name + ' asked you something', body: d.title || '', link: '#requests', reqId: r.id, ask: d.type || '', sendAfter: Date.now(), sent: false, created: Date.now() }));
+    writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: d.to, kind: 'requests', title: 'Still waiting: ' + name + ' asked you something', body: d.title || '', link: '#requests', reqId: r.id, ask: '1', sendAfter: Date.now(), sent: false, created: Date.now() }));
     writes.push(upd_(HOUSEHOLD + '/requests/' + r.id, { autoNudged: Date.now() }, ['autoNudged']));
   });
   fsCommit_(writes);
