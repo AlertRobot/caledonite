@@ -12,7 +12,7 @@ const SHELL = [
   './js/app.js', './js/config.js', './js/util.js', './js/logic.js', './js/store.js', './js/ui.js', './js/uistate.js', './js/ops.js',
   './js/theme.js', './js/views-main.js', './js/views-requests.js', './js/views-settings.js', './js/views-event.js', './js/views-extra.js',
   './js/linked.js', './js/firebase.js', './js/demo.js',
-  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'
+  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/badge-96.png'
 ];
 const SDK_FILES = ['firebase-app', 'firebase-auth', 'firebase-firestore', 'firebase-messaging']
   .map((n) => `https://www.gstatic.com/firebasejs/${SDK_VERSION}/${n}.js`);

@@ -653,3 +653,17 @@ test('something agreed and then moved to another day is only on its new day, not
   const it = L.dayList(st, far).find((x) => x.title === 'Cinema');
   assert.ok(it && !it.pending && !/Saving/.test(it.sub));
 });
+
+test('the app icon reaches phones: every icon the page, the manifest and notifications use is saved for offline', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const read = (f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+  const sw = read('sw.js');
+  const shell = JSON.parse(sw.slice(sw.indexOf('const SHELL = [') + 14, sw.indexOf('];', sw.indexOf('const SHELL = [')) + 1).replace(/'/g, '"').replace(/\s+/g, ''));
+  const used = new Set([
+    ...JSON.parse(read('manifest.webmanifest')).icons.map((i) => i.src),
+    ...[...read('index.html').matchAll(/href="(icons\/[^"]+)"/g)].map((m) => m[1]),
+    ...[...sw.matchAll(/'(icons\/[^']+)'/g)].map((m) => m[1])
+  ]);
+  for (const u of used) assert.ok(shell.includes(`./${u}`), u);
+});
