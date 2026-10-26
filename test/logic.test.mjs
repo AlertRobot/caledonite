@@ -349,6 +349,19 @@ test("the rules: only the one it's for answers a request, and a holiday booked j
   assert.equal(canPatch('sophie', 'r1', ask({ status: 'no' }), answer(ask(), 'yes', 'sophie')), false);
 });
 
+test("the rules: a request is always to your partner, and yes to the other time they suggested is that time", () => {
+  const create = (who, data) => RULES.allowed({ method: 'create', path: `${HH}/requests/n1`, email: EM[who], db: rulesDb(), data });
+  // one "for" yourself you could then answer yourself: a holiday "agreed" by both of you that Sophie never saw
+  assert.equal(create('ethan', ask({ to: 'ethan' })), false);
+  assert.equal(create('ethan', ask({ type: 'leave', to: 'ethan', people: ['ethan', 'sophie'] })), false);
+  assert.equal(create('ethan', ask({ to: 'nobody' })), false, 'not someone who isn\'t one of you');
+  assert.equal(create('ethan', ask()), true);
+  // Sophie couldn't do the first time and suggested another: Ethan can only say yes to hers
+  const other = ask({ status: 'other', counter: { day: '2026-11-08', start: '18:00', end: '20:00', allDay: false, label: 'Sunday' } });
+  assert.equal(canPatch('ethan', 'r1', other, { status: 'yes', answeredAt: 5 }), false, 'yes at the time she said she couldn\'t do');
+  assert.equal(canPatch('ethan', 'r1', other, answer(other, 'accept-counter', 'ethan')), true);
+});
+
 test('the page only loads pictures from Caledonite itself, so injected markup or styles have nowhere to send things', async () => {
   const { readFileSync } = await import('node:fs');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');

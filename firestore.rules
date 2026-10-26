@@ -86,16 +86,23 @@ service cloud.firestore {
       // was offline can't bring back something already called off, or answer it a second time.
       function isMe(pid) { return personEmail(pid) == myEmail(); }
       function justOne(r) { return r.get('own', false) == true || (r.get('people', null) is list && r.people.size() == 1); }
+      function sameTime(a, b) {
+        return a is map && b is map && a.get('day', null) == b.get('day', null)
+          && a.get('start', null) == b.get('start', null) && a.get('end', null) == b.get('end', null);
+      }
+      // yes to the other time your partner suggested is yes to that time, never the one they couldn't do
       function okStatus(r, next) {
         return next == 'cancelled'
           ? (!justOne(r) || isMe(r.from))
           : (r.get('status', '') in ['waiting', 'maybe', 'sent'] && isMe(r.to) && next in ['yes', 'no', 'maybe', 'seen', 'other'])
-            || (r.get('status', '') == 'other' && isMe(r.from) && next == 'yes');
+            || (r.get('status', '') == 'other' && isMe(r.from) && next == 'yes'
+                && sameTime(request.resource.data.get('when', null), r.get('counter', null)));
       }
       match /requests/{id} {
         allow read: if member();
-        // asked (or a heads up), or your own holiday, booked straight away: never one already agreed for the other
-        allow create: if member() && isMe(request.resource.data.from)
+        // asked (or a heads up), or your own holiday, booked straight away: never one already agreed for the other.
+        // Always to your partner: one "for" yourself you could answer yourself
+        allow create: if member() && isMe(request.resource.data.from) && !isMe(request.resource.data.to)
           && (request.resource.data.get('status', '') in ['waiting', 'sent']
               || (request.resource.data.get('status', '') == 'yes' && request.resource.data.get('own', false) == true
                   && request.resource.data.get('people', null) == [request.resource.data.from]));
