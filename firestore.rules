@@ -78,11 +78,15 @@ service cloud.firestore {
       }
       // requests: anyone can answer, but who asked, who it's for and whether it's just for one of you are fixed
       // (the calendar sync uses them to decide whether your partner may change the event that came from it),
-      // and so is what was asked: its name, note, holiday days and whether it was pencilled in
+      // and so is what was asked: its name, note, holiday days and whether it was pencilled in.
+      // Once it's answered or cancelled, the only change left is cancelling it, so an answer saved on a phone that
+      // was offline can't bring back something already called off, or answer it a second time.
       match /requests/{id} {
         allow read: if member();
         allow create: if member() && personEmail(request.resource.data.from) == myEmail();
-        allow update: if member() && !changed().hasAny(['from', 'to', 'type', 'own', 'people', 'title', 'note', 'days', 'hold', 'created']);
+        allow update: if member() && !changed().hasAny(['from', 'to', 'type', 'own', 'people', 'title', 'note', 'days', 'hold', 'created'])
+          && (!changed().hasAny(['status']) || resource.data.get('status', '') in ['waiting', 'maybe', 'sent', 'other']
+              || request.resource.data.status == 'cancelled');
         allow delete: if false;
       }
       // asks to add, change or remove things in Google Calendar: always signed with who asked.

@@ -275,7 +275,7 @@ test("the rules: a request's asker, who it's for and whether it's just for one o
   const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
   const rq = rules.slice(rules.indexOf('match /requests/{id}'), rules.indexOf('match /outbox/{id}'));
   assert.match(rq, /allow create: if member\(\) && personEmail\(request\.resource\.data\.from\) == myEmail\(\);/);
-  assert.match(rq, /allow update: if member\(\) && !changed\(\)\.hasAny\(\['from', 'to', 'type', 'own', 'people'[^\]]*\]\);/);
+  assert.match(rq, /allow update: if member\(\) && !changed\(\)\.hasAny\(\['from', 'to', 'type', 'own', 'people'[^\]]*\]\)/);
   assert.match(rq, /allow delete: if false;/);
   // and the catch-all for shared lists no longer lets requests through
   const generic = rules.slice(rules.indexOf('match /{coll}/{id}'));
@@ -462,7 +462,7 @@ test("the rules: once sent, a request's name, note, holiday days and pencilling-
   const { readFileSync } = await import('node:fs');
   const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
   const rq = rules.slice(rules.indexOf('match /requests/{id}'), rules.indexOf('match /outbox/{id}'));
-  const fixed = JSON.parse(rq.match(/allow update: if member\(\) && !changed\(\)\.hasAny\((\[[^\]]+\])\);/)[1].replace(/'/g, '"'));
+  const fixed = JSON.parse(rq.match(/allow update: if member\(\) && !changed\(\)\.hasAny\((\[[^\]]+\])\)/)[1].replace(/'/g, '"'));
   for (const f of ['from', 'to', 'type', 'own', 'people', 'title', 'note', 'days', 'hold', 'created']) assert.ok(fixed.includes(f), f);
   // everything answering, cancelling or reminding writes is still allowed (the app, the notification buttons and the sync)
   const req = { from: 'ethan', to: 'sophie', type: 'plan', title: 'Film', hold: true, when: { day: sat, start: '19:00', end: '21:00' }, counter: { day: sat, start: '20:00', end: '22:00', label: 'x' } };
@@ -517,4 +517,17 @@ test("just this one, from your partner's copy of something repeating you share, 
   Object.assign(ui.ev, { ref: 't:both:wk', day: sat, confirmDelete: true, editing: false, scope: 'one' });
   assert.match(viewEvent(store.state), /Just this one/);
   Object.assign(ui.ev, { confirmDelete: false });
+});
+
+test("the rules: an answer saved offline can't bring back a request already called off; cancelling clears both calendars", async () => {
+  const { readFileSync } = await import('node:fs');
+  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const rq = rules.slice(rules.indexOf('match /requests/{id}'), rules.indexOf('match /outbox/{id}'));
+  const upd = rq.slice(rq.indexOf('allow update'), rq.indexOf('allow delete'));
+  assert.match(upd, /!changed\(\)\.hasAny\(\['status'\]\) \|\| resource\.data\.get\('status', ''\) in \['waiting', 'maybe', 'sent', 'other'\]\s*\|\| request\.resource\.data\.status == 'cancelled'/);
+  // every status the app writes from an open request is one of those, and cancelling is the only way out of a closed one
+  const req = { from: 'ethan', to: 'sophie', type: 'plan', title: 'Film', hold: false, when: { day: sat, start: '19:00', end: '21:00' }, counter: { day: sat, start: '20:00', end: '22:00', label: 'x' } };
+  // cancelling one this phone still thought was waiting (it had been agreed meanwhile): what was added goes too
+  const c = Ops.buildAnswer({ req, id: 'r1', answer: 'cancel', me: 'ethan', byEmail: 'e@x.com', names: {} });
+  assert.deepEqual(c.outbox.map((o) => [o.person, o.op, o.tag]), [['ethan', 'delete', 'req:r1'], ['sophie', 'delete', 'req:r1']]);
 });

@@ -78,7 +78,8 @@
       tell(r.to, meName + ' said yes to your time', (r.title || t2) + ': ' + r.counter.label);
     } else if (answer === 'cancel') {
       patch.status = 'cancelled';
-      if (r.hold) both.forEach(function (p) { add(p, 'delete', {}); });
+      // whatever it put in either calendar: pencilled in, or added after a yes this phone hadn't heard about yet
+      both.forEach(function (p) { add(p, 'delete', {}); });
     } else if (answer === 'remind') {
       patch.reminded = now;
       tell(r.to, 'Reminder from ' + meName, r.title || eventTitle(r));
