@@ -448,3 +448,32 @@ test('a reminder whose notification could not be saved is tried again next time'
   ctx.fireReminders_(me, {}, seen);
   assert.equal(sent.length, 1);
 });
+
+test("rota change notifications show your partner only what the rota's sharing lets them see", () => {
+  const now = Date.now();
+  const L = (ms) => ctx.Utilities.formatDate(new Date(ms), 'Europe/London', 'yyyy-MM-dd');
+  const day = L(now + 3 * 864e5);
+  const shift = (t, s, e) => ({ t, s: ctx.localTime_(day, s), e: ctx.localTime_(day, e) });
+  const run = (share, before, after) => {
+    const { api } = smallProps();
+    ctx.PropertiesService = { getUserProperties: () => api };
+    ctx.Utilities.getUuid = () => 'u' + Math.random();
+    const writes = [];
+    ctx.fsCommit_ = (w) => writes.push(...w);
+    ctx.docName_ = (p) => p;
+    const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+    const me = { person: 'sophie' };
+    ctx.rotaChanged_(me, c, 'rota', before, api, { share });
+    ctx.rotaChanged_(me, c, 'rota', after, api, { share });
+    return writes.map((w) => w.update.fields.body.stringValue);
+  };
+  const before = [shift('Ward 7 cover', '07:30', '20:00')];
+  const moved = [shift('Ward 7 cover', '08:00', '20:00')];
+  const renamed = [shift('Ward 9 cover', '07:30', '20:00')];
+  assert.match(run('all', before, moved)[0], /long day changed/);
+  assert.deepEqual(run('none', before, moved), [], 'shared as Nothing: no notification');
+  const busy = run('busy', before, moved);
+  assert.equal(busy.length, 1);
+  assert.doesNotMatch(busy[0], /Ward/);
+  assert.deepEqual(run('busy', before, renamed), [], 'a new name only is not news when shared as Busy');
+});

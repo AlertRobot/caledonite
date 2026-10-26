@@ -336,7 +336,7 @@ function syncCalendars_(me, ctx, errors) {
       var fw = feedWrites_(me, ctx, calKey, doc, events, props);
       writes = writes.concat(fw.writes);
       pending[fw.key] = fw.value;
-      if (doc.role === 'rota') rotaChanged_(me, ctx, calKey, events, props);
+      if (doc.role === 'rota') rotaChanged_(me, ctx, calKey, events, props, doc);
     } catch (err) {
       var msg = 'calendar ' + ((cal && safeName_(cal)) || id) + ': ' + String(err && err.message || err);
       Logger.log(msg);
@@ -554,7 +554,7 @@ function syncRotaLink_(me, ctx) {
   writes = writes.concat(fw.writes);
   fsCommit_(writes);
   props.setProperty(fw.key, fw.value);
-  rotaChanged_(me, ctx, calKey, events, props);
+  rotaChanged_(me, ctx, calKey, events, props, doc);
 }
 
 // The rota link was taken out in the app: its shifts go too, so old ones don't linger for months
@@ -748,8 +748,10 @@ function icsExpand_(r, to) {
 
 // Tell the partner which shifts in the next three weeks were added, removed or changed.
 // Only the days both this run and the last run could see are compared, so the window
-// moving on by a day never looks like a change.
-function rotaChanged_(me, ctx, calKey, events, props) {
+// moving on by a day never looks like a change. Only what the rota's sharing lets them see:
+// nothing for "Nothing", and for "Busy" just the times (never the shift's name).
+function rotaChanged_(me, ctx, calKey, events, props, doc) {
+  var share = (doc && doc.share) || 'busy';
   var now = Date.now();
   var win = { from: now - 864e5, to: now + 21 * 864e5 };
   var map = {};
@@ -765,7 +767,8 @@ function rotaChanged_(me, ctx, calKey, events, props) {
   var before = null;
   try { before = JSON.parse(props.getProperty(key) || 'null'); } catch (err) { before = null; }
   props.setProperty(key, JSON.stringify({ from: win.from, to: win.to, map: map }));
-  if (!before || typeof before !== 'object' || !before.map) return;
+  if (!before || typeof before !== 'object' || !before.map || share === 'none') return;
+  var named = share === 'all';
   var lo = Math.max(before.from, win.from), hi = Math.min(before.to, win.to);
   var inside = function (v) { return v && v[0] >= lo && v[0] <= hi && v[1] > now; };
   var changes = [];
@@ -776,7 +779,7 @@ function rotaChanged_(me, ctx, calKey, events, props) {
     var a = before.map[k], b = map[k];
     if (a && b) {
       if (!inside(a) && !inside(b)) return;
-      if (a[0] !== b[0] || a[1] !== b[1] || a[2] !== b[2]) changes.push({ k: k, what: 'changed', v: b });
+      if (a[0] !== b[0] || a[1] !== b[1] || (named && a[2] !== b[2])) changes.push({ k: k, what: 'changed', v: b });
     } else if (b) {
       if (inside(b)) changes.push({ k: k, what: 'added', v: b });
     } else if (inside(a)) {
@@ -786,7 +789,7 @@ function rotaChanged_(me, ctx, calKey, events, props) {
   if (!changes.length) return;
   var name = (ctx.person && ctx.person.name) || 'Your partner';
   var parts = changes.slice(0, 2).map(function (c) {
-    var label = shiftWords_({ t: c.v[2], s: c.v[0], e: c.v[1] });
+    var label = shiftWords_({ t: named ? c.v[2] : '', s: c.v[0], e: c.v[1] });
     return dayLabel_(c.k.replace(/\+*$/, '')) + ': ' + label + ' ' + c.what + '.';
   });
   if (changes.length > 2) parts.push('And ' + (changes.length - 2) + ' more.');
