@@ -680,7 +680,7 @@ test('something agreed and then moved to another day is only on its new day, not
   assert.ok(it && !it.pending && !/Saving/.test(it.sub));
 });
 
-test('the app icon reaches phones: every icon the page, the manifest and notifications use is saved for offline', async () => {
+test('the app icon reaches phones: every icon the page, the manifest and notifications use is saved for offline, and the service worker changes when one does', async () => {
   const { readFileSync } = await import('node:fs');
   const { execFileSync } = await import('node:child_process');
   const read = (f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
@@ -692,4 +692,11 @@ test('the app icon reaches phones: every icon the page, the manifest and notific
     ...[...sw.matchAll(/'(icons\/[^']+)'/g)].map((m) => m[1])
   ]);
   for (const u of used) assert.ok(shell.includes(`./${u}`), u);
+  // a new icon only replaces the saved one when sw.js itself changes (a new VERSION): it must have changed since
+  let log;
+  try { log = (f) => Number(execFileSync('git', ['log', '-1', '--format=%ct', '--', f], { cwd: new URL('..', import.meta.url) }).toString().trim() || 0); log('sw.js'); } catch (e) { return; }
+  const icons = Math.max(...[...used].map(log));
+  const versionChanged = Number(execFileSync('git', ['log', '-1', '--format=%ct', '-G', "const VERSION = ", '--', 'sw.js'], { cwd: new URL('..', import.meta.url) }).toString().trim() || 0);
+  const uncommitted = execFileSync('git', ['diff', 'HEAD', '--', 'sw.js'], { cwd: new URL('..', import.meta.url) }).toString().includes('const VERSION');
+  assert.ok(uncommitted || versionChanged >= icons, 'sw.js VERSION was not changed after the icons were');
 });
