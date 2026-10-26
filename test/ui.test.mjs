@@ -336,3 +336,15 @@ test('a change to the shared settings shows straight away, even before it reache
   assert.match(await mainText(page), /Walk to the shop/);
   await page.context().close();
 });
+
+test('the week strips put things at the right time on the day the clocks change', async () => {
+  const page = await open('ethan', '#today');
+  // Sunday 28 March 2027: the clocks go forward at 1am. Noon to 1pm sits a third of the way along (6am to midnight).
+  await mods(page, (store) => { store.store.backend.commit([{ type: 'add', path: 'outbox', data: { person: 'ethan', op: 'create', tag: 'add:dst1', byEmail: 'ethan@example.com', done: false, created: Date.now(), event: { title: 'Brunch', day: '2027-03-28', start: '12:00', end: '13:00', allDay: false } } }]); return store.store.backend.ping(); });
+  await page.waitForTimeout(1000);
+  await mods(page, (store, ui) => { ui.calView = 'week'; ui.weekStart = new Date(2027, 2, 22); ui.weekOpen = null; });
+  await go(page, '#calendar');
+  const lefts = await page.locator('.wday').nth(6).locator('.strip').first().locator('.seg-bar').evaluateAll((els) => els.map((e) => e.style.left));
+  assert.ok(lefts.includes('33.33%'), lefts.join(' '));
+  await page.context().close();
+});

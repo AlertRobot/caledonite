@@ -403,8 +403,9 @@ function weekView(state) {
     const d = buildDay(state, k);
     const open = ui.weekOpen === k;
     const rows = [];
-    const dayStart = atTime(k, '00:00').getTime();
-    const pct = (t) => Math.max(0, Math.min(100, ((t - dayStart) / 3600000 - 6) / 18 * 100));
+    // from 6am (by the clock, so the day the clocks change lines up too) to midnight
+    const six = atTime(k, '06:00').getTime();
+    const pct = (t) => Math.max(0, Math.min(100, ((t - six) / 3600000) / 18 * 100));
     const segs = (list) => list.map(([s, e, col]) => {
       const l = pct(s); const r = pct(e);
       if (r <= l) return '';
