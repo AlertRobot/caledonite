@@ -289,6 +289,8 @@ function syncCalendars_(me, ctx, errors) {
   var from = new Date(now.getTime() - DAYS_BACK * 864e5);
   var to = new Date(now.getTime() + DAYS_AHEAD * 864e5);
   var cals = CalendarApp.getAllCalendars();
+  // every account has at least its own calendar: none at all is Google having a moment, not every calendar gone
+  if (!cals || !cals.length) throw new Error('Google returned no calendars this time.');
   var defaultId = CalendarApp.getDefaultCalendar().getId();
   var writes = [];
   var props = PropertiesService.getUserProperties();
@@ -801,6 +803,8 @@ function rotaChanged_(me, ctx, calKey, events, props) {
 // Returns true when something in Google Calendar changed, so the feeds can catch up.
 function processOutbox_(me, ctx) {
   var items = fsQuery_('outbox', [['person', me.person], ['done', false]]).filter(function (it) {
+    // your partner's asks always go to your main account: they can't pick your work calendar
+    if (String(it.data.byEmail || '').toLowerCase() !== ctx.appEmail) return me.main;
     var acc = String(it.data.account || '').toLowerCase();
     return acc ? acc === me.email : me.main;
   });
@@ -1148,7 +1152,8 @@ function fireReminders_(me, ctx, seen) {
 function processJobs_(me, ctx) {
   var now = Date.now();
   var today = Utilities.formatDate(new Date(now), TZ, 'yyyy-MM-dd');
-  var jobs = fsList_(HOUSEHOLD + '/jobs');
+  // only today's open ones: done jobs are kept, and reading them all every 10 minutes adds up
+  var jobs = fsQuery_('jobs', [['done', false], ['day', today]]);
   var props = PropertiesService.getUserProperties();
   var sent = {};
   try { sent = JSON.parse(props.getProperty('job_sent') || '{}'); } catch (e) { sent = {}; }
@@ -1527,6 +1532,11 @@ function processNotify_(ctx) {
   var tokensFor = {};
   due.forEach(function (n) {
     var d = n.data;
+    // only ever one of the two of you (its address builds the path to their phones)
+    if (!Object.prototype.hasOwnProperty.call(ctx.people, String(d.to))) {
+      try { fsCommit_([upd_(HOUSEHOLD + '/notify/' + n.id, { sent: true, sentAt: now, error: 'not for anyone here' }, ['sent', 'sentAt', 'error'])]); } catch (e) { /* the next run tries again */ }
+      return;
+    }
     var who = ctx.people[d.to] || {};
     var settings = who.settings || {};
     // inside the person's quiet hours, or asleep after a night shift: wait (a test is sent straight away)

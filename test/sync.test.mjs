@@ -223,7 +223,8 @@ test("a calendar that's gone from Google leaves Settings after a couple of days"
   ctx.fsCommit_ = (w) => writes.push(...w);
   ctx.docName_ = (p) => p;
   ctx.PropertiesService = { getUserProperties: () => ({ getProperty: () => null, getProperties: () => ({}), setProperties() {}, deleteProperty() {} }) };
-  ctx.CalendarApp = { getAllCalendars: () => [], getDefaultCalendar: () => ({ getId: () => 'p@x' }) };
+  // the account still has its main calendar (read with an error here, which is fine)
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'p@x', getName: () => 'Main' }], getDefaultCalendar: () => ({ getId: () => 'p@x' }) };
   const old = Date.now() - 5 * 864e5;
   ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true }, { calDocs: {
     gone: { account: 'e@x.com', lastSeen: old }, recent: { account: 'e@x.com', lastSeen: Date.now() - 3600e3 },
@@ -306,4 +307,52 @@ test('the rules: what is just for you (reminders, private countdowns) only you c
   const store = readFileSync(new URL('../js/store.js', import.meta.url), 'utf8');
   const sr = store.slice(store.indexOf('async setReminder('), store.indexOf('async removeReminder('));
   assert.match(sr, /path: privatePath\(\)/);
+});
+
+test("your partner's asks are done by your main account only, never one they pick (like your work account)", () => {
+  const calendar = fakeCalendar([]);
+  const item = { person: 'ethan', op: 'create', tag: 'both:x', byEmail: 's@x.com', account: 'ethan@work.com', done: false, created: 1, event: { title: 'Tea', day: '2026-11-07', start: '10:00', end: '11:00' } };
+  ctx.Calendar = calendar;
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'primary@x', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'primary@x' }) };
+  ctx.fsQuery_ = () => [{ id: 'o1', data: item }];
+  ctx.fsCommit_ = () => {};
+  ctx.processOutbox_({ email: 'ethan@work.com', person: 'ethan', main: false }, { appEmail: 'e@x.com', calDocs: {} });
+  assert.equal(calendar.events.length, 0, 'not by the work account');
+  ctx.processOutbox_({ email: 'e@x.com', person: 'ethan', main: true }, { appEmail: 'e@x.com', calDocs: {} });
+  assert.equal(calendar.events.length, 1, 'by the main one');
+  // your own asks still go to the account you chose
+  const own = Object.assign({}, item, { byEmail: 'e@x.com', tag: 'add:y' });
+  ctx.fsQuery_ = () => [{ id: 'o2', data: own }];
+  ctx.processOutbox_({ email: 'ethan@work.com', person: 'ethan', main: false }, { appEmail: 'e@x.com', calDocs: {} });
+  assert.equal(calendar.events.length, 2);
+});
+
+test('a notification for someone who is not one of you is never sent', () => {
+  const writes = []; const listed = [];
+  ctx.fsQuery_ = (coll) => (coll === 'notify' ? [{ id: 'n1', data: { to: 'ethan/tokens/../../x', kind: 'test', title: 'x', sendAfter: 0, sent: false }, updateTime: 't' }] : []);
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.fsList_ = (p) => { listed.push(p); return []; };
+  ctx.docName_ = (p) => p;
+  ctx.processNotify_({ people: { ethan: { settings: {} }, sophie: { settings: {} } } });
+  assert.deepEqual(listed, []);
+  assert.equal(writes[0].update.fields.sent.booleanValue, true);
+});
+
+test('Google returning no calendars at all does not empty your calendars in the app', () => {
+  ctx.CalendarApp = { getAllCalendars: () => [], getDefaultCalendar: () => ({ getId: () => 'primary@x' }) };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.PropertiesService = { getUserProperties: () => ({ getProperties: () => ({ h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h' }) }), getProperty: () => null, setProperties() {}, deleteProperty() {} }) };
+  assert.throws(() => ctx.syncCalendars_({ person: 'ethan', email: 'e@x.com', main: true }, { calDocs: {} }, []), /no calendars/);
+  assert.equal(writes.length, 0);
+});
+
+test("job reminders read only today's open jobs", () => {
+  const asked = [];
+  ctx.fsQuery_ = (coll, eqs) => { asked.push([coll, eqs]); return []; };
+  ctx.fsList_ = () => { throw new Error('should not list every job'); };
+  ctx.PropertiesService = { getUserProperties: () => ({ getProperty: () => null, setProperty() {} }) };
+  ctx.processJobs_({ person: 'ethan', email: 'e@x.com', main: true }, { settings: {}, people: { ethan: {}, sophie: {} } });
+  assert.equal(asked[0][0], 'jobs');
+  assert.deepEqual(JSON.parse(JSON.stringify(asked[0][1].map((f) => f[0]))), ['done', 'day']);
 });
