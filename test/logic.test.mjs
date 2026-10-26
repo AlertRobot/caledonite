@@ -188,3 +188,19 @@ test('the rules: you read only your own outbox, and the app asks only for that',
   assert.match(ob, /allow read: if member\(\) && resource\.data\.byEmail == myEmail\(\);/);
   assert.match(readFileSync(new URL('../js/firebase.js', import.meta.url), 'utf8'), /c\('outbox'\), fs\.where\('byEmail', '==', email\)/);
 });
+
+test('a countdown to something private shows only on your own Today', () => {
+  const st = load({ events: [timed('ethan', 'primary', sat, '10:00', '11:00', { t: 'Party' })] });
+  st.calendars.ethan__secret = { owner: 'ethan', calKey: 'secret', name: 'Private', share: 'busy', role: 'normal', layer: 'own' };
+  st.calendars.ethan__work = { owner: 'ethan', calKey: 'work', name: 'Work', share: 'hours', role: 'work', layer: 'own' };
+  assert.equal(L.countdownShared(st, { owner: 'ethan', calKey: 'primary', title: 'Party' }), true);
+  assert.equal(L.countdownShared(st, { owner: 'ethan', calKey: 'secret', title: 'Job interview' }), false);
+  assert.equal(L.countdownShared(st, { owner: 'ethan', calKey: 'work', title: 'Big launch' }), false);
+  assert.equal(L.countdownShared(st, { owner: 'ethan', calKey: 'secret', tag: 'both:x', title: 'Trip' }), true);
+  assert.equal(L.countdownShared(st, { owner: 'sophie', calKey: 'primary', title: 'Her thing' }), true);
+  // and Sophie's Today leaves out one that isn't shared
+  st.people.ethan.countdowns = { c1: { title: 'Job interview', date: sat, shared: false }, c2: { title: 'Party', date: sat, shared: true } };
+  const asSophie = Object.assign({}, st, { me: 'sophie', partner: 'ethan' });
+  const titles = L.countdowns(asSophie).map((c) => c.title);
+  assert.ok(titles.includes('Party') && !titles.includes('Job interview'));
+});

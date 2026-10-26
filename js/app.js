@@ -11,7 +11,7 @@ import { applyLook, setLook } from './theme.js';
 import { FIREBASE, APP } from './config.js';
 import { icon } from './ui.js';
 import { dayKey, addDays, fromDayKey, mondayOf, esc, minutesOf, pad } from './util.js';
-import { freeSlots, settingsOf, shiftFor, SHIFT_ORDER, nameOf, reminderFor, reminderId, quietNight, repeatOf, leaveDaysFor, nextBothFree } from './logic.js';
+import { freeSlots, settingsOf, shiftFor, SHIFT_ORDER, nameOf, reminderFor, reminderId, quietNight, repeatOf, leaveDaysFor, nextBothFree, countdownShared } from './logic.js';
 import { whenLabel } from './store.js';
 
 const root = document.getElementById('app');
@@ -316,7 +316,8 @@ const H = {
     const id = reminderId(ui.ev.ref);
     if (el.dataset.v === 'off') return run(actions.removeCountdown(id), 'Countdown removed.');
     const date = src.allDay ? (src.startKey || dayKey(src.start)) : dayKey(src.start);
-    run(actions.setCountdown({ id, title: (it && it.title) || src.title, date, ref: ui.ev.ref }), 'It counts down on Today now.');
+    const shared = countdownShared(st, src);
+    run(actions.setCountdown({ id, title: (it && it.title) || src.title, date, ref: ui.ev.ref, shared }), shared ? 'It counts down on Today now, for you both.' : `It counts down on your Today now. ${nameOf(st, st.partner)} doesn’t see it, as it’s private.`);
   },
   // ----- every other Friday off -----
   altOffToggle: () => {

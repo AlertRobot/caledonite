@@ -896,6 +896,13 @@ export function leaveSummary(state, pid, now = new Date()) {
 }
 
 // ---------- countdowns ----------
+// A countdown shows on both your Todays only when your partner can already see the event's name
+export function countdownShared(state, ev) {
+  if (!ev || !ev.owner || ev.owner !== state.me) return true;
+  if (ev.tag && (ev.tag.startsWith('both:') || ev.tag.startsWith('req:'))) return true;
+  const c = calOf(state, ev);
+  return c.share === 'all' && c.role !== 'work' && !ev.busy;
+}
 export function countdowns(state, now = new Date()) {
   const out = [];
   const today = startOfDay(now);

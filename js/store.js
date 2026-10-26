@@ -340,9 +340,9 @@ export const actions = {
   },
 
   // ----- countdowns (on your own record, shown to you both) -----
-  async setCountdown({ id, title, date, ref }) {
+  async setCountdown({ id, title, date, ref, shared = true }) {
     const st = store.state;
-    await commit([{ type: 'update', path: `people/${st.me}`, data: { countdowns: { [id]: { title, date, ref: ref || null, shared: true, created: now() } } } }], false);
+    await commit([{ type: 'update', path: `people/${st.me}`, data: { countdowns: { [id]: { title, date, ref: ref || null, shared: !!shared, created: now() } } } }], false);
   },
   async removeCountdown(id) {
     await commit([{ type: 'unset', path: `people/${store.state.me}`, field: `countdowns.${id}` }], false);
