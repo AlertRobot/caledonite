@@ -411,7 +411,7 @@ function readEvents_(cal, id, from, to) {
         var res = Calendar.Events.list(id, {
           timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: true, showDeleted: false, maxResults: 2500,
           pageToken: token || undefined,
-          fields: 'nextPageToken,items(id,iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,attendees(self,responseStatus))'
+          fields: 'nextPageToken,items(id,iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,visibility,attendees(self,responseStatus))'
         });
         (res.items || []).forEach(function (it) { var o = normApi_(it); if (o) out.push(o); });
         token = res.nextPageToken;
@@ -453,7 +453,8 @@ function normApi_(it) {
   if (it.location) o.l = String(it.location).slice(0, 80);
   var m = desc.match(/\[caledonite:([^\]\s]+)\]/);
   if (m) o.tag = m[1];
-  if (/#busy\b/i.test(desc)) o.pb = 1;
+  // "#busy", or marked Private in Google Calendar: your partner only ever sees "Busy"
+  if (/#busy\b/i.test(desc) || it.visibility === 'private' || it.visibility === 'confidential') o.pb = 1;
   return o;
 }
 
@@ -480,6 +481,10 @@ function norm_(ev) {
   var m = desc.match(/\[caledonite:([^\]\s]+)\]/);
   if (m) o.tag = m[1];
   if (/#busy\b/i.test(desc)) o.pb = 1;
+  try {
+    var vis = ev.getVisibility();
+    if (vis === CalendarApp.Visibility.PRIVATE || vis === CalendarApp.Visibility.CONFIDENTIAL) o.pb = 1;
+  } catch (e) { /* ignore */ }
   return o;
 }
 
@@ -766,7 +771,8 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     if (s < win.from || s > win.to) return;
     var k = evStartKey_(e);
     while (map[k]) k += '+';
-    map[k] = [s, en, e.t || 'Shift'];
+    // a shift marked Private or #busy is never named, not even by a change to its name
+    map[k] = [s, en, e.pb ? '' : (e.t || 'Shift')];
   });
   var key = 'rota_' + calKey;
   var before = null;

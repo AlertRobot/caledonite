@@ -545,3 +545,43 @@ test('changes are done in the order they reached the database, whatever the phon
   ctx.processOutbox_({ email: 'e@x.com', person: 'ethan', main: true }, { appEmail: 'e@x.com', calDocs: {} });
   assert.equal(calendar.events.length, 0, 'the pencilled-in event was added, then taken out');
 });
+
+// ---------- round 5 checks ----------
+function withDigest() {
+  const U = ctx.Utilities;
+  const crypto = require_('node:crypto');
+  U.computeDigest = (alg, s) => [...crypto.createHash('md5').update(s, 'utf8').digest()];
+  U.base64EncodeWebSafe = (b) => Buffer.from(b).toString('base64url');
+  U.DigestAlgorithm = { MD5: 'md5' }; U.Charset = { UTF_8: 'utf8' };
+  U.getUuid = () => 'u' + Math.random();
+}
+
+test('an event marked Private in Google Calendar is only "Busy" in your partner\'s copy, even from a calendar shared as Everything', () => {
+  withDigest();
+  const ev = (visibility) => ctx.normApi_({ id: 'g1', iCalUID: 'g1@google.com', summary: 'Hospital appointment', location: 'Ward 7', visibility, start: { dateTime: '2026-11-06T10:00:00Z' }, end: { dateTime: '2026-11-06T11:00:00Z' } });
+  for (const v of ['private', 'confidential']) {
+    const shared = ctx.shareFilter_({ share: 'all' }, [ev(v)]);
+    assert.equal(shared[0].t, 'Busy', v);
+    assert.equal(shared[0].l, undefined, v);
+  }
+  assert.equal(ctx.shareFilter_({ share: 'all' }, [ev('default')])[0].t, 'Hospital appointment');
+  // and the same when the slow way (CalendarApp) is used
+  ctx.CalendarApp = { Visibility: { PRIVATE: 'P', CONFIDENTIAL: 'C', DEFAULT: 'D' }, GuestStatus: { NO: 'NO' } };
+  const old = { getMyStatus: () => null, getDescription: () => '', getStartTime: () => new Date('2026-11-06T10:00:00Z'), getEndTime: () => new Date('2026-11-06T11:00:00Z'), getId: () => 'x@google.com', getTitle: () => 'Hospital appointment', isRecurringEvent: () => false, isAllDayEvent: () => false, getLocation: () => '', getVisibility: () => 'P' };
+  assert.equal(ctx.shareFilter_({ share: 'all' }, [ctx.norm_(old)])[0].t, 'Busy');
+});
+test('a rota shift marked Private: a change to its name alone is not sent to your partner', () => {
+  withDigest();
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 3 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const { api } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const sh = (t) => [{ t, pb: 1, s: ctx.localTime_(day, '07:30'), e: ctx.localTime_(day, '20:00') }];
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', sh('Clinic A'), api, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', sh('Clinic B'), api, { share: 'all' });
+  assert.equal(writes.length, 0);
+});
