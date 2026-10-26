@@ -297,6 +297,7 @@ function syncCalendars_(me, ctx, errors) {
   var pending = {};   // property updates, saved only once the writes have gone through
   var toForget = [];
   var seenCalKeys = {};
+  var handledElsewhere = {};
   var seen = [];
   var count = 0;
   for (var i = 0; i < cals.length; i++) {
@@ -314,8 +315,9 @@ function syncCalendars_(me, ctx, errors) {
       };
       var doc = ctx.calDocs[calKey];
       var docPath = HOUSEHOLD + '/calendars/' + me.person + '__' + calKey;
-      // the same calendar seen from another of this person's accounts: let that account handle it
-      if (doc && doc.account && doc.account !== me.email && Date.now() - (doc.lastSeen || 0) < 2 * 864e5) { delete seenCalKeys[calKey]; continue; }
+      // the same calendar seen from another of this person's accounts: let that account handle it. It marks the
+      // calendar as seen at least every 6 hours; after 12 without, this account takes over (keeping its settings)
+      if (doc && doc.account && doc.account !== me.email && Date.now() - (doc.lastSeen || 0) < 12 * 3600e3) { delete seenCalKeys[calKey]; handledElsewhere[calKey] = true; continue; }
       // calendars set up before family calendars were recognised
       if (doc && !doc.userSet && doc.layer === 'own' && isFamilyCal_(id, meta.name)) {
         writes.push(upd_(docPath, { layer: 'family', share: 'all' }, ['layer', 'share']));
@@ -349,9 +351,12 @@ function syncCalendars_(me, ctx, errors) {
     if (k.indexOf('h_') !== 0) return;
     var ck = k.slice(2);
     if (ck === 'rotalink' || seenCalKeys[ck]) return;
-    var old = {};
-    try { old = JSON.parse(all[k] || '{}'); } catch (e) { old = {}; }
-    Object.keys(old).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
+    // now written by the other account, at the same addresses: just forget them here
+    if (!handledElsewhere[ck]) {
+      var old = {};
+      try { old = JSON.parse(all[k] || '{}'); } catch (e) { old = {}; }
+      Object.keys(old).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
+    }
     toForget.push(k);
   });
   // and their records, once they've been gone a couple of days (so they leave Settings too)

@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { createRequire } from 'node:module';
+const require_ = createRequire(import.meta.url);
 
 // London wall-clock <-> instants, enough for parseDate/formatDate
 function parts(d, tz) {
@@ -476,4 +478,38 @@ test("rota change notifications show your partner only what the rota's sharing l
   assert.equal(busy.length, 1);
   assert.doesNotMatch(busy[0], /Ward/);
   assert.deepEqual(run('busy', before, renamed), [], 'a new name only is not news when shared as Busy');
+});
+
+test("a calendar two of your accounts can see: the one that isn't syncing it never deletes what the other wrote", () => {
+  const U = ctx.Utilities;
+  const crypto = require_('node:crypto');
+  U.computeDigest = (alg, s) => [...crypto.createHash('md5').update(s, 'utf8').digest()];
+  U.base64EncodeWebSafe = (b) => Buffer.from(b).toString('base64url');
+  U.DigestAlgorithm = { MD5: 'md5' }; U.Charset = { UTF_8: 'utf8' };
+  const calId = 'ethan@work.example';
+  const key = ctx.shortKey_(calId);
+  const paths = { [`households/main/privateFeeds/ethan__${key}__2026-11`]: 'h', [`households/main/sharedFeeds/ethan__${key}__2026-11`]: 'h' };
+  const sync = (lastSeen) => {
+    const store = { [`h_${key}`]: JSON.stringify(paths) };
+    ctx.PropertiesService = { getUserProperties: () => ({ getProperty: (k) => store[k] ?? null, getProperties: () => Object.assign({}, store), setProperties: (o) => Object.assign(store, o), deleteProperty: (k) => { delete store[k]; } }) };
+    ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => calId, getName: () => 'Work', getColor: () => '#123456', isOwnedByMe: () => false }], getDefaultCalendar: () => ({ getId: () => 'e@x.com' }) };
+    ctx.Calendar = { Events: { list: () => ({ items: [] }) } };
+    const writes = [];
+    ctx.fsCommit_ = (w) => writes.push(...w);
+    ctx.docName_ = (p) => p;
+    ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true }, { appEmail: 'e@x.com', calDocs: {
+      [key]: { owner: 'ethan', calKey: key, calId, name: 'Work', color: '#123456', canWrite: false, primary: false, account: 'ethan@work.example', lastSeen, show: true, share: 'none', role: 'work', layer: 'own', userSet: true }
+    } }, []);
+    return { writes, store };
+  };
+  // the work account synced it an hour ago: leave its copies alone, and stop remembering them here
+  let r = sync(Date.now() - 3600e3);
+  assert.deepEqual(r.writes.filter((w) => w.delete), []);
+  assert.equal(r.store[`h_${key}`], undefined);
+  // the work account hasn't seen it for half a day: this one takes over, keeping what you chose
+  r = sync(Date.now() - 13 * 3600e3);
+  const rec = r.writes.find((w) => w.update && w.update.name === `households/main/calendars/ethan__${key}`);
+  assert.ok(rec, 'taken over');
+  assert.equal(rec.update.fields.account.stringValue, 'e@x.com');
+  assert.ok(!rec.updateMask.fieldPaths.includes('share'), 'its sharing choice is kept');
 });
