@@ -1032,11 +1032,14 @@ export function inQuietHours(s, now = new Date()) {
   const nightStart = a > b && m < b ? dayKey(addDays(now, -1)) : dayKey(now);
   return q.skip !== nightStart;
 }
-// the date the coming (or current) quiet night starts on, for "not tonight"
+// the date the coming (or current) quiet night starts on, for "not tonight" (the calendar sync skips the quiet
+// hours that start on that date)
 export function quietNight(s, now = new Date()) {
   const q = s.quiet;
   const m = now.getHours() * 60 + now.getMinutes();
   const a = minutesOf(q.from || '23:00'); const b = minutesOf(q.to || '07:00');
-  return a > b && m < b ? dayKey(addDays(now, -1)) : dayKey(now);
+  if (a > b) return m < b ? dayKey(addDays(now, -1)) : dayKey(now);
+  // quiet hours that start after midnight (12:30am to 7am): once today's are over, the next start tomorrow
+  return m >= b ? dayKey(addDays(now, 1)) : dayKey(now);
 }
 

@@ -418,3 +418,18 @@ test("fonts come from Caledonite's own saved copies, never another app's, and a 
   await new Promise((res) => setTimeout(res, 10));
   assert.deepEqual(r.puts, []);
 });
+
+test('"Not tonight" works for quiet hours that start after midnight, tapped in the evening', () => {
+  const s = { quiet: { on: true, from: '00:30', to: '07:00', skip: null } };
+  const evening = atTime(sat, '22:00');
+  const sun = dayKey(addDays(new Date(sat + 'T12:00'), 1));
+  assert.equal(L.quietNight(s, evening), sun, 'the quiet hours coming next start on Sunday');
+  const skipped = { quiet: Object.assign({}, s.quiet, { skip: L.quietNight(s, evening) }) };
+  assert.equal(L.inQuietHours(skipped, atTime(sun, '01:00')), false);
+  // the usual 11pm to 7am still means tonight, in the evening and in the small hours
+  const usual = { quiet: { on: true, from: '23:00', to: '07:00' } };
+  assert.equal(L.quietNight(usual, evening), sat);
+  assert.equal(L.quietNight(usual, atTime(sun, '02:00')), sat);
+  assert.equal(L.quietNight(s, atTime(sun, '00:10')), sun, 'before they start that night');
+  assert.equal(L.quietNight(s, atTime(sun, '03:00')), sun, 'while they are on');
+});
