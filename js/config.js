@@ -1,6 +1,6 @@
-// Calendite settings. The Firebase part is filled in during setup.
+// Caledonite settings. The Firebase part is filled in during setup.
 export const APP = {
-  name: 'Calendite',
+  name: 'Caledonite',
   version: '1.0.0'
 };
 

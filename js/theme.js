@@ -12,7 +12,7 @@ export const PALETTES = {
   sunset: { name: 'Sunset', swatch: '#B84E15' },
   slate: { name: 'Slate', swatch: '#27272A' }
 };
-const KEY = 'calendite.look';
+const KEY = 'caledonite.look';
 export function getLook() {
   let l = {};
   try { l = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { l = {}; }

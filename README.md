@@ -1,4 +1,4 @@
-# Calendite
+# Caledonite
 
 Your calendars, side by side. A phone app (installable from Chrome) for Ethan and Sophie that pulls everything from Google Calendar, shows what each other is up to, finds time you're both free, handles requests (plan something, favours, keep time free, heads up), and knows about shifts and sleep after nights.
 
@@ -19,7 +19,7 @@ Try it with made-up data: open the app with `?demo=ethan` or `?demo=sophie` on t
    - Cloud Messaging: under Web Push certificates, generate a key pair and copy the key into `js/config.js` (`FIREBASE.vapidKey`).
    - Project settings, Service accounts: generate a new private key (a JSON file). Keep it private.
 2. **Open the app**, sign in with Google and fill in the first-time form (your name, your partner's name and Google email).
-3. **Sync script** (script.google.com, signed in as Ethan): new project called "Calendite sync". Paste in `apps-script/Code.gs`, and in Project Settings tick "Show appsscript.json" and paste `apps-script/appsscript.json`.
+3. **Sync script** (script.google.com, signed in as Ethan): new project called "Caledonite sync". Paste in `apps-script/Code.gs`, and in Project Settings tick "Show appsscript.json" and paste `apps-script/appsscript.json`.
    - Script properties: `PROJECT_ID` (the Firebase project id) and `SA_JSON` (the whole service account JSON, pasted by you).
    - Deploy, New deployment, Web app, execute as Me, access Anyone. Copy the web app address into a `WEBAPP_URL` script property.
    - Run `setupProject` and allow access when Google asks.

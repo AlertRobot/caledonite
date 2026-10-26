@@ -57,7 +57,7 @@ function settingsHome(state) {
     <p class="small muted pad-x">Settings are saved to your account, so they follow you to a new phone. Your theme is just for this phone.</p>`;
 }
 function fmtHM(hm) { return fmtTime(atTime('2000-01-01', hm || '00:00')); }
-function hasPush() { try { return localStorage.getItem('calendite.push') === '1' && Notification.permission === 'granted'; } catch (e) { return false; } }
+function hasPush() { try { return localStorage.getItem('caledonite.push') === '1' && Notification.permission === 'granted'; } catch (e) { return false; } }
 
 // ---------- calendars ----------
 const ROLE_OPTIONS = [
@@ -108,7 +108,7 @@ function secCalendars(state) {
     out.push(`<h2 class="h4">${esc(nameOf(state, P))}'s calendars</h2>
       <div class="card flush">${theirs.length ? theirs.map((c) => `<div class="list-row"><span class="dot" style="background:${esc(c.color || 'var(--orange)')}"></span><span class="grow col"><span class="b">${esc(c.name)}</span><span class="small muted">You see ${esc(SHORT[c.share] || 'nothing')}. ${esc(nameOf(state, P))} chooses this.</span></span></div>`).join('') : `<p class="pad muted">${esc(nameOf(state, P))} hasn't connected a calendar yet.</p>`}</div>`);
   }
-  out.push(`<div class="card stack-s"><span class="b">Moving from TimeTree?</span><p class="small muted">TimeTree no longer lets other apps link to it, so it can't sync. Put upcoming TimeTree events into Google Calendar (or add them here) once, then Calendite takes over.</p></div>`);
+  out.push(`<div class="card stack-s"><span class="b">Moving from TimeTree?</span><p class="small muted">TimeTree no longer lets other apps link to it, so it can't sync. Put upcoming TimeTree events into Google Calendar (or add them here) once, then Caledonite takes over.</p></div>`);
   return out.join('');
 }
 function lastRunFor(state, pid, acc) {
@@ -138,11 +138,11 @@ function connectGuide(state) {
   const url = state.household.scriptUrl || '';
   return `<div class="card stack">
     <span class="h3">Connect your Google Calendar</span>
-    <p class="muted">Calendite reads your calendars with a small Google script that runs on your own account. It takes about two minutes, once.</p>
+    <p class="muted">Caledonite reads your calendars with a small Google script that runs on your own account. It takes about two minutes, once.</p>
     <ol class="steps">
-      <li>${url ? `Open <a href="${esc(url)}" target="_blank" rel="noopener">the Calendite sync script</a>` : 'Open the Calendite sync script (Ethan can share the link)'} while signed in to your Google account.</li>
+      <li>${url ? `Open <a href="${esc(url)}" target="_blank" rel="noopener">the Caledonite sync script</a>` : 'Open the Caledonite sync script (Ethan can share the link)'} while signed in to your Google account.</li>
       <li>At the top, pick <b>connectMe</b> in the list, then press <b>Run</b>.</li>
-      <li>Google asks for permission. Choose your account, then <b>Advanced</b>, then <b>Go to Calendite sync</b>, then <b>Allow</b>.</li>
+      <li>Google asks for permission. Choose your account, then <b>Advanced</b>, then <b>Go to Caledonite sync</b>, then <b>Allow</b>.</li>
       <li>Come back here. Your calendars appear within a minute.</li>
     </ol>
   </div>`;
@@ -291,7 +291,7 @@ function secAccount(state) {
   </div>`);
   if (P) {
     out.push(`<div class="card stack-s pad"><label for="p-email" class="b">${esc(nameOf(state, P))}'s Google email</label>
-      <p class="small muted">${esc(nameOf(state, P))} signs in with this. Only the two of you can open Calendite.</p>
+      <p class="small muted">${esc(nameOf(state, P))} signs in with this. Only the two of you can open Caledonite.</p>
       <div class="row"><input id="p-email" class="grow" type="email" data-bind="settings.partnerEmailDraft" value="${esc(ui.settings.partnerEmailDraft || state.people[P].email || '')}" placeholder="name@gmail.com"><button type="button" class="btn" data-act="savePartnerEmail">Save</button></div></div>`);
   }
   const linked = (h.linked || []).filter((x) => x.person === me);
@@ -316,7 +316,7 @@ export function viewSignedOut() {
     <span class="logo">${icon.gem(56)}</span>
     <h1 class="h1">${esc(APP.name)}</h1>
     <p class="lead">Your calendars, side by side. See what each other is up to, find time together, and ask each other things.</p>
-    ${ready ? '<button type="button" class="btn big-btn" data-act="signIn">Sign in with Google</button>' : '<p class="note-box">Calendite isn’t connected to its database yet. You can try the demo.</p>'}
+    ${ready ? '<button type="button" class="btn big-btn" data-act="signIn">Sign in with Google</button>' : '<p class="note-box">Caledonite isn’t connected to its database yet. You can try the demo.</p>'}
     <div class="row-wrap center"><a class="btn sec" href="?demo=ethan">Try the demo as Ethan</a><a class="btn sec" href="?demo=sophie">Try it as Sophie</a></div>
     ${ui.signInError ? `<p class="note-box">${esc(ui.signInError)}</p>` : ''}
   </div>`;

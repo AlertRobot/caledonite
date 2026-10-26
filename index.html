@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Calendite</title>
+<title>Caledonite</title>
 <meta name="description" content="Your two calendars, side by side.">
 <meta name="theme-color" content="#F3F5F8">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Calendite">
+<meta name="apple-mobile-web-app-title" content="Caledonite">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -18,7 +18,7 @@
 <link rel="stylesheet" href="css/app.css">
 <script>
   // apply the saved theme before anything draws, so there's no flash
-  try { var l = JSON.parse(localStorage.getItem('calendite.look') || '{}'); var r = document.documentElement;
+  try { var l = JSON.parse(localStorage.getItem('caledonite.look') || '{}'); var r = document.documentElement;
     if (l.theme) r.dataset.theme = l.theme; if (l.palette) r.dataset.palette = l.palette;
     var dark = l.theme === 'starship' || l.theme === 'dragonfire' || ((!l.theme || l.theme === 'classic') && (l.mode === 'dark' || ((!l.mode || l.mode === 'auto') && matchMedia('(prefers-color-scheme: dark)').matches)));
     r.dataset.mode = dark ? 'dark' : 'light'; } catch (e) {}
@@ -26,7 +26,7 @@
 </head>
 <body>
 <div id="app"></div>
-<noscript>Calendite needs JavaScript turned on.</noscript>
+<noscript>Caledonite needs JavaScript turned on.</noscript>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

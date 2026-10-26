@@ -1,4 +1,4 @@
-// Calendite: start-up, screens, taps and typing.
+// Caledonite: start-up, screens, taps and typing.
 import { store, actions, setPhase } from './store.js';
 import { ui, resetAsk, resetAdd } from './uistate.js';
 import { viewToday, viewCalendar, waitingForMe } from './views-main.js';
@@ -347,7 +347,7 @@ async function boot() {
       store.backend = await createFirebaseBackend();
     } catch (e) {
       console.error(e);
-      ui.signInError = 'Couldn’t reach Calendite’s server. Check your connection and reload.';
+      ui.signInError = 'Couldn’t reach Caledonite’s server. Check your connection and reload.';
       setPhase('signed-out');
     }
   }

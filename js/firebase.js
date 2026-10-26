@@ -106,7 +106,7 @@ export async function createFirebaseBackend() {
       const me = store.state.me;
       const id = await sha1(token);
       await fs.setDoc(ref(`people/${me}/tokens/${id}`), { token, ua: navigator.userAgent.slice(0, 200), created: Date.now() });
-      try { localStorage.setItem('calendite.push', '1'); } catch (e) { /* ignore */ }
+      try { localStorage.setItem('caledonite.push', '1'); } catch (e) { /* ignore */ }
       return { ok: true };
     },
     async signIn() {

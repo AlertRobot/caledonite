@@ -1,5 +1,5 @@
 /**
- * Calendite calendar sync.
+ * Caledonite calendar sync.
  *
  * One copy of this script serves everyone. Each person, and each extra Google account
  * (a second Gmail, a work Google account), opens it once while signed in and runs
@@ -38,11 +38,11 @@ function connectMe() {
 function setupProject() {
   var url = prop_('WEBAPP_URL', true) || ScriptApp.getService().getUrl();
   var hh = fsGet_(HOUSEHOLD);
-  if (!hh) throw new Error('Open Calendite and finish the first-time setup first.');
+  if (!hh) throw new Error('Open Caledonite and finish the first-time setup first.');
   var patch = { scriptUrl: 'https://script.google.com/d/' + ScriptApp.getScriptId() + '/edit' };
   if (url) patch.pingUrl = url;
   fsCommit_([upd_(HOUSEHOLD, patch)]);
-  Logger.log('Saved the sync address in Calendite. Now connecting this account...');
+  Logger.log('Saved the sync address in Caledonite. Now connecting this account...');
   return connectMe();
 }
 
@@ -64,7 +64,7 @@ function doPost(e) {
   try { syncAll(); } catch (err) { return text_('error: ' + err.message); }
   return text_('ok');
 }
-function doGet() { return text_('Calendite sync is running.'); }
+function doGet() { return text_('Caledonite sync is running.'); }
 function text_(s) { return ContentService.createTextOutput(s).setMimeType(ContentService.MimeType.TEXT); }
 
 // ===================== the sync =====================
@@ -103,7 +103,7 @@ function whoAmI_() {
   for (var j = 0; j < linked.length; j++) {
     if (String(linked[j].email || '').toLowerCase() === email) return { email: email, person: linked[j].person, main: false, people: people };
   }
-  throw new Error(email + ' is not part of Calendite. Add it in Calendite: Settings, Account, then run connectMe again.');
+  throw new Error(email + ' is not part of Caledonite. Add it in Caledonite: Settings, Account, then run connectMe again.');
 }
 
 function loadCtx_(me) {
@@ -206,7 +206,7 @@ function norm_(ev) {
   }
   var loc = ev.getLocation();
   if (loc) o.l = String(loc).slice(0, 80);
-  var m = desc.match(/\[calendite:([^\]\s]+)\]/);
+  var m = desc.match(/\[caledonite:([^\]\s]+)\]/);
   if (m) o.tag = m[1];
   if (/#busy\b/i.test(desc)) o.pb = 1;
   return o;
@@ -354,7 +354,7 @@ function rotaChanged_(me, ctx, calKey, events, props) {
   var name = (ctx.person && ctx.person.name) || 'Your partner';
   Object.keys(ctx.people).forEach(function (pid) {
     if (pid === me.person) return;
-    fsCommit_([upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: pid, kind: 'rota', title: name + "'s rota has changed", body: 'Open Calendite to see the new shifts.', link: '#calendar', sendAfter: Date.now(), sent: false, created: Date.now() })]);
+    fsCommit_([upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: pid, kind: 'rota', title: name + "'s rota has changed", body: 'Open Caledonite to see the new shifts.', link: '#calendar', sendAfter: Date.now(), sent: false, created: Date.now() })]);
   });
 }
 
@@ -395,10 +395,10 @@ function createEvent_(me, ctx, o) {
   var ev = o.event || {};
   var cal = targetCalendar_(ctx, ev.calKey);
   var tag = o.tag || ('app:' + Utilities.getUuid().slice(0, 8));
-  var desc = 'Added by Calendite [calendite:' + tag + ']' + (ev.busyOnly ? ' #busy' : '');
+  var desc = 'Added by Caledonite [caledonite:' + tag + ']' + (ev.busyOnly ? ' #busy' : '');
   var day = Utilities.parseDate(ev.day + ' 12:00', TZ, 'yyyy-MM-dd HH:mm');
   // already there? (a retry after a time-out)
-  var existing = cal.getEventsForDay(day).filter(function (x) { return (x.getDescription() || '').indexOf('[calendite:' + tag + ']') >= 0; });
+  var existing = cal.getEventsForDay(day).filter(function (x) { return (x.getDescription() || '').indexOf('[caledonite:' + tag + ']') >= 0; });
   if (existing.length) return { eventId: existing[0].getId(), calId: cal.getId(), already: true };
   var created;
   if (ev.allDay) {
@@ -463,7 +463,7 @@ function processNotify_(ctx) {
     if (d.kind && notif[d.kind] === false) return;
     if (!tokensFor[d.to]) tokensFor[d.to] = fsList_(HOUSEHOLD + '/people/' + d.to + '/tokens');
     tokensFor[d.to].forEach(function (t) {
-      var code = sendPush_(t.data.token, { title: d.title || 'Calendite', body: d.body || '', link: d.link || '#today', tag: n.id });
+      var code = sendPush_(t.data.token, { title: d.title || 'Caledonite', body: d.body || '', link: d.link || '#today', tag: n.id });
       if (code === 404 || code === 410) fsCommit_([{ 'delete': docName_(HOUSEHOLD + '/people/' + d.to + '/tokens/' + t.id) }]);
     });
   });

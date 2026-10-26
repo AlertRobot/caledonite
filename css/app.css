@@ -1,4 +1,4 @@
-/* Calendite. Body text is always Atkinson Hyperlegible; themes change colours, headings and decoration. */
+/* Caledonite. Body text is always Atkinson Hyperlegible; themes change colours, headings and decoration. */
 :root {
   --font: 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --head: 'Bricolage Grotesque', var(--font);
