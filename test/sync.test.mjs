@@ -1533,3 +1533,26 @@ test('a change Google keeps turning away for a moment is tried for a day, not dr
   // something wrong with the change itself: after 5 tries, as before
   assert.equal(run('API call to calendar.events.insert failed with error: Invalid start time.', recent).done.booleanValue, true);
 });
+
+test('a rota shared as working hours, saved before all-day entries were left out of it, never says they were removed', () => {
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 3 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const L = (hm) => ctx.localTime_(day, hm);
+  // as an earlier version saved it: a study day (all day) listed first, then a long day
+  const saved = { from: now - 864e5, to: now + 21 * 864e5, map: { [day]: [L('00:00'), ctx.localTime_(ctx.keyPlus_(day, 1), '00:00'), 'Study day'], [day + '+']: [L('07:30'), L('20:00'), 'Long day'] } };
+  const { api } = smallProps({ rota_rota: JSON.stringify(saved) });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  const evs = [{ t: 'Long day', s: L('07:30'), e: L('20:00') }, { ad: 1, sd: day, ed: ctx.keyPlus_(day, 1), t: 'Study day' }];
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'hours' });
+  assert.deepEqual(writes.map((w) => w.update.fields.body.stringValue), []);
+  // and the same shifts listed in another order are no change, whatever the sharing
+  api.setProperty('rota_rota', JSON.stringify(Object.assign({}, saved, { map: { [day]: saved.map[day + '+'], [day + '+']: saved.map[day] } })));
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs.slice().reverse(), api, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'all' });
+  assert.equal(writes.length, 0);
+});

@@ -992,6 +992,9 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   var now = Date.now();
   var win = { from: now - 864e5, to: now + 21 * 864e5 };
   var map = {};
+  // in time order, so a day's second shift is always its second, however Google listed them
+  var startOf = function (e) { return e.ad ? Utilities.parseDate(e.sd, TZ, 'yyyy-MM-dd').getTime() : e.s; };
+  events = events.slice().sort(function (a, b) { return startOf(a) - startOf(b) || (a.ad ? -1 : 0) - (b.ad ? -1 : 0); });
   events.forEach(function (e) {
     var s = e.ad ? Utilities.parseDate(e.sd, TZ, 'yyyy-MM-dd').getTime() : e.s;
     var en = e.ad ? Utilities.parseDate(e.ed || keyPlus_(e.sd, 1), TZ, 'yyyy-MM-dd').getTime() : e.e;
@@ -1017,6 +1020,9 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   try { before = JSON.parse(props.getProperty(key) || 'null'); } catch (err) { before = null; }
   props.setProperty(key, JSON.stringify({ from: win.from, to: win.to, map: map }));
   if (!before || typeof before !== 'object' || !before.map || share === 'none') return;
+  // saved before working-hours sharing left out all-day and very long entries: compared the same way, so they
+  // never come up as removed (each day's entries numbered again in time order, as now)
+  before.map = rotaRekey_(before.map, function (v) { return !!v && (share !== 'hours' || (!v[3] && v[1] - v[0] <= 14 * 3600e3)); });
   var named = share === 'all';
   var lo = Math.max(before.from, win.from), hi = Math.min(before.to, win.to);
   var inside = function (v) { return v && v[0] >= lo && v[0] <= hi && v[1] > now; };
@@ -1049,6 +1055,21 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: pid, kind: 'rota', title: name + "'s rota has changed", body: parts.join(' '), link: '#calendar', sendAfter: now, sent: false, created: now }));
   });
   if (writes.length) fsCommit_(writes);
+}
+
+// A saved rota with only the entries keep() allows, each day's numbered again in time order ("day", "day+", ...)
+function rotaRekey_(m, keep) {
+  var byDay = {};
+  Object.keys(m || {}).forEach(function (k) {
+    if (!keep(m[k])) return;
+    var d = k.replace(/\+*$/, '');
+    (byDay[d] = byDay[d] || []).push(m[k]);
+  });
+  var out = {};
+  Object.keys(byDay).forEach(function (d) {
+    byDay[d].sort(function (a, b) { return a[0] - b[0] || (b[3] || 0) - (a[3] || 0); }).forEach(function (v, i) { out[d + new Array(i + 1).join('+')] = v; });
+  });
+  return out;
 }
 
 // ===================== the app's to-do list for your calendars =====================
