@@ -161,7 +161,9 @@ async function answerFromNotification(reqId, action) {
   if (req.status !== 'waiting' && req.status !== 'maybe') return 'You already answered that one.';
   const names = {};
   for (const pid of Object.keys(people)) names[pid] = people[pid].name || 'Your partner';
-  const res = self.CaledoniteOps.buildAnswer({ req, id: reqId, answer: action, me, byEmail: email, names, now: Date.now() });
+  let tz = null;
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (err) { /* London */ }
+  const res = self.CaledoniteOps.buildAnswer({ req, id: reqId, answer: action, me, byEmail: email, names, now: Date.now(), tz });
   const writes = [{
     update: { name: `${ROOT}/households/main/requests/${reqId}`, fields: toValue(res.patch).mapValue.fields },
     updateMask: { fieldPaths: Object.keys(res.patch) }

@@ -20,7 +20,7 @@
     return r.title;
   }
 
-  // req: the request; me: who is answering (person id); byEmail: their email; names: {pid: name}
+  // req: the request; me: who is answering (person id); byEmail: their email; names: {pid: name}; tz: the phone's time zone
   // returns { patch, outbox: [...], notify: {...} | null }
   function buildAnswer(o) {
     var r = o.req, id = o.id, answer = o.answer, me = o.me, now = o.now || Date.now();
@@ -31,7 +31,7 @@
     var out = [];
     var notify = null;
     var add = function (person, op, extra) {
-      var item = { person: person, op: op, tag: tag, byEmail: o.byEmail, done: false, created: now };
+      var item = { person: person, op: op, tag: tag, byEmail: o.byEmail, done: false, created: now, tz: o.tz || null };
       for (var k in extra) item[k] = extra[k];
       out.push(item);
     };

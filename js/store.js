@@ -134,8 +134,12 @@ function notifyOp(to, title, body, link = '#today', kind = 'requests', extra = {
   }
   return { type: 'add', path: 'notify', data: Object.assign({ to, kind, title, body, link, sendAfter, sent: false, created: now() }, extra) };
 }
+// The phone's time zone: times typed in the app are this phone's clock (on holiday abroad too)
+export function phoneTz() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (e) { return null; }
+}
 function outboxOp(item) {
-  return { type: 'add', path: 'outbox', data: Object.assign({ byEmail: myEmail(), done: false, created: now() }, item) };
+  return { type: 'add', path: 'outbox', data: Object.assign({ byEmail: myEmail(), done: false, created: now(), tz: phoneTz() }, item) };
 }
 async function commit(ops, ping = true) {
   await db().commit(ops.filter(Boolean));
@@ -187,7 +191,7 @@ export const actions = {
     const st = store.state;
     const r = st.requests.find((x) => x.id === id);
     if (!r) return;
-    const res = Ops.buildAnswer({ req: r, id, answer, me: st.me, byEmail: myEmail(), names: names(), when: extra.when, now: now() });
+    const res = Ops.buildAnswer({ req: r, id, answer, me: st.me, byEmail: myEmail(), names: names(), when: extra.when, now: now(), tz: phoneTz() });
     const ops = [{ type: 'update', path: `requests/${id}`, data: res.patch }];
     for (const o of res.outbox) ops.push({ type: 'add', path: 'outbox', data: o });
     if (res.notify) ops.push(notifyOp(res.notify.to, res.notify.title, res.notify.body, res.notify.link, res.notify.kind));

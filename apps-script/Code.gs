@@ -839,8 +839,8 @@ function createEvent_(me, ctx, o, own, rs) {
     var st = hm_(ev.start) || '19:00';
     var en = hm_(ev.end) || hm_(ev.start) || '20:00';
     if (mins_(en) <= mins_(st)) en = addMins_(st, 60);
-    resource.start = { dateTime: day + 'T' + st + ':00', timeZone: TZ };
-    resource.end = { dateTime: day + 'T' + en + ':00', timeZone: TZ };
+    resource.start = { dateTime: day + 'T' + st + ':00', timeZone: tzOf_(o) };
+    resource.end = { dateTime: day + 'T' + en + ':00', timeZone: tzOf_(o) };
   }
   var rule = rrule_(ev.repeat);
   if (rule) resource.recurrence = [rule];
@@ -865,7 +865,7 @@ function changeByTag_(o, rs) {
     if (o.op === 'delete') { Calendar.Events.remove(t.calId, t.eventId); n++; return; }
     var changes = o.changes || {};
     if (o.event && o.event.title && !changes.title) changes = merge_(changes, { title: o.event.title });
-    var patch = patchFor_(changes, t.calId, t.eventId);
+    var patch = patchFor_(changes, t.calId, t.eventId, tzOf_(o));
     if (Object.keys(patch).length) { Calendar.Events.patch(patch, t.calId, t.eventId); n++; }
   });
   if (o.op === 'delete') rs.tagMap[o.tag] = [];
@@ -881,14 +881,20 @@ function editOwn_(o, rs) {
   if (!target) return { refused: 'no event' };
   if (o.op === 'remove') { Calendar.Events.remove(o.calId, target); return { changed: 1 }; }
   var changes = o.changes || {};
-  var patch = all ? (changes.title ? { summary: changes.title } : {}) : patchFor_(changes, o.calId, target);
+  var patch = all ? (changes.title ? { summary: changes.title } : {}) : patchFor_(changes, o.calId, target, tzOf_(o));
   if (!Object.keys(patch).length) return { changed: 0 };
   Calendar.Events.patch(patch, o.calId, target);
   return { changed: 1 };
 }
 
+// Times typed in the app are the phone's clock, so a phone abroad sends its time zone with them
+function tzOf_(o) {
+  var z = String((o && o.tz) || '');
+  return /^[A-Za-z]+(\/[A-Za-z0-9_+\-]+){1,2}$/.test(z) || z === 'UTC' ? z : TZ;
+}
+
 // The Calendar API patch for {title, day, start, end, allDay}
-function patchFor_(changes, calId, eventId) {
+function patchFor_(changes, calId, eventId, zone) {
   var p = {};
   if (changes.title) p.summary = String(changes.title);
   var timing = ['day', 'start', 'end', 'allDay'].some(function (k) { return changes[k] !== undefined && changes[k] !== null && changes[k] !== ''; });
@@ -909,8 +915,8 @@ function patchFor_(changes, calId, eventId) {
     var st = hm_(changes.start) || exSt || '09:00';
     var en = hm_(changes.end) || (exSt && exEn ? addMins_(st, Math.max(15, mins_(exEn) - mins_(exSt))) : addMins_(st, 60));
     if (mins_(en) <= mins_(st)) en = addMins_(st, 60);
-    p.start = { dateTime: day + 'T' + st + ':00', timeZone: TZ, date: null };
-    p.end = { dateTime: day + 'T' + en + ':00', timeZone: TZ, date: null };
+    p.start = { dateTime: day + 'T' + st + ':00', timeZone: zone || TZ, date: null };
+    p.end = { dateTime: day + 'T' + en + ':00', timeZone: zone || TZ, date: null };
   }
   return p;
 }
