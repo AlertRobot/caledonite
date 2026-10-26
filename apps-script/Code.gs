@@ -39,6 +39,7 @@ var MONTHS_ = ['January', 'February', 'March', 'April', 'May', 'June', 'July', '
 
 /** The owner runs this once from the editor. Everyone else uses the Connect page. */
 function connectMe() {
+  requireSelf_();
   var me = whoAmI_();
   installTrigger_();
   var r = syncAll();
@@ -48,6 +49,7 @@ function connectMe() {
 
 /** Run once by the owner after setting up the two deployments. */
 function setupProject() {
+  requireSelf_();
   requireCreator_();
   var patch = { scriptUrl: 'https://script.google.com/d/' + ScriptApp.getScriptId() + '/edit' };
   var ping = prop_('PING_URL', true) || prop_('WEBAPP_URL', true) || ScriptApp.getService().getUrl();
@@ -62,12 +64,14 @@ function setupProject() {
 
 /** Stop syncing this Google account. */
 function disconnectMe() {
+  requireSelf_();
   stopSyncing_();
   Logger.log('This account will no longer sync.');
 }
 
 /** Owner only: back up the app's data to Google Drive now. */
 function backupNow() {
+  requireSelf_();
   var hh = requireCreator_();
   var me = whoAmI_();
   var name = backup_(me, { hh: hh }, true);
@@ -94,13 +98,17 @@ function stopSyncing_() {
   removeTriggers_();
   var lock = LockService.getUserLock();
   if (!lock.tryLock(60000)) throw new Error('This account is in the middle of syncing. Try again in a minute.');
+  var claim = '';
   try {
+    for (var i = 0; i < 20 && !(claim = claimRun_()); i++) Utilities.sleep(3000);
+    if (!claim) throw new Error('This account is in the middle of syncing. Try again in a minute.');
     var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
     var props = PropertiesService.getUserProperties();
     var all = props.getProperties();
     fsCommit_(copiesWritten_(all, email));
     Object.keys(all).forEach(function (k) { if (/^(h|rota)_/.test(k)) props.deleteProperty(k); });
   } finally {
+    if (claim) releaseRun_(claim);
     lock.releaseLock();
   }
 }
@@ -129,6 +137,14 @@ function removeTriggers_() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'syncAll') ScriptApp.deleteTrigger(t);
   });
+}
+// Only as the person themselves: from the editor, or the connect page (which runs as whoever opens it).
+// Never in the ping deployment, which runs as Ethan for anyone at all.
+function requireSelf_() {
+  var active = '';
+  try { active = String(Session.getActiveUser().getEmail() || '').toLowerCase(); } catch (e) { active = ''; }
+  var effective = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  if (!active || active !== effective) throw new Error('Open this page signed in to the Google account you want to connect.');
 }
 function requireCreator_() {
   var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
@@ -176,6 +192,7 @@ function doGet(e) {
 }
 
 function connectFromPage() {
+  requireSelf_();
   var me;
   try { me = whoAmI_(); } catch (err) {
     throw new Error('This Google account is not part of Caledonite yet. Ask Ethan to add it in Caledonite: Settings, then Account.');
@@ -186,6 +203,7 @@ function connectFromPage() {
   return 'Connected. ' + (n ? n + ' calendar' + (n === '1' ? '' : 's') + ' synced. ' : '') + 'Caledonite now keeps ' + (me.main ? 'your' : 'this account\'s') + ' calendars up to date by itself. You can close this page.';
 }
 function disconnectFromPage() {
+  requireSelf_();
   stopSyncing_();
   return 'Stopped. This account no longer syncs to Caledonite, and its events have been taken out of the app.';
 }
@@ -228,7 +246,12 @@ function syncAll() {
   var me = null;
   var errors = [];
   var n = 0;
+  var claim = '';
   try {
+    // and never two runs of one account at once, whichever way they started (Google doesn't say whose lock
+    // the ping deployment, running as Ethan for no one in particular, gets)
+    claim = claimRun_();
+    if (!claim) return 'already running';
     try { me = whoAmI_(); } catch (err) {
       // taken out of Caledonite (Settings, Account): take its calendars out too, and stop
       if (err && err.notMember) forgetThisAccount_(err.email);
@@ -263,9 +286,27 @@ function syncAll() {
     try { writeStatus_(me, errors, n); } catch (e2) { Logger.log('status: ' + e2.message); }
     return 'Synced ' + n + ' calendars.' + (errors.length ? ' Problems: ' + errors.join(' | ') : '');
   } finally {
+    if (claim) releaseRun_(claim);
     lock.releaseLock();
   }
 }
+// This account's run, marked in the script's cache under the script lock (held only for a moment).
+// It runs out after 400 seconds, longer than a run can last, in case a run is stopped part way.
+function claimRun_() {
+  var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  var key = 'run_' + email.replace(/[^a-z0-9]+/g, '_');
+  var cache = CacheService.getScriptCache();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return '';
+  try {
+    if (cache.get(key)) return '';
+    cache.put(key, String(Date.now()), 400);
+    return key;
+  } finally {
+    lock.releaseLock();
+  }
+}
+function releaseRun_(key) { try { CacheService.getScriptCache().remove(key); } catch (e) { /* it runs out by itself */ } }
 function isCreator_(me, ctx) {
   return String(((ctx.hh || {}).emails || [])[0] || '').toLowerCase() === me.email;
 }

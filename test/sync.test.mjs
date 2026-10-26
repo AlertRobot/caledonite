@@ -243,7 +243,8 @@ test('an account taken out in the app takes its calendars out and stops syncing'
   ctx.Session = { getEffectiveUser: () => ({ getEmail: () => 'Work@X.com' }) };
   const store = { h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h', 'households/main/sharedFeeds/ethan__abc__2026-11': 'h' }), rem_fired: '{}' };
   ctx.PropertiesService = { getUserProperties: () => ({ getProperties: () => Object.assign({}, store), deleteAllProperties: () => { for (const k of Object.keys(store)) delete store[k]; } }) };
-  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.CacheService = { getScriptCache: () => ({ get: () => null, put() {}, remove() {} }) };
   const writes = []; let triggersRemoved = false;
   ctx.fsCommit_ = (w) => writes.push(...w);
   ctx.fsQuery_ = (coll, eq) => (coll === 'calendars' && eq[0][1] === 'work@x.com' ? [{ id: 'ethan__abc', data: {} }] : []);
@@ -599,7 +600,8 @@ test('"Stop syncing this account" takes its copies out too, so none are left tha
   asUser('work@x.com');
   const { store, api } = fakeProps({ h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h', 'households/main/sharedFeeds/ethan__abc__2026-11': 'h' }), rota_abc: '{}', rem_fired: '{"k":1}' });
   ctx.PropertiesService = { getUserProperties: () => api };
-  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, waitLock() {}, releaseLock() {} }) };
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, waitLock() {}, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.CacheService = { getScriptCache: () => ({ get: () => null, put() {}, remove() {} }) };
   let removed = 0;
   ctx.ScriptApp = { getProjectTriggers: () => [{ getHandlerFunction: () => 'syncAll' }], deleteTrigger: () => { removed++; } };
   const writes = [];
@@ -723,4 +725,39 @@ test('removing one of your own events that has already gone from Google Calendar
   calendar.Events.remove = () => { throw new Error('API call to calendar.events.delete failed with error: Not Found'); };
   const writes = runOutbox([{ person: 'ethan', op: 'remove', calId: 'primary@x', gid: 'gone1', byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
   assert.equal(writes[0].update.fields.done.booleanValue, true);
+});
+
+function fakeCache() {
+  const c = {};
+  ctx.CacheService = { getScriptCache: () => ({ get: (k) => (k in c ? c[k] : null), put: (k, v) => { c[k] = String(v); }, remove: (k) => { delete c[k]; } }) };
+  return c;
+}
+test('a sync of an account never runs twice at once, even when a ping and the 10-minute run arrive together', () => {
+  asUser('e@x.com');
+  const cache = fakeCache();
+  // a lock that lets everything through (as Google's own lock might for the ping, which runs as no one)
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, waitLock() {}, releaseLock() {} }) };
+  let ran = 0;
+  ctx.fsList_ = () => { ran++; return [{ id: 'ethan', data: { email: 'e@x.com' } }]; };
+  ctx.fsGet_ = () => { throw new Error('stop here'); };
+  // another run of this account is part way through
+  cache.run_e_x_com = String(Date.now());
+  assert.equal(ctx.syncAll(), 'already running');
+  assert.equal(ran, 0);
+  // once it has finished, the next one runs, and lets the one after it run too
+  delete cache.run_e_x_com;
+  assert.throws(() => ctx.syncAll(), /stop here/);
+  assert.equal(ran, 1);
+  assert.equal(cache.run_e_x_com, undefined);
+});
+
+test('connect, stop and the owner-only jobs only ever run as the person themselves', () => {
+  // the ping deployment runs as Ethan for anyone at all: none of these may run there
+  asUser('e@x.com', '');
+  let removed = 0;
+  ctx.ScriptApp = { getProjectTriggers: () => [{ getHandlerFunction: () => 'syncAll' }], deleteTrigger: () => { removed++; }, newTrigger() { throw new Error('no'); } };
+  for (const fn of ['disconnectFromPage', 'connectFromPage', 'disconnectMe', 'connectMe', 'setupProject', 'backupNow']) {
+    assert.throws(() => ctx[fn](), /signed in/, fn);
+  }
+  assert.equal(removed, 0);
 });
