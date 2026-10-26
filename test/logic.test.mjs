@@ -225,3 +225,20 @@ test('changing the day of something overnight or over several days keeps its end
   assert.match(L.editTimes(dentist, { end: '09:00' }).error, /end needs to be after/);
   assert.deepEqual(L.editTimes(dentist, { day: k(4) }), { day: k(4), start: '16:30', end: '17:15' });
 });
+
+test('the middle day of something over several days says All day, not when it ends', () => {
+  const st = load({ events: [timed('ethan', 'primary', k(8), '09:00', '09:00', { t: 'Conference', e: atTime(k(10), '17:00').getTime() })] });
+  const it = (day) => L.dayList(st, day).find((x) => x.title === 'Conference');
+  assert.equal(L.itemTime(it(k(9)), k(9)), 'All day');
+  assert.equal(L.itemTime(it(k(10)), k(10)), 'Until 5pm');
+});
+
+test('a reminder to answer comes with the Yes and Can’t buttons', async () => {
+  load({ requests: { r9: { from: 'ethan', to: 'sophie', type: 'plan', title: 'Walk', when: { day: sat, start: '10:00', end: '11:00', allDay: false }, status: 'waiting', created: Date.now() } } });
+  const seen = [];
+  store.backend = { commit: async (ops) => { seen.push(...ops); }, ping() {} };
+  await actions.answerRequest('r9', 'remind');
+  const n = seen.find((o) => o.path === 'notify');
+  assert.equal(n.data.reqId, 'r9');
+  assert.equal(n.data.ask, '1');
+});

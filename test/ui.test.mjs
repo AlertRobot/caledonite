@@ -155,3 +155,24 @@ test('Add: an end before the start is questioned, not quietly changed', async ()
   assert.equal(await page.locator('.done-card').count(), 0);
   await page.context().close();
 });
+
+test('Ask: an end before the start is questioned, not quietly dropped', async () => {
+  const page = await open('ethan', '#ask');
+  await page.fill('#ask-title', 'Late walk');
+  await page.click('[data-act="askCustom"]');
+  await page.fill('#ask-start', '21:00');
+  await page.fill('#ask-end', '20:00');
+  await page.click('[data-act="askSend"]');
+  assert.match(await page.textContent('.toast'), /end needs to be after the start/);
+  assert.equal(await page.locator('.done-card').count(), 0);
+  await page.context().close();
+});
+
+test("a partner's shift times can't break the Shifts page", async () => {
+  const page = await open('ethan', '#settings/shifts');
+  const p = await page.getAttribute('[data-act="cycleShift"]', 'data-p');
+  assert.equal(p, 'sophie');
+  const src = (await import('node:fs')).readFileSync(new globalThis.URL('../js/views-settings.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /data-p="\$\{who\}"/);
+  await page.context().close();
+});

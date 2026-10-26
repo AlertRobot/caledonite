@@ -210,9 +210,9 @@ function secShifts(state) {
     const type = sh ? sh.type : null;
     const label = sh ? sh.label : 'No shift';
     const times = sh && !sh.allDay ? `${fmtTime(sh.start)} to ${fmtTime(sh.end)}` : (sh ? (type === 'leave' ? 'Annual leave' : 'Not working') : 'Tap to add a shift');
-    rows.push(`<button type="button" class="list-row btn-row" data-act="cycleShift" data-p="${who}" data-day="${k}" data-type="${type || ''}" aria-label="${esc(fmtDate(d))}: ${esc(label)}. Tap to change.">
+    rows.push(`<button type="button" class="list-row btn-row" data-act="cycleShift" data-p="${esc(who)}" data-day="${k}" data-type="${type || ''}" aria-label="${esc(fmtDate(d))}: ${esc(label)}. Tap to change.">
       <span class="grow col"><span class="b">${esc(fmtDate(d))}</span><span class="small muted">${esc(times)}</span></span>
-      ${ov ? `<span class="small b link" data-act="clearShift" data-p="${who}" data-day="${k}" role="button" tabindex="0">Undo</span>` : ''}
+      ${ov ? `<span class="small b link" data-act="clearShift" data-p="${esc(who)}" data-day="${k}" role="button" tabindex="0">Undo</span>` : ''}
       <span class="shift-pill sp-${type || 'none'}">${esc(label)}</span></button>`);
   }
   out.push(`<section class="stack-s"><h2 class="h4">Change a shift</h2>
@@ -225,12 +225,12 @@ function secShifts(state) {
     <div class="card flush">${editable.map((t) => {
       const def = s.shiftTypes[t];
       return `<div class="type-times"><span class="shift-pill sp-${t} self-start">${esc(def.label)}</span>
-        <div class="grid2"><div class="field"><label for="st-${t}">Starts</label><input id="st-${t}" type="time" value="${esc(def.start)}" data-act="shiftTime" data-p="${who}" data-t="${t}" data-f="start"></div>
-        <div class="field"><label for="en-${t}">Ends</label><input id="en-${t}" type="time" value="${esc(def.end)}" data-act="shiftTime" data-p="${who}" data-t="${t}" data-f="end"></div></div></div>`;
+        <div class="grid2"><div class="field"><label for="st-${t}">Starts</label><input id="st-${t}" type="time" value="${esc(def.start)}" data-act="shiftTime" data-p="${esc(who)}" data-t="${t}" data-f="start"></div>
+        <div class="field"><label for="en-${t}">Ends</label><input id="en-${t}" type="time" value="${esc(def.end)}" data-act="shiftTime" data-p="${esc(who)}" data-t="${t}" data-f="end"></div></div></div>`;
     }).join('')}</div></section>`);
   out.push(`<section class="stack-s"><h2 class="h4">After a night shift</h2><div class="card grid2 pad">
-    <div class="field"><label for="sleep-until">Sleeps until</label><input id="sleep-until" type="time" value="${esc(s.sleepUntil)}" data-act="personField" data-p="${who}" data-f="sleepUntil"></div>
-    <div class="field"><label for="travel">Travel home</label><select id="travel" data-act="personField" data-p="${who}" data-f="travelMins">${[15, 30, 45, 60].map((m) => `<option value="${m}" ${Number(s.travelMins) === m ? 'selected' : ''}>${m === 60 ? '1 hour' : m + ' minutes'}</option>`).join('')}</select></div>
+    <div class="field"><label for="sleep-until">Sleeps until</label><input id="sleep-until" type="time" value="${esc(s.sleepUntil)}" data-act="personField" data-p="${esc(who)}" data-f="sleepUntil"></div>
+    <div class="field"><label for="travel">Travel home</label><select id="travel" data-act="personField" data-p="${esc(who)}" data-f="travelMins">${[15, 30, 45, 60].map((m) => `<option value="${m}" ${Number(s.travelMins) === m ? 'selected' : ''}>${m === 60 ? '1 hour' : m + ' minutes'}</option>`).join('')}</select></div>
   </div></section>`);
   return out.join('');
 }

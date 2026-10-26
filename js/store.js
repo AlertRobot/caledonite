@@ -194,7 +194,9 @@ export const actions = {
     const res = Ops.buildAnswer({ req: r, id, answer, me: st.me, byEmail: myEmail(), names: names(), when: extra.when, now: now(), tz: phoneTz() });
     const ops = [{ type: 'update', path: `requests/${id}`, data: res.patch }];
     for (const o of res.outbox) ops.push({ type: 'add', path: 'outbox', data: o });
-    if (res.notify) ops.push(notifyOp(res.notify.to, res.notify.title, res.notify.body, res.notify.link, res.notify.kind));
+    // a reminder to answer gets the same Yes and Can't buttons as the first notification
+    const ask = answer === 'remind' && r.type !== 'heads' ? { reqId: id, ask: '1' } : {};
+    if (res.notify) ops.push(notifyOp(res.notify.to, res.notify.title, res.notify.body, res.notify.link, res.notify.kind, ask));
     await commit(ops);
   },
 

@@ -346,6 +346,8 @@ const H = {
     const a = ui.ask;
     if (!a.title.trim() && a.type !== 'leave') { ui.focus = 'ask-title'; return toast('Add what it is first.'); }
     const st = store.state;
+    const ownTime = a.type !== 'heads' && a.type !== 'leave' && (a.custom || !(a.shown || []).length);
+    if (ownTime && a.cend && a.cend <= (a.cstart || '19:00')) { ui.focus = 'ask-end'; return toast('The end needs to be after the start.'); }
     const when = askWhen(st);
     const def = st.household.pencilDefault !== false;
     const hold = (a.type === 'plan' || a.type === 'free') && (a.hold === null ? def : a.hold);

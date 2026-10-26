@@ -490,6 +490,8 @@ export function itemTime(it, key) {
   const startsBefore = it.start < dayStart;
   const endsAfter = it.end > addDays(dayStart, 1);
   if (it.kind === 'sleep') return `Until ${fmtTime(it.end)}`;
+  // the middle day of something that runs over several days
+  if (startsBefore && endsAfter) return 'All day';
   if (it.cont || startsBefore) return `Until ${fmtTime(it.end)}`;
   if (it.kind === 'shift' || it.kind === 'work' || (it.end - it.start) >= 90 * 60000) {
     if (endsAfter) return `${fmtTime(it.start)} to ${fmtTime(it.end)}`;
