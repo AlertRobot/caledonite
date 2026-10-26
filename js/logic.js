@@ -439,7 +439,7 @@ export function buildDay(state, key, now = new Date()) {
     const ev = o.event;
     const start = ev.allDay ? new Date(dayStart) : atTime(key, ev.start);
     const end = ev.allDay ? new Date(dayEnd) : atTime(key, ev.end);
-    const it = { kind: o.both ? 'together' : 'event', who: o.both ? 'both' : o.person, title: ev.title, start, end, allDay: ev.allDay, sub: 'Saving to Google Calendar', pending: true, tag: o.tag, ref: `t:${o.tag}`, owner: o.person };
+    const it = { kind: o.both ? 'together' : 'event', who: o.both ? 'both' : o.person, title: ev.title, start, end, allDay: ev.allDay, sub: 'Saving to Google Calendar', pending: true, tag: o.tag, ref: `t:${o.tag}`, owner: o.person, calKey: ev.calKey || null, busyOnly: !!ev.busyOnly };
     if (o.both) { if (o.person === state.me) together.push(it); }
     else if (persons[o.person]) addOwn(persons[o.person], it);
   }
@@ -962,11 +962,15 @@ export function leaveSummary(state, pid, now = new Date()) {
 
 // ---------- countdowns ----------
 // A countdown shows on both your Todays only when your partner can already see the event's name
+// (not when your partner sees it only as "Busy": added that way, marked Private in Google Calendar, or in a calendar
+// that isn't shared as Everything, including one not known yet)
 export function countdownShared(state, ev) {
   if (!ev || !ev.owner || ev.owner !== state.me) return true;
   if (ev.tag && (ev.tag.startsWith('both:') || ev.tag.startsWith('req:'))) return true;
-  const c = calOf(state, ev);
-  return c.share === 'all' && c.role !== 'work' && !ev.busy;
+  if (ev.busy || ev.busyOnly || ev.pb) return false;
+  const c = state.calendars[`${ev.owner}__${ev.calKey}`]
+    || (!ev.calKey ? Object.values(state.calendars).find((x) => x.owner === ev.owner && x.primary) : null);
+  return !!c && c.share === 'all' && c.role !== 'work';
 }
 export function countdowns(state, now = new Date()) {
   const out = [];

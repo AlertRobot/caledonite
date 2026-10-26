@@ -124,7 +124,8 @@ export function setRaw(raw, extra = {}) {
       if (!(end > start)) end = new Date(start.getTime() + 30 * 60000);
       evs.push({
         owner: f.owner, calKey: f.calKey, id: e.id, title: e.t || '', start, end, allDay: !!e.ad, startKey: e.ad ? e.sd : null,
-        busy: !!e.b, tag: e.tag || null, location: e.l || '', sid: e.sid || null, uid: e.uid || null, gid: e.gid || null, rid: e.rid || null
+        // pb: in your own copy, something your partner sees only as "Busy" (added that way, or Private in Google)
+        busy: !!e.b, pb: !!(f.private && e.pb), tag: e.tag || null, location: e.l || '', sid: e.sid || null, uid: e.uid || null, gid: e.gid || null, rid: e.rid || null
       });
     }
   }

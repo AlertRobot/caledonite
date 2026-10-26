@@ -206,6 +206,21 @@ test('a countdown to something private shows only on your own Today', () => {
   assert.ok(titles.includes('Party') && !titles.includes('Job interview'));
 });
 
+test('a countdown to something your partner sees only as "Busy" stays on your own Today', () => {
+  // added with "Sophie sees Busy", still waiting to sync: it's private, whichever calendar it goes in
+  const st = load({ outbox: { o1: { person: 'ethan', op: 'create', tag: 'add:ji', byEmail: 'e@x.com', done: false, event: { title: 'Job interview', day: sat, start: '10:00', end: '11:00', allDay: false, busyOnly: true } } } });
+  const pending = L.dayList(st, sat).find((it) => it.title === 'Job interview');
+  assert.equal(L.countdownShared(st, pending), false);
+  // the same, synced (the sync marks it in your own copy), or marked Private in Google Calendar
+  const st2 = load({ events: [timed('ethan', 'primary', sat, '10:00', '11:00', { t: 'Job interview', tag: 'add:ji', pb: 1 })] });
+  assert.equal(L.countdownShared(st2, st2.events[0]), false);
+  // a calendar not known (yet) isn't taken to be shared as Everything
+  assert.equal(L.countdownShared(st2, { owner: 'ethan', calKey: 'newcal', title: 'Therapy' }), false);
+  // something waiting to sync to your main calendar, shared as Everything, still counts down for you both
+  const st3 = load({ outbox: { o1: { person: 'ethan', op: 'create', tag: 'add:p', byEmail: 'e@x.com', done: false, event: { title: 'Party', day: sat, start: '10:00', end: '11:00', allDay: false } } } });
+  assert.equal(L.countdownShared(st3, L.dayList(st3, sat).find((it) => it.title === 'Party')), true);
+});
+
 test('a late shift that ends at midnight is not a night: no sleeping the next morning', () => {
   const st = load({ events: [timed('sophie', 'rota', k(8), '16:00', '16:00', { t: 'Shift', e: atTime(k(9), '00:00').getTime() })] });
   assert.equal(L.shiftFor(st, 'sophie', k(8)).type, 'late');
