@@ -1803,6 +1803,8 @@ function nudgeRequests_(me, ctx) {
   waiting.forEach(function (r) {
     var d = r.data;
     if (d.autoNudged || d.type === 'heads') return;
+    // its time has gone by: nothing left to say yes to (the app offers "Not this time" or Cancel instead)
+    if (whenOver_(d.when, Date.now())) return;
     var since = Math.max(d.created || 0, d.reminded || 0);
     if (Date.now() - since < hours * 3600e3) return;
     var name = (ctx.person && ctx.person.name) || 'Your partner';
@@ -1813,6 +1815,18 @@ function nudgeRequests_(me, ctx) {
     ];
     try { fsCommit_(pair); } catch (err) { if (!/FAILED_PRECONDITION|^Firestore 409/i.test(String(err && err.message))) throw err; }
   });
+}
+
+// A request's time ({ day, start, end, allDay, endDay }) is over: past the end of its last day, or its end time
+function whenOver_(w, now) {
+  if (!w || !/^\d{4}-\d{2}-\d{2}$/.test(String(w.day || ''))) return false;
+  var last = /^\d{4}-\d{2}-\d{2}$/.test(String(w.endDay || '')) && w.endDay > w.day ? w.endDay : w.day;
+  if (w.allDay) return now >= localTime_(keyPlus_(last, 1), '00:00');
+  var st = hm_(w.start) || '19:00';
+  var en = hm_(w.end) || addMins_(st, 60);
+  // overnight (an end before the start, on the same day): the next morning
+  if (last === w.day && mins_(en) <= mins_(st)) last = keyPlus_(w.day, 1);
+  return now >= localTime_(last, en);
 }
 
 // ===================== notifications =====================

@@ -1433,3 +1433,28 @@ test('your own copy keeps the "seen only as Busy" mark (the app uses it); your p
   assert.ok(!('pb' in ev('/sharedFeeds/')));
   assert.equal(ev('/sharedFeeds/').t.stringValue, 'Busy');
 });
+
+test('no "Still waiting" nudge once the time asked about has gone by', () => {
+  withDigest();
+  const now = Date.now();
+  const day = (n) => ctx.Utilities.formatDate(new Date(now + n * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const old = now - 2 * 864e5;
+  const req = (id, when) => ({ id, data: { from: 'ethan', to: 'sophie', title: id, status: 'waiting', created: old, when }, updateTime: 'T' + id });
+  ctx.fsQuery_ = () => [
+    req('past', { day: day(-1), start: '19:00', end: '21:00' }),
+    req('pastAllDay', { day: day(-3), endDay: day(-1), allDay: true }),
+    req('soon', { day: day(1), start: '19:00', end: '21:00' }),
+    req('holidayOn', { day: day(-1), endDay: day(2), allDay: true }),
+    req('noTime', null)
+  ];
+  const sent = [];
+  ctx.fsCommit_ = (w) => sent.push(w[0].update.fields.body.stringValue);
+  ctx.docName_ = (p) => p;
+  ctx.nudgeRequests_({ person: 'ethan' }, { hh: {}, person: { name: 'Ethan' } });
+  assert.deepEqual(sent.sort(), ['holidayOn', 'noTime', 'soon']);
+  // an evening that runs past midnight is still on until it ends
+  const L = (d, hm) => ctx.localTime_(d, hm);
+  assert.equal(ctx.whenOver_({ day: '2026-11-06', start: '22:00', end: '01:00' }, L('2026-11-07', '00:30')), false);
+  assert.equal(ctx.whenOver_({ day: '2026-11-06', start: '22:00', end: '01:00' }, L('2026-11-07', '01:00')), true);
+  assert.equal(ctx.whenOver_({ day: '2026-11-06', start: '19:00' }, L('2026-11-06', '19:59')), false);
+});
