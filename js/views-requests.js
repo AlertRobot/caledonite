@@ -63,10 +63,10 @@ function reqCard(state, r) {
     if (r.status === 'waiting') {
       const asleep = sleepingUntil(state, r.to);
       body = `<p class="small muted">Waiting for ${esc(on)}.${r.hold ? ' Pencilled into both calendars until there\u2019s an answer.' : ''}${asleep ? ` ${esc(on)} is asleep, so the notification waits until about ${esc(fmtTime(asleep))}.` : ''}</p>
-        <div class="row-wrap">${(!r.reminded || Date.now() - r.reminded > 6 * 3600000) ? `<button type="button" class="btn sec" data-act="answer" data-a="remind" data-id="${id}">Remind ${esc(on)}</button>` : '<span class="small b muted">Reminder sent.</span>'}
-        <button type="button" class="btn link-btn" data-act="answer" data-a="cancel" data-id="${id}">Cancel request</button></div>`;
+        <div class="row-wrap">${askerButtons(r, id, on)}</div>`;
     } else if (r.status === 'maybe') {
-      body = `<p class="note-box">${esc(on)} isn't sure yet.${r.hold ? ' It stays pencilled in.' : ''}</p>`;
+      body = `<p class="note-box">${esc(on)} isn't sure yet.${r.hold ? ' It stays pencilled in.' : ''}</p>
+        <div class="row-wrap">${askerButtons(r, id, on)}</div>`;
     } else if (r.status === 'other') {
       body = `<p class="note-box">${esc(on)} suggested <b>${esc(whenText(r.counter))}</b> instead.</p>
         <div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="accept-counter" data-id="${id}">That works</button><button type="button" class="btn link-btn" data-act="answer" data-a="cancel" data-id="${id}">Not this time</button></div>`;
@@ -77,6 +77,11 @@ function reqCard(state, r) {
   const title = r.type === 'leave' ? (r.title ? `Holiday: ${r.title}` : 'Holiday') : r.title;
   const days = r.type === 'leave' && r.days ? `<p class="small muted">${esc(leaveDaysLine(state, r))}</p>` : '';
   return `<article class="card stack ${isOpen(r) ? '' : 'faded'}">${head}<h3 class="h3">${esc(title)}</h3>${when}${days}${body}</article>`;
+}
+// still waiting for an answer (or a "not sure yet"): remind them, or call it off
+function askerButtons(r, id, on) {
+  return `${(!r.reminded || Date.now() - r.reminded > 6 * 3600000) ? `<button type="button" class="btn sec" data-act="answer" data-a="remind" data-id="${id}">Remind ${esc(on)}</button>` : '<span class="small b muted">Reminder sent.</span>'}
+        <button type="button" class="btn link-btn" data-act="answer" data-a="cancel" data-id="${id}">Cancel request</button>`;
 }
 function leaveDaysLine(state, r) {
   const bits = [];

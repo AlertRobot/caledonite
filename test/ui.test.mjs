@@ -414,3 +414,14 @@ test('a "not tonight" from a night that has passed no longer says quiet hours ar
   assert.match(await page.textContent('main'), /off for one night/);
   await page.context().close();
 });
+
+test('a request your partner isn\'t sure about can still be called off (and its pencilled-in time freed)', async () => {
+  const page = await open('ethan', '#requests');
+  await mods(page, (store) => store.store.backend.commit([{ type: 'update', path: 'requests/r_keep', data: { status: 'maybe' } }]));
+  await page.click('[data-act="reqTab"][data-v="sent"]');
+  const card = page.locator('article', { hasText: 'Keep the day free for me' });
+  await card.locator('[data-act="answer"][data-a="cancel"]').click();
+  await page.waitForTimeout(150);
+  assert.equal(await mods(page, (store) => store.store.state.requests.find((r) => r.id === 'r_keep').status), 'cancelled');
+  await page.context().close();
+});
