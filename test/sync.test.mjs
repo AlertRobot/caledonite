@@ -913,3 +913,22 @@ test('finding an event by its tag reads every page Google hands back, even an em
   assert.equal(writes[0].update.fields.done.booleanValue, true);
   assert.equal(writes[0].update.fields.result.mapValue.fields.eventId.stringValue, 'ev1');
 });
+
+test('a rota link that sends a sign-in page instead of a calendar leaves the shifts as they were', () => {
+  withDigest();
+  const { store, api } = fakeProps({ h_rotalink: JSON.stringify({ 'households/main/privateFeeds/sophie__rotalink__2026-11': 'h' }) });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  for (const body of ['<html><body>Please sign in</body></html>', '']) {
+    ctx.UrlFetchApp = { fetch: () => ({ getResponseCode: () => 200, getContentText: () => body }) };
+    assert.throws(() => ctx.syncRotaLink_({ person: 'sophie', email: 's@x.com', main: true }, { calDocs: { rotalink: { share: 'all', role: 'rota', lastSeen: Date.now() } }, people: { sophie: {}, ethan: {} }, appEmail: 's@x.com' }, 'https://loop.example/r.ics'), /did not send a calendar/);
+  }
+  assert.equal(writes.length, 0, 'nothing deleted, no notification');
+  assert.ok(store.h_rotalink.includes('2026-11'));
+  // an empty calendar is a real answer
+  ctx.UrlFetchApp = { fetch: () => ({ getResponseCode: () => 200, getContentText: () => 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n' }) };
+  ctx.syncRotaLink_({ person: 'sophie', email: 's@x.com', main: true }, { calDocs: { rotalink: { share: 'all', role: 'rota', lastSeen: Date.now() } }, people: { sophie: {}, ethan: {} }, appEmail: 's@x.com' }, 'https://loop.example/r.ics');
+  assert.ok(writes.some((w) => w.delete === 'households/main/privateFeeds/sophie__rotalink__2026-11'));
+});

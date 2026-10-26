@@ -686,7 +686,11 @@ function syncRotaLink_(me, ctx, rotaUrl) {
   if (!/^https:\/\//i.test(url)) return;
   var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
   if (res.getResponseCode() >= 300) throw new Error('The rota link returned an error (' + res.getResponseCode() + ').');
-  var events = parseIcs_(res.getContentText());
+  var text = res.getContentText();
+  // a sign-in or error page (or nothing) instead of a calendar is never "no shifts": the ones there stay,
+  // and your partner isn't told they've all gone
+  if (!/BEGIN:VCALENDAR/i.test(String(text || ''))) throw new Error('The rota link did not send a calendar this time. Trying again next run.');
+  var events = parseIcs_(text);
   var calKey = 'rotalink';
   var path = HOUSEHOLD + '/calendars/' + me.person + '__' + calKey;
   var doc = ctx.calDocs[calKey];
