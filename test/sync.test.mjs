@@ -124,3 +124,19 @@ test("your partner can't change or delete something you added just for yourself"
   assert.deepEqual(calendar.events.map((e) => e.summary), ['Dentist', 'Holiday']);
   assert.equal(writes.filter((w) => JSON.stringify(w).includes('not yours')).length, 3);
 });
+
+test('an account listed for both of you is not synced as either', () => {
+  const people = [
+    { id: 'ethan', data: { email: 'e@x.com', linked: ['work@x.com'] } },
+    { id: 'sophie', data: { email: 's@x.com', linked: ['work@x.com', 'sophie2@x.com'] } }
+  ];
+  ctx.fsList_ = () => people;
+  ctx.fsGet_ = () => ({});
+  const as = (email) => { ctx.Session = { getEffectiveUser: () => ({ getEmail: () => email }) }; return ctx.whoAmI_(); };
+  assert.throws(() => as('work@x.com'), /more than one person/);
+  assert.equal(as('sophie2@x.com').person, 'sophie');
+  assert.equal(as('e@x.com').person, 'ethan');
+  // a second record with the same main email: never pick one of them
+  people.unshift({ id: 'aaa', data: { email: 'E@x.com' } });
+  assert.throws(() => as('e@x.com'), /more than one person/);
+});

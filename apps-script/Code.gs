@@ -221,21 +221,23 @@ function whoAmI_() {
   var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
   if (!email) throw new Error('Could not tell which Google account this is.');
   var people = fsList_(HOUSEHOLD + '/people');
-  var i;
-  for (i = 0; i < people.length; i++) {
-    if (String(people[i].data.email || '').toLowerCase() === email) return { email: email, person: people[i].id, main: true, people: people };
-  }
-  // extra accounts each person added to their own record
-  for (i = 0; i < people.length; i++) {
-    var mine = (people[i].data.linked || []).map(function (x) { return String(x || '').toLowerCase(); });
-    if (mine.indexOf(email) >= 0) return { email: email, person: people[i].id, main: false, people: people };
-  }
-  // the older list on the household
+  // Each account belongs to exactly one of you. If two records claim it, sync nothing: syncing it as the wrong
+  // person would copy that account's whole calendar into the other person's private copy.
+  var one = function (ids, main) {
+    var uniq = ids.filter(function (x, k) { return ids.indexOf(x) === k; });
+    if (uniq.length > 1) throw new Error(email + ' is listed for more than one person in Caledonite, so it is not synced. Remove it from the wrong person in Settings, Account.');
+    return uniq.length ? { email: email, person: uniq[0], main: main, people: people } : null;
+  };
+  var found = one(people.filter(function (p) { return String(p.data.email || '').toLowerCase() === email; }).map(function (p) { return p.id; }), true);
+  if (found) return found;
+  // extra accounts each person added to their own record, and the older list on the household
+  var claims = people.filter(function (p) {
+    return (p.data.linked || []).map(function (x) { return String(x || '').toLowerCase(); }).indexOf(email) >= 0;
+  }).map(function (p) { return p.id; });
   var hh = fsGet_(HOUSEHOLD) || {};
-  var linked = hh.linked || [];
-  for (var j = 0; j < linked.length; j++) {
-    if (String(linked[j].email || '').toLowerCase() === email) return { email: email, person: linked[j].person, main: false, people: people };
-  }
+  (hh.linked || []).forEach(function (x) { if (String(x.email || '').toLowerCase() === email && x.person) claims.push(x.person); });
+  found = one(claims, false);
+  if (found) return found;
   throw new Error(email + ' is not part of Caledonite. Add it in Caledonite: Settings, Account, then connect it again.');
 }
 

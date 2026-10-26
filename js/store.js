@@ -399,6 +399,30 @@ export const actions = {
   createHousehold(info) { return db().createHousehold(info); }
 };
 
+// First-time setup: the household and both of your records, saved together
+export function setupOps(email, { myName, myShifts, partnerName, partnerEmail, partnerShifts }) {
+  const myEmail = String(email || '').toLowerCase();
+  const slug = (n, fallback) => (n || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20) || fallback;
+  const a = slug(myName, 'me');
+  let b = slug(partnerName, 'partner');
+  if (a === b) b = b + '2';
+  const settingsFor = (shifts) => shifts
+    ? { workLabel: 'Working', workDays: [], hasShifts: true, sleepUntil: '14:00', travelMins: 30 }
+    : { workLabel: 'Working', workStart: '09:00', workEnd: '18:00', workDays: [1, 2, 3, 4, 5], hasShifts: false };
+  const secret = Array.from(crypto.getRandomValues(new Uint8Array(18))).map((x) => x.toString(16).padStart(2, '0')).join('');
+  const pe = String(partnerEmail || '').toLowerCase().trim();
+  const emails = [myEmail, pe].filter((x, i, all) => x && all.indexOf(x) === i);
+  return [
+    { type: 'set', path: '', data: {
+      emails, created: now(), dinnerTime: '19:00', moveDinner: true, pencilDefault: true, nudgeHours: 24,
+      favours: ['Put the bins out', 'Pick up some shopping', 'Give me a lift', 'Book a table somewhere'],
+      pingSecret: secret, pingUrl: '', settingsRev: now()
+    } },
+    { type: 'set', path: `people/${a}`, data: { name: String(myName || '').trim(), email: myEmail, colour: 'blue', joined: true, settings: settingsFor(myShifts) } },
+    { type: 'set', path: `people/${b}`, data: { name: String(partnerName || '').trim(), email: emails[1] || '', colour: 'orange', settings: settingsFor(partnerShifts) } }
+  ];
+}
+
 // Who has a copy of something made in this app
 function partiesOf(st, ev) {
   const owners = new Set(st.events.filter((e) => e.tag === ev.tag).map((e) => e.owner));

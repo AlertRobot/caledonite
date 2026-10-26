@@ -464,12 +464,14 @@ const H = {
     const st = store.state;
     const v = (ui.settings.partnerEmailDraft || '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return toast('That doesn’t look like an email.');
+    if (v === ((st.people[st.me] && st.people[st.me].email) || '').toLowerCase()) return toast('That’s your own email.');
     run(actions.setPartnerEmail(v), 'Saved.');
   },
   linkAcc: () => {
     const st = store.state;
     const v = (ui.settings.linkDraft || '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return toast('That doesn’t look like an email.');
+    if ((st.household.emails || []).includes(v)) return toast('That’s one of the two main accounts. Add another account of your own.');
     ui.settings.linkDraft = '';
     const linked = ((st.people[st.me] && st.people[st.me].linked) || []).filter((x) => x !== v);
     run(actions.setLinkedAccounts([...linked, v]), 'Added. Now open the connect page while signed in to that account.');
@@ -494,6 +496,7 @@ const H = {
     const st = store.state;
     const myName = (s.myName || (st.user && st.user.name || '').split(' ')[0] || '').trim();
     if (!myName || !s.partnerName.trim()) return toast('Add both first names.');
+    if ((s.partnerEmail || '').trim().toLowerCase() === (st.user && st.user.email || '').toLowerCase()) return toast('That’s your own email. Add your partner’s Google email, or leave it for now.');
     try { await actions.createHousehold({ myName, myShifts: s.myShifts, partnerName: s.partnerName, partnerEmail: s.partnerEmail, partnerShifts: s.partnerShifts }); } catch (e) { console.error(e); toast('That didn’t save. Try again.'); }
   }
 };

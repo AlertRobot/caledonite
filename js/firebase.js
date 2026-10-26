@@ -1,6 +1,6 @@
 // The real backend: Firebase sign-in (Google) and Firestore, with offline storage.
 import { FIREBASE, HOUSEHOLD_PATH } from './config.js';
-import { setRaw, setPhase, store } from './store.js';
+import { setRaw, setPhase, store, setupOps } from './store.js';
 import { DEFAULT_SETTINGS } from './logic.js';
 
 export async function createFirebaseBackend() {
@@ -188,24 +188,11 @@ export async function createFirebaseBackend() {
       }
     },
     async signOut() { await fa.signOut(auth); },
-    async createHousehold({ myName, myShifts, partnerName, partnerEmail, partnerShifts }) {
-      const myEmail = user.email.toLowerCase();
-      const slug = (n, fallback) => (n || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20) || fallback;
-      let a = slug(myName, 'me');
-      let b = slug(partnerName, 'partner');
-      if (a === b) b = b + '2';
-      const settingsFor = (shifts) => shifts
-        ? { workLabel: 'Working', workDays: [], hasShifts: true, sleepUntil: '14:00', travelMins: 30 }
-        : { workLabel: 'Working', workStart: '09:00', workEnd: '18:00', workDays: [1, 2, 3, 4, 5], hasShifts: false };
-      const secret = Array.from(crypto.getRandomValues(new Uint8Array(18))).map((x) => x.toString(16).padStart(2, '0')).join('');
-      const emails = [myEmail, (partnerEmail || '').toLowerCase().trim()].filter(Boolean);
-      await fs.setDoc(ref(''), {
-        emails, created: Date.now(), dinnerTime: '19:00', moveDinner: true, pencilDefault: true, nudgeHours: 24,
-        favours: ['Put the bins out', 'Pick up some shopping', 'Give me a lift', 'Book a table somewhere'],
-        pingSecret: secret, pingUrl: '', settingsRev: Date.now()
-      });
-      await fs.setDoc(ref(`people/${a}`), { name: myName.trim(), email: myEmail, colour: 'blue', joined: true, settings: settingsFor(myShifts) });
-      await fs.setDoc(ref(`people/${b}`), { name: partnerName.trim(), email: emails[1] || '', colour: 'orange', settings: settingsFor(partnerShifts) });
+    // the household and both of you, in one go: the rules only allow your two records while the household is being made
+    async createHousehold(info) {
+      const b = fs.writeBatch(db);
+      for (const o of setupOps(user.email, info)) b.set(ref(o.path), o.data);
+      await b.commit();
     }
   };
   return backend;

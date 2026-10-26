@@ -147,3 +147,26 @@ test("your partner's own holiday has no Change or Delete for you", async () => {
   assert.equal(canChange(st, { owner: 'sophie', tag: 'add:x' }, {}), false);
   assert.equal(canChange(st, { owner: 'ethan', tag: 'add:x' }, {}), true);
 });
+
+test('first-time setup makes the household and both records together, with two different emails', async () => {
+  const { setupOps } = await import('../js/store.js');
+  const ops = setupOps('Ethan@X.com', { myName: 'Ethan', partnerName: 'Sophie', partnerEmail: ' S@x.com ', partnerShifts: true });
+  assert.deepEqual(ops.map((o) => o.path), ['', 'people/ethan', 'people/sophie']);
+  assert.deepEqual(ops[0].data.emails, ['ethan@x.com', 's@x.com']);
+  assert.equal(ops[2].data.joined, undefined);
+  const same = setupOps('e@x.com', { myName: 'Ethan', partnerName: 'Sophie', partnerEmail: 'E@x.com' });
+  assert.deepEqual(same[0].data.emails, ['e@x.com']);
+  assert.equal(same[2].data.email, '');
+  const { readFileSync } = await import('node:fs');
+  assert.match(readFileSync(new URL('../js/firebase.js', import.meta.url), 'utf8'), /writeBatch\(db\);\s*for \(const o of setupOps/);
+});
+
+test('the rules: no new person records once the household exists, and your other accounts are never the main ones', async () => {
+  const { readFileSync } = await import('node:fs');
+  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const people = rules.slice(rules.indexOf('match /people/{pid}'), rules.indexOf('match /tokens/'));
+  const create = people.slice(people.indexOf('allow create'), people.indexOf('allow update'));
+  assert.match(create, /!exists\(\/databases\/\$\(database\)\/documents\/households\/main\)/);
+  assert.doesNotMatch(create, /member\(\)/);
+  assert.match(people, /linked', \[\]\)\.hasAny\(household\(\)\.emails\)/);
+});
