@@ -228,7 +228,8 @@ test("a calendar that's gone from Google leaves Settings after a couple of days"
   // the account still has its main calendar (read with an error here, which is fine)
   ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'p@x', getName: () => 'Main' }], getDefaultCalendar: () => ({ getId: () => 'p@x' }) };
   const old = Date.now() - 5 * 864e5;
-  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true }, { calDocs: {
+  // work@x.com is another of your accounts, still in Caledonite: its records are its own to tidy up
+  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true, people: [{ id: 'ethan', data: { email: 'e@x.com', linked: ['work@x.com'] } }] }, { calDocs: {
     gone: { account: 'e@x.com', lastSeen: old }, recent: { account: 'e@x.com', lastSeen: Date.now() - 3600e3 },
     other: { account: 'work@x.com', lastSeen: old }, rotalink: { account: 'Rota link', lastSeen: old }
   } }, []);
@@ -242,7 +243,8 @@ test('an account taken out in the app takes its calendars out and stops syncing'
   ctx.Session = { getEffectiveUser: () => ({ getEmail: () => 'Work@X.com' }) };
   const store = { h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h', 'households/main/sharedFeeds/ethan__abc__2026-11': 'h' }), rem_fired: '{}' };
   ctx.PropertiesService = { getUserProperties: () => ({ getProperties: () => Object.assign({}, store), deleteAllProperties: () => { for (const k of Object.keys(store)) delete store[k]; } }) };
-  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.CacheService = { getScriptCache: () => ({ get: () => null, put() {}, remove() {} }) };
   const writes = []; let triggersRemoved = false;
   ctx.fsCommit_ = (w) => writes.push(...w);
   ctx.fsQuery_ = (coll, eq) => (coll === 'calendars' && eq[0][1] === 'work@x.com' ? [{ id: 'ethan__abc', data: {} }] : []);
@@ -544,4 +546,335 @@ test('changes are done in the order they reached the database, whatever the phon
   ctx.docName_ = (p) => p;
   ctx.processOutbox_({ email: 'e@x.com', person: 'ethan', main: true }, { appEmail: 'e@x.com', calDocs: {} });
   assert.equal(calendar.events.length, 0, 'the pencilled-in event was added, then taken out');
+});
+
+// ---------- round 5 checks ----------
+function withDigest() {
+  const U = ctx.Utilities;
+  const crypto = require_('node:crypto');
+  U.computeDigest = (alg, s) => [...crypto.createHash('md5').update(s, 'utf8').digest()];
+  U.base64EncodeWebSafe = (b) => Buffer.from(b).toString('base64url');
+  U.DigestAlgorithm = { MD5: 'md5' }; U.Charset = { UTF_8: 'utf8' };
+  U.getUuid = () => 'u' + Math.random();
+}
+
+test('an event marked Private in Google Calendar is only "Busy" in your partner\'s copy, even from a calendar shared as Everything', () => {
+  withDigest();
+  const ev = (visibility) => ctx.normApi_({ id: 'g1', iCalUID: 'g1@google.com', summary: 'Hospital appointment', location: 'Ward 7', visibility, start: { dateTime: '2026-11-06T10:00:00Z' }, end: { dateTime: '2026-11-06T11:00:00Z' } });
+  for (const v of ['private', 'confidential']) {
+    const shared = ctx.shareFilter_({ share: 'all' }, [ev(v)]);
+    assert.equal(shared[0].t, 'Busy', v);
+    assert.equal(shared[0].l, undefined, v);
+  }
+  assert.equal(ctx.shareFilter_({ share: 'all' }, [ev('default')])[0].t, 'Hospital appointment');
+  // and the same when the slow way (CalendarApp) is used
+  ctx.CalendarApp = { Visibility: { PRIVATE: 'P', CONFIDENTIAL: 'C', DEFAULT: 'D' }, GuestStatus: { NO: 'NO' } };
+  const old = { getMyStatus: () => null, getDescription: () => '', getStartTime: () => new Date('2026-11-06T10:00:00Z'), getEndTime: () => new Date('2026-11-06T11:00:00Z'), getId: () => 'x@google.com', getTitle: () => 'Hospital appointment', isRecurringEvent: () => false, isAllDayEvent: () => false, getLocation: () => '', getVisibility: () => 'P' };
+  assert.equal(ctx.shareFilter_({ share: 'all' }, [ctx.norm_(old)])[0].t, 'Busy');
+});
+test('a rota shift marked Private: a change to its name alone is not sent to your partner', () => {
+  withDigest();
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 3 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const { api } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const sh = (t) => [{ t, pb: 1, s: ctx.localTime_(day, '07:30'), e: ctx.localTime_(day, '20:00') }];
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', sh('Clinic A'), api, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', sh('Clinic B'), api, { share: 'all' });
+  assert.equal(writes.length, 0);
+});
+
+function fakeProps(init = {}) {
+  const store = Object.assign({}, init);
+  return { store, api: { getProperty: (k) => (k in store ? store[k] : null), getProperties: () => Object.assign({}, store), setProperty: (k, v) => { store[k] = String(v); }, setProperties: (o) => Object.assign(store, o), deleteProperty: (k) => { delete store[k]; }, deleteAllProperties: () => { for (const k of Object.keys(store)) delete store[k]; } } };
+}
+function asUser(email, active = email) {
+  ctx.Session = { getEffectiveUser: () => ({ getEmail: () => email }), getActiveUser: () => ({ getEmail: () => active }) };
+}
+
+test('"Stop syncing this account" takes its copies out too, so none are left that no longer follow your sharing', () => {
+  asUser('work@x.com');
+  const { store, api } = fakeProps({ h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h', 'households/main/sharedFeeds/ethan__abc__2026-11': 'h' }), rota_abc: '{}', rem_fired: '{"k":1}' });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, waitLock() {}, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.CacheService = { getScriptCache: () => ({ get: () => null, put() {}, remove() {} }) };
+  let removed = 0;
+  ctx.ScriptApp = { getProjectTriggers: () => [{ getHandlerFunction: () => 'syncAll' }], deleteTrigger: () => { removed++; } };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.disconnectFromPage();
+  assert.equal(removed, 1);
+  assert.deepEqual(writes.map((w) => w.delete).sort(), ['households/main/privateFeeds/ethan__abc__2026-11', 'households/main/sharedFeeds/ethan__abc__2026-11', 'households/main/status/work_x_com']);
+  assert.deepEqual(Object.keys(store), ['rem_fired'], 'what was already sent is still remembered');
+});
+
+test('a ping never syncs an account that has stopped syncing', () => {
+  let synced = 0;
+  const realSync = ctx.syncAll;
+  ctx.syncAll = () => { synced++; return 'ok'; };
+  const cache = {};
+  ctx.CacheService = { getScriptCache: () => ({ get: (k) => cache[k] || null, put: (k, v) => { cache[k] = v; }, remove: (k) => { delete cache[k]; } }) };
+  ctx.fsGet_ = () => ({ pingSecret: 's3cret' });
+  ctx.ContentService = { createTextOutput: (t) => ({ t, setMimeType() { return this; } }), MimeType: { TEXT: 'text' } };
+  let triggers = [];
+  ctx.ScriptApp = { getProjectTriggers: () => triggers };
+  const post = () => ctx.doPost({ postData: { contents: JSON.stringify({ secret: 's3cret' }) } });
+  post();
+  assert.equal(synced, 0);
+  delete cache.last_ping;
+  triggers = [{ getHandlerFunction: () => 'syncAll' }];
+  post();
+  assert.equal(synced, 1);
+  ctx.syncAll = realSync;
+});
+
+test('an account taken out in the app that can no longer run: your main account takes its calendars out', () => {
+  withDigest();
+  const { api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'p@x', getName: () => 'Main' }], getDefaultCalendar: () => ({ getId: () => 'p@x' }) };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsQuery_ = (coll, eqs) => {
+    const calKey = (eqs.find((f) => f[0] === 'calKey') || [])[1];
+    return ['privateFeeds', 'sharedFeeds'].includes(coll) && calKey ? [{ id: `ethan__${calKey}__2026-11`, data: {} }] : [];
+  };
+  const old = Date.now() - 3 * 864e5;
+  const me = { email: 'e@x.com', person: 'ethan', main: true, people: [{ id: 'ethan', data: { email: 'e@x.com', linked: ['work@x.com'] } }] };
+  ctx.syncCalendars_(me, { hh: {}, calDocs: {
+    gone: { account: 'old@x.com', lastSeen: old },
+    listed: { account: 'work@x.com', lastSeen: old },
+    recent: { account: 'old2@x.com', lastSeen: Date.now() - 3600e3 }
+  } }, []);
+  assert.deepEqual(writes.map((w) => w.delete).filter(Boolean).sort(), ['households/main/calendars/ethan__gone', 'households/main/privateFeeds/ethan__gone__2026-11', 'households/main/sharedFeeds/ethan__gone__2026-11']);
+  // only your main account does this
+  writes.length = 0;
+  ctx.syncCalendars_(Object.assign({}, me, { main: false, email: 'work@x.com' }), { hh: {}, calDocs: { gone: { account: 'old@x.com', lastSeen: old } } }, []);
+  assert.deepEqual(writes.filter((w) => w.delete), []);
+});
+
+test('taking over a calendar from another of your accounts also takes out the months only that account had written', () => {
+  withDigest();
+  const calId = 'ethan@work.example';
+  const key = ctx.shortKey_(calId);
+  const { store, api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => calId, getName: () => 'Work', getColor: () => '#123456', isOwnedByMe: () => false }], getDefaultCalendar: () => ({ getId: () => 'e@x.com' }) };
+  const s = ctx.localTime_('2026-11-10', '09:00');
+  ctx.Calendar = { Events: { list: () => ({ items: [{ id: 'g1', iCalUID: 'g1@x', summary: 'Standup', start: { dateTime: new Date(s).toISOString() }, end: { dateTime: new Date(s + 3600e3).toISOString() } }] }) } };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  // what the work account had written: November, and a January with an event since deleted
+  ctx.fsQuery_ = (coll, eqs) => (['privateFeeds', 'sharedFeeds'].includes(coll) ? ['2026-11', '2027-01'].map((m) => ({ id: `ethan__${key}__${m}`, data: {} })) : []);
+  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true, people: [{ id: 'ethan', data: { email: 'e@x.com', linked: ['ethan@work.example'] } }] }, { appEmail: 'e@x.com', hh: {}, calDocs: {
+    [key]: { owner: 'ethan', calKey: key, calId, name: 'Work', color: '#123456', canWrite: false, primary: false, account: 'ethan@work.example', lastSeen: Date.now() - 13 * 3600e3, show: true, share: 'all', role: 'work', layer: 'own', userSet: true }
+  } }, []);
+  assert.deepEqual(writes.map((w) => w.delete).filter(Boolean).sort(), [`households/main/privateFeeds/ethan__${key}__2027-01`, `households/main/sharedFeeds/ethan__${key}__2027-01`]);
+  assert.ok(writes.some((w) => w.update && w.update.name === `households/main/sharedFeeds/ethan__${key}__2026-11`), 'November is written again');
+  assert.ok(store[`h_${key}`]);
+});
+
+test('someone who was never part of Caledonite opening the connect page writes nothing', () => {
+  ctx.fsList_ = () => [{ id: 'ethan', data: { email: 'e@x.com', linked: [] } }];
+  ctx.fsGet_ = () => ({});
+  asUser('stranger@x.com');
+  const { api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, waitLock() {}, releaseLock() {} }) };
+  ctx.ScriptApp = { getProjectTriggers: () => [], deleteTrigger() {} };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  let queried = 0;
+  ctx.fsQuery_ = () => { queried++; return []; };
+  assert.throws(() => ctx.syncAll(), /not part of Caledonite/);
+  assert.equal(writes.length, 0);
+  assert.equal(queried, 0);
+});
+
+test('deleting every time of something repeating that had one time changed: done in one go, not an error', () => {
+  // Google lists the changed time (an exception) next to the series; deleting the series takes it too
+  const calendar = fakeCalendar([
+    { id: 'm1', calId: 'primary@x', tag: 'both:wk', summary: 'Date night' },
+    { id: 'm1_20261113T190000Z', calId: 'primary@x', tag: 'both:wk', summary: 'Date night (moved)' }
+  ]);
+  calendar.Events.remove = (calId, id) => {
+    if (!calendar.events.some((e) => e.id === id)) throw new Error('API call to calendar.events.delete failed with error: Resource has been deleted');
+    calendar.events = calendar.events.filter((e) => !(e.id === id || e.id.startsWith(id + '_')));
+  };
+  const patched = [];
+  calendar.Events.patch = (p, calId, id) => { patched.push([id, Object.keys(p)]); };
+  const writes = runOutbox([{ person: 'ethan', op: 'delete', tag: 'both:wk', byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+  assert.equal(calendar.events.length, 0);
+  // and a new name for every time renames the changed one too, but never moves it
+  calendar.events.push({ id: 'm2', calId: 'primary@x', tag: 'both:x' }, { id: 'm2_20261113T190000Z', calId: 'primary@x', tag: 'both:x' });
+  ctx.Calendar.Events.get = () => ({ start: { dateTime: '2026-11-06T19:00:00Z' }, end: { dateTime: '2026-11-06T21:00:00Z' } });
+  runOutbox([{ person: 'ethan', op: 'update', tag: 'both:x', changes: { title: 'Film night', day: '2026-11-20', start: '19:00' }, byEmail: 'e@x.com', done: false, created: 2 }], { calendar });
+  assert.deepEqual(patched.find((x) => x[0] === 'm2_20261113T190000Z')[1], ['summary']);
+});
+
+test('removing one of your own events that has already gone from Google Calendar is done, not tried again and again', () => {
+  const calendar = fakeCalendar([]);
+  calendar.Events.remove = () => { throw new Error('API call to calendar.events.delete failed with error: Not Found'); };
+  const writes = runOutbox([{ person: 'ethan', op: 'remove', calId: 'primary@x', gid: 'gone1', byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+});
+
+function fakeCache() {
+  const c = {};
+  ctx.CacheService = { getScriptCache: () => ({ get: (k) => (k in c ? c[k] : null), put: (k, v) => { c[k] = String(v); }, remove: (k) => { delete c[k]; } }) };
+  return c;
+}
+test('a sync of an account never runs twice at once, even when a ping and the 10-minute run arrive together', () => {
+  asUser('e@x.com');
+  const cache = fakeCache();
+  // a lock that lets everything through (as Google's own lock might for the ping, which runs as no one)
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, waitLock() {}, releaseLock() {} }) };
+  let ran = 0;
+  ctx.fsList_ = () => { ran++; return [{ id: 'ethan', data: { email: 'e@x.com' } }]; };
+  ctx.fsGet_ = () => { throw new Error('stop here'); };
+  // another run of this account is part way through
+  cache.run_e_x_com = String(Date.now());
+  assert.equal(ctx.syncAll(), 'already running');
+  assert.equal(ran, 0);
+  // once it has finished, the next one runs, and lets the one after it run too
+  delete cache.run_e_x_com;
+  assert.throws(() => ctx.syncAll(), /stop here/);
+  assert.equal(ran, 1);
+  assert.equal(cache.run_e_x_com, undefined);
+});
+
+test('connect, stop and the owner-only jobs only ever run as the person themselves', () => {
+  // the ping deployment runs as Ethan for anyone at all: none of these may run there
+  asUser('e@x.com', '');
+  let removed = 0;
+  ctx.ScriptApp = { getProjectTriggers: () => [{ getHandlerFunction: () => 'syncAll' }], deleteTrigger: () => { removed++; }, newTrigger() { throw new Error('no'); } };
+  for (const fn of ['disconnectFromPage', 'connectFromPage', 'disconnectMe', 'connectMe', 'setupProject', 'backupNow']) {
+    assert.throws(() => ctx[fn](), /signed in/, fn);
+  }
+  assert.equal(removed, 0);
+});
+
+test('a reminder on something your account sees twice (your copy, and your partner\'s calendar shared with you) goes once', () => {
+  withDigest();
+  const now = Date.now();
+  const { api } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsGet_ = (path) => (path === 'households/main/people/ethan/private/main' ? { reminders: { r1: { ref: 't:both:tea', owner: 'ethan', times: ['h1'], note: '' } } } : null);
+  const me = { person: 'ethan', email: 'e@x.com', main: true, people: [{ id: 'ethan', data: { settings: {} } }] };
+  const ev = { tag: 'both:tea', t: 'Tea', s: now + 30 * 60e3, e: now + 90 * 60e3 };
+  const seen = ['primary', 'sophiecal'].map((calKey) => ({ calKey, shown: true, share: 'all', doc: { share: 'all' }, ev: Object.assign({ id: calKey }, ev) }));
+  ctx.fireReminders_(me, {}, seen);
+  assert.equal(writes.filter((w) => w.update.fields.kind && w.update.fields.kind.stringValue === 'reminders').length, 1);
+});
+
+test('the same events listed in another order by Google are not written again', () => {
+  withDigest();
+  const s = ctx.localTime_('2026-11-10', '09:00');
+  const a = { id: 'a', t: 'A', s, e: s + 3600e3 }, b = { id: 'b', t: 'B', s: s + 864e5, e: s + 864e5 + 3600e3 };
+  const { api } = fakeProps();
+  const me = { person: 'ethan', email: 'e@x.com' };
+  const first = ctx.feedWrites_(me, { appEmail: 'e@x.com' }, 'k', { share: 'all' }, [a, b], api);
+  api.setProperty(first.key, first.value);
+  const again = ctx.feedWrites_(me, { appEmail: 'e@x.com' }, 'k', { share: 'all' }, [b, a], api);
+  assert.equal(again.writes.length, 0);
+});
+
+test('a very long note still reaches the phone (cut short to fit what Firebase can send)', () => {
+  const sent = [];
+  ctx.UrlFetchApp = { fetch: (url, opt) => { sent.push(opt.payload); return { getResponseCode: () => 200 }; } };
+  const realToken = ctx.saToken_, realProp = ctx.prop_;
+  ctx.saToken_ = () => 't'; ctx.prop_ = () => 'proj';
+  ctx.fsQuery_ = (coll) => (coll === 'notify' ? [{ id: 'n1', data: { to: 'sophie', kind: 'notes', title: 'A note from Ethan '.repeat(40), body: 'Ünïcödé 🙂 '.repeat(1500), sendAfter: 0, sent: false }, updateTime: 't' }] : []);
+  ctx.fsList_ = () => [{ id: 't1', data: { token: 'tok' } }];
+  ctx.fsCommit_ = () => {};
+  ctx.docName_ = (p) => p;
+  ctx.processNotify_({ people: { sophie: { settings: { quiet: { on: false } } } } });
+  ctx.saToken_ = realToken; ctx.prop_ = realProp;
+  assert.equal(sent.length, 1);
+  const data = JSON.parse(sent[0]).message.data;
+  assert.ok(Buffer.byteLength(JSON.stringify(data), 'utf8') < 4000, 'under the 4 KB limit');
+  assert.match(data.body, /…$/);
+});
+
+test('events Google lists without their own calendar id still each have their own reminders', () => {
+  withDigest();
+  const ev = (id, h) => ctx.normApi_({ id, summary: '', start: { dateTime: `2026-11-06T${h}:00:00Z` }, end: { dateTime: `2026-11-06T${h}:30:00Z` } });
+  assert.notEqual(ev('aaa', '10').uid, ev('bbb', '12').uid);
+});
+
+test('renaming one of your calendars to something with "family" in it never shares more of it', () => {
+  withDigest();
+  const calId = 'cal1@group.calendar.google.com';
+  const key = ctx.shortKey_(calId);
+  const { api } = fakeProps({ [`h_${key}`]: '{}' });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => calId, getName: () => 'Family planning', getColor: () => '#1', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'e@x.com' }) };
+  ctx.Calendar = { Events: { list: () => ({ items: [] }) } };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true, people: [] }, { appEmail: 'e@x.com', hh: {}, calDocs: {
+    [key]: { owner: 'ethan', calKey: key, calId, name: 'Gym', color: '#1', canWrite: true, primary: false, account: 'e@x.com', lastSeen: Date.now(), show: true, share: 'busy', role: 'normal', layer: 'own' }
+  } }, []);
+  const masks = writes.filter((w) => w.update && w.update.name.endsWith(`/calendars/ethan__${key}`)).flatMap((w) => w.updateMask.fieldPaths);
+  assert.ok(!masks.includes('share'));
+});
+
+test('the morning summary reads only the jobs still to do, not every job ever done', () => {
+  const asked = [];
+  ctx.fsList_ = (p) => { asked.push(['list', p]); return []; };
+  ctx.fsQuery_ = (coll, eqs) => { asked.push(['query', coll, JSON.stringify(eqs)]); return []; };
+  ctx.digestData_({ person: 'ethan' }, { settings: {}, people: { ethan: {} } });
+  assert.ok(!asked.some((a) => a[0] === 'list' && a[1].endsWith('/jobs')));
+  assert.ok(asked.some((a) => a[1] === 'jobs' && a[2] === '[["done",false]]'));
+});
+
+test('when Google Calendar can only be read the slow way and time is running out, that calendar waits for the next run', () => {
+  const realCal = ctx.Calendar;
+  ctx.Calendar = undefined;
+  ctx.RUN_STARTED_ = Date.now() - 4 * 60e3;
+  const cal = { getEvents: () => { throw new Error('should not start'); } };
+  assert.throws(() => ctx.readEvents_(cal, 'x', new Date(), new Date()), /next run/);
+  ctx.RUN_STARTED_ = 0;
+  ctx.Calendar = realCal;
+});
+
+test('your own copies follow a corrected email (set before you joined), not just changed events', () => {
+  withDigest();
+  const s = ctx.localTime_('2026-11-10', '09:00');
+  const evs = [{ id: 'a', t: 'A', s, e: s + 3600e3 }];
+  const { api } = fakeProps();
+  const me = { person: 'sophie', email: 's@x.com' };
+  const first = ctx.feedWrites_(me, { appEmail: 'sophy@x.com' }, 'k', { share: 'all' }, evs, api);
+  api.setProperty(first.key, first.value);
+  const again = ctx.feedWrites_(me, { appEmail: 's@x.com' }, 'k', { share: 'all' }, evs, api);
+  const priv = again.writes.find((w) => w.update && w.update.name.includes('/privateFeeds/'));
+  assert.ok(priv, 'written again');
+  assert.equal(priv.update.fields.ownerEmail.stringValue, 's@x.com');
+});
+
+test("yes to the other time: the agreed event is added even if Google's search still lists the pencilled-in one just deleted", () => {
+  const calendar = fakeCalendar([{ id: 'hold1', calId: 'primary@x', tag: 'req:r7', summary: 'Pencilled in: Walk' }]);
+  const gone = new Set();
+  // the search lags: what was deleted a moment ago is still found by its tag
+  const list = calendar.Events.list;
+  calendar.Events.remove = (calId, id) => { gone.add(id); };
+  calendar.Events.list = (calId, q) => list(calId, q);
+  runOutbox([
+    { person: 'ethan', op: 'delete', tag: 'req:r7', byEmail: 'e@x.com', done: false, created: 5, seq: 0 },
+    { person: 'ethan', op: 'create', tag: 'req:r7', byEmail: 'e@x.com', done: false, created: 5, seq: 1, event: { title: 'Walk', day: '2026-11-07', start: '10:00', end: '11:00' } }
+  ], { calendar });
+  assert.ok(gone.has('hold1'));
+  assert.ok(calendar.events.some((e) => e.summary === 'Walk'), 'the agreed one was added');
 });

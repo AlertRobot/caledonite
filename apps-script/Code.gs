@@ -32,6 +32,7 @@ var HOUSEHOLD = 'households/main';
 var DAYS_BACK = 14;
 var DAYS_AHEAD = 120;
 var TZ = 'Europe/London';
+var RUN_STARTED_ = 0;   // when this run started (a run is stopped by Google after 6 minutes)
 var WEEKDAYS_ = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 var MONTHS_ = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -39,6 +40,7 @@ var MONTHS_ = ['January', 'February', 'March', 'April', 'May', 'June', 'July', '
 
 /** The owner runs this once from the editor. Everyone else uses the Connect page. */
 function connectMe() {
+  requireSelf_();
   var me = whoAmI_();
   installTrigger_();
   var r = syncAll();
@@ -48,6 +50,7 @@ function connectMe() {
 
 /** Run once by the owner after setting up the two deployments. */
 function setupProject() {
+  requireSelf_();
   requireCreator_();
   var patch = { scriptUrl: 'https://script.google.com/d/' + ScriptApp.getScriptId() + '/edit' };
   var ping = prop_('PING_URL', true) || prop_('WEBAPP_URL', true) || ScriptApp.getService().getUrl();
@@ -62,12 +65,14 @@ function setupProject() {
 
 /** Stop syncing this Google account. */
 function disconnectMe() {
-  removeTriggers_();
+  requireSelf_();
+  stopSyncing_();
   Logger.log('This account will no longer sync.');
 }
 
 /** Owner only: back up the app's data to Google Drive now. */
 function backupNow() {
+  requireSelf_();
   var hh = requireCreator_();
   var me = whoAmI_();
   var name = backup_(me, { hh: hh }, true);
@@ -79,6 +84,38 @@ function backupNow() {
 function forgetThisAccount_(email) {
   var props = PropertiesService.getUserProperties();
   var all = props.getProperties();
+  // never connected here (someone who just opened the connect page): nothing to tidy up
+  if (!Object.keys(all).length && !hasTrigger_()) return;
+  var writes = copiesWritten_(all, email);
+  fsQuery_('calendars', [['account', email]]).forEach(function (d) { writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + d.id) }); });
+  fsCommit_(writes);
+  props.deleteAllProperties();
+  removeTriggers_();
+}
+
+// Stop syncing this account: it stops running, and the copies it wrote go too, so none are left behind that
+// no longer follow your sharing choices. Its calendars' settings stay, for if it's connected again.
+function stopSyncing_() {
+  removeTriggers_();
+  var lock = LockService.getUserLock();
+  if (!lock.tryLock(60000)) throw new Error('This account is in the middle of syncing. Try again in a minute.');
+  var claim = '';
+  try {
+    for (var i = 0; i < 20 && !(claim = claimRun_()); i++) Utilities.sleep(3000);
+    if (!claim) throw new Error('This account is in the middle of syncing. Try again in a minute.');
+    var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+    var props = PropertiesService.getUserProperties();
+    var all = props.getProperties();
+    fsCommit_(copiesWritten_(all, email));
+    Object.keys(all).forEach(function (k) { if (/^(h|rota)_/.test(k)) props.deleteProperty(k); });
+  } finally {
+    if (claim) releaseRun_(claim);
+    lock.releaseLock();
+  }
+}
+
+// Deleting every copy this account remembers writing, and its status
+function copiesWritten_(all, email) {
   var writes = [];
   Object.keys(all).forEach(function (k) {
     if (k.indexOf('h_') !== 0) return;
@@ -86,11 +123,11 @@ function forgetThisAccount_(email) {
     try { old = JSON.parse(all[k] || '{}'); } catch (e) { old = {}; }
     Object.keys(old).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
   });
-  fsQuery_('calendars', [['account', email]]).forEach(function (d) { writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + d.id) }); });
-  writes.push({ 'delete': docName_(HOUSEHOLD + '/status/' + email.replace(/[^a-z0-9]+/g, '_')) });
-  fsCommit_(writes);
-  props.deleteAllProperties();
-  removeTriggers_();
+  if (email) writes.push({ 'delete': docName_(HOUSEHOLD + '/status/' + email.replace(/[^a-z0-9]+/g, '_')) });
+  return writes;
+}
+function hasTrigger_() {
+  return ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'syncAll'; });
 }
 
 function installTrigger_() {
@@ -101,6 +138,14 @@ function removeTriggers_() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'syncAll') ScriptApp.deleteTrigger(t);
   });
+}
+// Only as the person themselves: from the editor, or the connect page (which runs as whoever opens it).
+// Never in the ping deployment, which runs as Ethan for anyone at all.
+function requireSelf_() {
+  var active = '';
+  try { active = String(Session.getActiveUser().getEmail() || '').toLowerCase(); } catch (e) { active = ''; }
+  var effective = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  if (!active || active !== effective) throw new Error('Open this page signed in to the Google account you want to connect.');
 }
 function requireCreator_() {
   var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
@@ -148,6 +193,7 @@ function doGet(e) {
 }
 
 function connectFromPage() {
+  requireSelf_();
   var me;
   try { me = whoAmI_(); } catch (err) {
     throw new Error('This Google account is not part of Caledonite yet. Ask Ethan to add it in Caledonite: Settings, then Account.');
@@ -158,8 +204,9 @@ function connectFromPage() {
   return 'Connected. ' + (n ? n + ' calendar' + (n === '1' ? '' : 's') + ' synced. ' : '') + 'Caledonite now keeps ' + (me.main ? 'your' : 'this account\'s') + ' calendars up to date by itself. You can close this page.';
 }
 function disconnectFromPage() {
-  removeTriggers_();
-  return 'Stopped. This account no longer syncs to Caledonite.';
+  requireSelf_();
+  stopSyncing_();
+  return 'Stopped. This account no longer syncs to Caledonite, and its events have been taken out of the app.';
 }
 function nameOf_(me) {
   for (var i = 0; i < me.people.length; i++) if (me.people[i].id === me.person) return me.people[i].data.name || me.person;
@@ -185,6 +232,8 @@ function doPost(e) {
   if (!body.secret || !secret || body.secret !== secret) return text_('no');
   if (cache.get('last_ping')) return text_('ok');
   cache.put('last_ping', String(Date.now()), 45);
+  // the owner's account stopped syncing: a ping doesn't start it again
+  if (!hasTrigger_()) return text_('not connected');
   try { syncAll(); } catch (err) { return text_('error: ' + err.message); }
   return text_('ok');
 }
@@ -193,12 +242,18 @@ function text_(s) { return ContentService.createTextOutput(s).setMimeType(Conten
 // ===================== the sync =====================
 
 function syncAll() {
+  RUN_STARTED_ = Date.now();
   var lock = LockService.getUserLock();
   if (!lock.tryLock(25000)) return 'already running';
   var me = null;
   var errors = [];
   var n = 0;
+  var claim = '';
   try {
+    // and never two runs of one account at once, whichever way they started (Google doesn't say whose lock
+    // the ping deployment, running as Ethan for no one in particular, gets)
+    claim = claimRun_();
+    if (!claim) return 'already running';
     try { me = whoAmI_(); } catch (err) {
       // taken out of Caledonite (Settings, Account): take its calendars out too, and stop
       if (err && err.notMember) forgetThisAccount_(err.email);
@@ -233,9 +288,27 @@ function syncAll() {
     try { writeStatus_(me, errors, n); } catch (e2) { Logger.log('status: ' + e2.message); }
     return 'Synced ' + n + ' calendars.' + (errors.length ? ' Problems: ' + errors.join(' | ') : '');
   } finally {
+    if (claim) releaseRun_(claim);
     lock.releaseLock();
   }
 }
+// This account's run, marked in the script's cache under the script lock (held only for a moment).
+// It runs out after 400 seconds, longer than a run can last, in case a run is stopped part way.
+function claimRun_() {
+  var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  var key = 'run_' + email.replace(/[^a-z0-9]+/g, '_');
+  var cache = CacheService.getScriptCache();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return '';
+  try {
+    if (cache.get(key)) return '';
+    cache.put(key, String(Date.now()), 400);
+    return key;
+  } finally {
+    lock.releaseLock();
+  }
+}
+function releaseRun_(key) { try { CacheService.getScriptCache().remove(key); } catch (e) { /* it runs out by itself */ } }
 function isCreator_(me, ctx) {
   return String(((ctx.hh || {}).emails || [])[0] || '').toLowerCase() === me.email;
 }
@@ -318,10 +391,14 @@ function syncCalendars_(me, ctx, errors) {
       // the same calendar seen from another of this person's accounts: let that account handle it. It marks the
       // calendar as seen at least every 6 hours; after 12 without, this account takes over (keeping its settings)
       if (doc && doc.account && doc.account !== me.email && Date.now() - (doc.lastSeen || 0) < 12 * 3600e3) { delete seenCalKeys[calKey]; handledElsewhere[calKey] = true; continue; }
-      // calendars set up before family calendars were recognised
+      // written by another of your accounts until now, or not kept up for a while: what this account remembers
+      // writing may not be all there is, so start from what's really there (no month is left behind)
+      var reseed = !!doc && (String(doc.account || '') !== me.email || !doc.lastSeen || Date.now() - doc.lastSeen > 12 * 3600e3 || props.getProperty('h_' + calKey) === null);
+      // calendars set up before family calendars were recognised, or renamed since: shown as family, but never
+      // shared more than before without you choosing it
       if (doc && !doc.userSet && doc.layer === 'own' && isFamilyCal_(id, meta.name)) {
-        writes.push(upd_(docPath, { layer: 'family', share: 'all' }, ['layer', 'share']));
-        doc = merge_(doc, { layer: 'family', share: 'all' });
+        writes.push(upd_(docPath, { layer: 'family' }, ['layer']));
+        doc = merge_(doc, { layer: 'family' });
       }
       if (!doc) {
         doc = merge_(meta, defaultsFor_(cal, isPrimary, me));
@@ -335,7 +412,7 @@ function syncCalendars_(me, ctx, errors) {
       if (doc.show !== false || (doc.share && doc.share !== 'none')) events = readEvents_(cal, id, from, to);
       var d2 = doc;
       events.forEach(function (o) { seen.push({ calKey: calKey, shown: d2.show !== false, share: d2.share || 'busy', doc: d2, ev: o }); });
-      var fw = feedWrites_(me, ctx, calKey, doc, events, props);
+      var fw = feedWrites_(me, ctx, calKey, doc, events, props, reseed ? copiesOf_(me.person, calKey) : null);
       writes = writes.concat(fw.writes);
       pending[fw.key] = fw.value;
       if (doc.role === 'rota') rotaChanged_(me, ctx, calKey, events, props, doc);
@@ -360,9 +437,19 @@ function syncCalendars_(me, ctx, errors) {
     toForget.push(k);
   });
   // and their records, once they've been gone a couple of days (so they leave Settings too)
+  var listed = me.main ? accountsOf_(me, ctx) : {};
   Object.keys(ctx.calDocs || {}).forEach(function (ck) {
     var d = ctx.calDocs[ck];
-    if (ck === 'rotalink' || seenCalKeys[ck] || String(d.account || '') !== me.email || Date.now() - (d.lastSeen || 0) < 2 * 864e5) return;
+    if (ck === 'rotalink' || seenCalKeys[ck] || handledElsewhere[ck]) return;
+    var acc = String(d.account || '');
+    if (acc === me.email) {
+      if (Date.now() - (d.lastSeen || 0) >= 2 * 864e5) writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + me.person + '__' + ck) });
+      return;
+    }
+    // an account taken out in the app that can't run any more to tidy up after itself (disconnected, access
+    // taken away, or the account closed): your main account takes its calendars and their copies out
+    if (!me.main || !acc || acc === 'Rota link' || listed[acc] || Date.now() - (d.lastSeen || 0) < 12 * 3600e3) return;
+    Object.keys(copiesOf_(me.person, ck)).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
     writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + me.person + '__' + ck) });
   });
   fsCommit_(writes);
@@ -372,6 +459,30 @@ function syncCalendars_(me, ctx, errors) {
   return { count: count, seen: seen };
 }
 function safeName_(cal) { try { return cal.getName(); } catch (e) { return ''; } }
+
+// Every copy of one of this person's calendars in Firestore, whichever account wrote it: { path: '' }
+function copiesOf_(person, calKey) {
+  var out = {};
+  var prefix = person + '__' + calKey + '__';
+  ['privateFeeds', 'sharedFeeds'].forEach(function (coll) {
+    fsQuery_(coll, [['owner', person], ['calKey', calKey]]).forEach(function (d) {
+      if (String(d.id).indexOf(prefix) === 0) out[HOUSEHOLD + '/' + coll + '/' + d.id] = '';
+    });
+  });
+  return out;
+}
+// The Google accounts that are this person's in Caledonite: { email: true }
+function accountsOf_(me, ctx) {
+  var out = {};
+  (me.people || []).forEach(function (p) {
+    if (p.id !== me.person) return;
+    if (p.data.email) out[String(p.data.email).toLowerCase()] = true;
+    (p.data.linked || []).forEach(function (x) { if (x) out[String(x).toLowerCase()] = true; });
+  });
+  ((ctx.hh || {}).linked || []).forEach(function (x) { if (x && x.person === me.person && x.email) out[String(x.email).toLowerCase()] = true; });
+  out[me.email] = true;
+  return out;
+}
 
 function defaultsFor_(cal, isPrimary, me) {
   var id = cal.getId();
@@ -411,7 +522,7 @@ function readEvents_(cal, id, from, to) {
         var res = Calendar.Events.list(id, {
           timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: true, showDeleted: false, maxResults: 2500,
           pageToken: token || undefined,
-          fields: 'nextPageToken,items(id,iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,attendees(self,responseStatus))'
+          fields: 'nextPageToken,items(id,iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,visibility,attendees(self,responseStatus))'
         });
         (res.items || []).forEach(function (it) { var o = normApi_(it); if (o) out.push(o); });
         token = res.nextPageToken;
@@ -421,9 +532,13 @@ function readEvents_(cal, id, from, to) {
       Logger.log('Calendar API failed for ' + id + ', using CalendarApp: ' + err.message);
     }
   }
+  // the slow way can take minutes for a busy calendar: never so long that the whole run is stopped (and nothing
+  // it did is saved). This calendar keeps what it had until the next run.
+  var late = function () { if (RUN_STARTED_ && Date.now() - RUN_STARTED_ > 180e3) throw new Error('Not enough time left in this run to read it; trying again next run.'); };
+  late();
   var list = cal.getEvents(from, to);
   var evs = [];
-  for (var k = 0; k < list.length; k++) { var o2 = norm_(list[k]); if (o2) evs.push(o2); }
+  for (var k = 0; k < list.length; k++) { if (k % 25 === 24) late(); var o2 = norm_(list[k]); if (o2) evs.push(o2); }
   return evs;
 }
 // The same shape as norm_, from a Calendar API event
@@ -444,8 +559,10 @@ function normApi_(it) {
     o.s = startMs;
     o.e = new Date(it.end.dateTime).getTime();
   }
-  o.id = shortKey_(it.iCalUID + '|' + startMs);
-  o.uid = shortKey_(it.iCalUID);
+  // (a calendar shared with you as free/busy only may not say an event's iCalUID)
+  var ical = it.iCalUID || it.id || '';
+  o.id = shortKey_(ical + '|' + startMs);
+  o.uid = shortKey_(ical);
   if (it.recurringEventId) o.sid = o.uid;
   // only in your own copy: what the app needs to change or delete this event
   if (it.id) o.gid = it.id;
@@ -453,7 +570,8 @@ function normApi_(it) {
   if (it.location) o.l = String(it.location).slice(0, 80);
   var m = desc.match(/\[caledonite:([^\]\s]+)\]/);
   if (m) o.tag = m[1];
-  if (/#busy\b/i.test(desc)) o.pb = 1;
+  // "#busy", or marked Private in Google Calendar: your partner only ever sees "Busy"
+  if (/#busy\b/i.test(desc) || it.visibility === 'private' || it.visibility === 'confidential') o.pb = 1;
   return o;
 }
 
@@ -480,18 +598,30 @@ function norm_(ev) {
   var m = desc.match(/\[caledonite:([^\]\s]+)\]/);
   if (m) o.tag = m[1];
   if (/#busy\b/i.test(desc)) o.pb = 1;
+  try {
+    var vis = ev.getVisibility();
+    if (vis === CalendarApp.Visibility.PRIVATE || vis === CalendarApp.Visibility.CONFIDENTIAL) o.pb = 1;
+  } catch (e) { /* ignore */ }
   return o;
 }
 
 // Turn one calendar's events into the owner's copy and the partner's filtered copy, by month.
 // Returns the writes and the property to save once they have gone through.
-function feedWrites_(me, ctx, calKey, doc, events, props) {
+// known: copies found in Firestore ({ path: '' }), when what this account remembers may not be all of them
+function feedWrites_(me, ctx, calKey, doc, events, props, known) {
   var writes = [];
   var pk = 'h_' + calKey;
   var old = {};
   try { old = JSON.parse(props.getProperty(pk) || '{}'); } catch (e) { old = {}; }
+  // anything found that this account didn't write is written again (or taken out)
+  if (known) Object.keys(known).forEach(function (path) { if (!(path in old)) old[path] = ''; });
   var next = {};
   var byMonth = {};
+  // in a fixed order, so the same events listed differently by Google are never written again
+  events = events.slice().sort(function (a, b) {
+    var ka = (a.ad ? a.sd : '') + '|' + (a.s || 0) + '|' + a.id, kb = (b.ad ? b.sd : '') + '|' + (b.s || 0) + '|' + b.id;
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
   events.forEach(function (e) {
     var mk = e.ad ? e.sd.slice(0, 7) : Utilities.formatDate(new Date(e.s), TZ, 'yyyy-MM');
     (byMonth[mk] = byMonth[mk] || []).push(e);
@@ -507,7 +637,8 @@ function feedWrites_(me, ctx, calKey, doc, events, props) {
     if (shared) put_(HOUSEHOLD + '/sharedFeeds/' + me.person + '__' + calKey + '__' + mk, base, shared);
   });
   function put_(path, base, evs) {
-    var h = hash_(JSON.stringify(evs));
+    // whose it is too (an email corrected before joining, or another of your accounts taking over)
+    var h = hash_(JSON.stringify([base, evs]));
     next[path] = h;
     if (old[path] !== h) writes.push(upd_(path, merge_(base, { events: evs, updated: Date.now() })));
   }
@@ -766,7 +897,8 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     if (s < win.from || s > win.to) return;
     var k = evStartKey_(e);
     while (map[k]) k += '+';
-    map[k] = [s, en, e.t || 'Shift'];
+    // a shift marked Private or #busy is never named, not even by a change to its name
+    map[k] = [s, en, e.pb ? '' : (e.t || 'Shift')];
   });
   var key = 'rota_' + calKey;
   var before = null;
@@ -817,7 +949,7 @@ function processOutbox_(me, ctx) {
     return acc ? acc === me.email : me.main;
   });
   if (!items.length) return false;
-  var rs = { tagMap: {}, owned: null, defaultId: null };
+  var rs = { tagMap: {}, owned: null, defaultId: null, removed: {} };
   var writes = [];
   var changed = false;
   // in the order they reached the database (two phones' clocks can differ: an answer must never come before
@@ -903,6 +1035,8 @@ function findByTag_(rs, tag) {
       (res.items || []).forEach(function (x) { if (x.status !== 'cancelled' && String(x.description || '').indexOf(marker) >= 0) found.push({ calId: calId, eventId: x.id }); });
     });
   }
+  // never something this run has just deleted (Google's search can take a moment to catch up)
+  found = found.filter(function (x) { return !(rs.removed || {})[x.calId + '|' + x.eventId]; });
   rs.tagMap[tag] = found;
   return found;
 }
@@ -954,18 +1088,27 @@ function changeByTag_(o, rs) {
   var inst = /^\d{8}(T\d{6}Z)?$/.test(String(o.inst || '')) ? String(o.inst) : '';
   var owned = ownedCals_(rs);
   var targets = findByTag_(rs, o.tag).filter(function (t) { return owned[t.calId] && (!inst || String(t.eventId).indexOf('_') < 0); });
+  // Google lists a time of a series that was changed on its own (an exception, "series_20261113T190000Z")
+  // next to the series itself
+  var series = {};
+  targets.forEach(function (t) { if (String(t.eventId).indexOf('_') < 0) series[t.calId + '|' + t.eventId] = true; });
   var n = 0;
   targets.forEach(function (t) {
     var id = inst ? t.eventId + '_' + inst : t.eventId;
+    var exception = !inst && String(t.eventId).indexOf('_') > 0;
+    // deleting the series takes its changed times with it
+    if (exception && o.op === 'delete' && series[t.calId + '|' + String(t.eventId).split('_')[0]]) return;
     try {
-      if (o.op === 'delete') { Calendar.Events.remove(t.calId, id); n++; return; }
+      if (o.op === 'delete') { Calendar.Events.remove(t.calId, id); rs.removed[t.calId + '|' + id] = true; n++; return; }
       var changes = o.changes || {};
       if (o.event && o.event.title && !changes.title) changes = merge_(changes, { title: o.event.title });
+      // a changed time keeps its own day and time when every time is changed: just the new name
+      if (exception) changes = changes.title ? { title: changes.title } : {};
       var patch = patchFor_(changes, t.calId, id, tzOf_(o));
       if (Object.keys(patch).length) { Calendar.Events.patch(patch, t.calId, id); n++; }
     } catch (err) {
-      // that occurrence is already gone (or this copy doesn't repeat): nothing to do
-      if (inst && /not found|404|410|deleted/i.test(String(err && err.message || err))) return;
+      // already gone (that occurrence, or the whole thing): nothing to do
+      if ((inst || o.op === 'delete') && gone_(err)) return;
       throw err;
     }
   });
@@ -980,13 +1123,21 @@ function editOwn_(o, rs) {
   var all = o.scope === 'all' && o.rid;
   var target = all ? o.rid : o.gid;
   if (!target) return { refused: 'no event' };
-  if (o.op === 'remove') { Calendar.Events.remove(o.calId, target); return { changed: 1 }; }
+  if (o.op === 'remove') {
+    // deleted in Google Calendar meanwhile, or by an earlier try whose "done" didn't get saved: done
+    try { Calendar.Events.remove(o.calId, target); } catch (err) { if (gone_(err)) return { changed: 0, gone: true }; throw err; }
+    rs.removed[o.calId + '|' + target] = true;
+    return { changed: 1 };
+  }
   var changes = o.changes || {};
   var patch = all ? (changes.title ? { summary: changes.title } : {}) : patchFor_(changes, o.calId, target, tzOf_(o));
   if (!Object.keys(patch).length) return { changed: 0 };
   Calendar.Events.patch(patch, o.calId, target);
   return { changed: 1 };
 }
+
+// The Calendar API saying an event isn't there (any more)
+function gone_(err) { return /not found|404|410|has been deleted/i.test(String(err && err.message || err)); }
 
 // Times typed in the app are the phone's clock, so a phone abroad sends its time zone with them
 function tzOf_(o) {
@@ -1126,7 +1277,8 @@ function fireReminders_(me, ctx, seen) {
       fireTimes_(rem.times, o, settings.remindAt || '09:00').forEach(function (f) {
         if (f.at > now || now - f.at > 36 * 3600e3) return;
         var key = personId + '|' + occ + '|' + f.code;
-        if (fired[key] || doneAt >= f.at) return;
+        // (newly: the same event seen twice by this account, say in your partner's calendar shared with you)
+        if (fired[key] || newly[key] || doneAt >= f.at) return;
         newly[key] = now;
         var line = (REMIND_MINS_[f.code] && o.l) ? leaveLine_(f.code, o) : reminderLine_(o, now);
         var body = line + (rem.note ? ' ' + String(rem.note).replace(/\.?$/, '.') : '');
@@ -1267,7 +1419,8 @@ function digestData_(me, ctx) {
   };
   var overrides = {};
   fsList_(HOUSEHOLD + '/shifts').forEach(function (d) { if (d.data.person && d.data.day) overrides[d.data.person + '|' + d.data.day] = d.data; });
-  var jobs = fsList_(HOUSEHOLD + '/jobs').map(function (j) { return j.data; });
+  // only the ones still to do (done ones are kept, and there are more of them every week)
+  var jobs = fsQuery_('jobs', [['done', false]]).map(function (j) { return j.data; });
   return {
     me: { id: me.person, name: 'You', settings: ctx.settings || {}, items: feedsFor('privateFeeds', me.person), mine: true },
     partner: partner ? { id: partner.id, name: partner.name || 'Your partner', settings: partner.settings || {}, items: feedsFor('sharedFeeds', partner.id), mine: false } : null,
@@ -1582,7 +1735,8 @@ function processNotify_(ctx) {
     var notif = settings.notif || {};
     if (d.kind && notif[d.kind] === false) return;
     if (!tokensFor[d.to]) tokensFor[d.to] = fsList_(HOUSEHOLD + '/people/' + d.to + '/tokens');
-    var msg = { title: String(d.title || 'Caledonite'), body: String(d.body || ''), link: String(d.link || '#today'), tag: String(n.id), kind: String(d.kind || '') };
+    // Firebase sends at most 4 KB, so a long note is cut short rather than never arriving
+    var msg = { title: cut_(d.title || 'Caledonite', 150), body: cut_(d.body || '', 700), link: cut_(d.link || '#today', 200), tag: String(n.id), kind: String(d.kind || '') };
     if (d.reqId) msg.reqId = String(d.reqId);
     if (d.ask) msg.ask = String(d.ask);
     tokensFor[d.to].forEach(function (t) {
@@ -1591,6 +1745,7 @@ function processNotify_(ctx) {
     });
   });
 }
+function cut_(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 function sendPush_(token, msg) {
   var url = 'https://fcm.googleapis.com/v1/projects/' + prop_('PROJECT_ID') + '/messages:send';
   var res = UrlFetchApp.fetch(url, {
