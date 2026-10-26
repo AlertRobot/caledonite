@@ -153,6 +153,7 @@ const H = {
     const st = store.state;
     const { it, ev } = findEvent(st, ui.ev.ref, ui.ev.day);
     const base = ev || it;
+    if (!base) return;
     const owner = (it && it.owner) || base.owner || st.me;
     const rem = reminderFor(st, ui.ev.ref, Object.assign({}, base, { owner }));
     const note = rem && rem.note === el.dataset.v ? '' : el.dataset.v;
