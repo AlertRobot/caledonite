@@ -11,7 +11,7 @@ import { applyLook, setLook } from './theme.js';
 import { FIREBASE, APP } from './config.js';
 import { icon } from './ui.js';
 import { dayKey, addDays, fromDayKey, mondayOf, esc, minutesOf, pad } from './util.js';
-import { freeSlots, settingsOf, shiftFor, SHIFT_ORDER, nameOf, reminderFor, reminderId, quietNight, repeatOf, leaveDaysFor, nextBothFree, countdownShared } from './logic.js';
+import { freeSlots, settingsOf, shiftFor, SHIFT_ORDER, nameOf, reminderFor, reminderId, quietNight, repeatOf, leaveDaysFor, nextBothFree, countdownShared, editTimes } from './logic.js';
 import { whenLabel } from './store.js';
 
 const root = document.getElementById('app');
@@ -82,7 +82,6 @@ function go(hash) {
   if (location.hash === hash) render();
   else location.hash = hash;
 }
-function hhmmOf(d) { return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 // the next Monday (1) ... Sunday (7), counting today
 function nextWeekday(iso) {
   for (let i = 0; i < 7; i++) { const d = addDays(new Date(), i); if ((d.getDay() || 7) === iso) return dayKey(d); }
@@ -283,10 +282,9 @@ const H = {
     if (ui.ev.scope !== 'all') {
       if (d.day) changes.day = d.day;
       if (!src.allDay && (d.start || d.end || d.day)) {
-        changes.start = d.start || hhmmOf(src.start);
-        changes.end = d.end || hhmmOf(src.end);
-        changes.day = changes.day || dayKey(src.start);
-        if (changes.end <= changes.start) return toast('The end needs to be after the start.');
+        const t = editTimes(src, d);
+        if (t.error) return toast(t.error);
+        Object.assign(changes, t);
       }
       if (src.allDay && d.day) changes.allDay = true;
     }

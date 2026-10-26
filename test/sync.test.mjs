@@ -20,7 +20,9 @@ const Utilities = {
   },
   formatDate(d, tz, fmt) {
     const p = parts(d, tz);
-    return fmt.replace('yyyy', p.year).replace('MM', p.month).replace('dd', p.day).replace(/^H$/, String(+p.hour)).replace(/^m$/, String(+p.minute));
+    if (fmt === 'H') return String(+p.hour);
+    if (fmt === 'm') return String(+p.minute);
+    return fmt.replace("'T'", 'T').replace('yyyy', p.year).replace('MM', p.month).replace('dd', p.day).replace('HH', p.hour).replace('mm', p.minute).replace('ss', p.second);
   }
 };
 const ctx = vm.createContext({ Utilities, Logger: { log() {} } });
@@ -169,4 +171,25 @@ test('a reminder due while asleep after nights waits', () => {
   ctx.sleepUntil_ = realSleep;
   assert.equal(writes.length, 1);
   assert.equal(JSON.stringify(writes[0].updateMask.fieldPaths), '["sendAfter"]');
+});
+
+test('changing the day of something overnight or over several days keeps its end', () => {
+  const ev = (s, e) => ({ start: { dateTime: s }, end: { dateTime: e } });
+  ctx.Calendar = { Events: { get: (cal, id) => ({
+    night: ev('2026-11-06T22:00:00Z', '2026-11-07T01:00:00Z'),
+    conf: ev('2026-11-09T09:00:00Z', '2026-11-11T17:00:00Z')
+  })[id] } };
+  // the app's change for "move the late film to Saturday"
+  let p = ctx.patchFor_({ day: '2026-11-07', start: '22:00', end: '01:00', endDay: '2026-11-08' }, 'c', 'night', 'Europe/London');
+  assert.equal(p.start.dateTime, '2026-11-07T22:00:00');
+  assert.equal(p.end.dateTime, '2026-11-08T01:00:00');
+  // a three-day conference moved a week on
+  p = ctx.patchFor_({ day: '2026-11-16', start: '09:00', end: '17:00', endDay: '2026-11-18' }, 'c', 'conf', 'Europe/London');
+  assert.equal(p.end.dateTime, '2026-11-18T17:00:00');
+  // only a new start: it keeps its length, past midnight too
+  p = ctx.patchFor_({ day: '2026-11-07', start: '23:00' }, 'c', 'night', 'Europe/London');
+  assert.equal(p.end.dateTime, '2026-11-08T02:00:00');
+  // a plain same-day change is as before
+  p = ctx.patchFor_({ day: '2026-11-07', start: '10:00', end: '11:00' }, 'c', 'night', 'Europe/London');
+  assert.equal(p.end.dateTime, '2026-11-07T11:00:00');
 });

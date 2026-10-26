@@ -6,7 +6,7 @@ import { serve } from './serve.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium, devices } = require('playwright');
-const PORT = 8841;
+const PORT = Number(process.env.PORT) || 8841;
 const URL = `http://localhost:${PORT}/index.html`;
 let server; let browser;
 

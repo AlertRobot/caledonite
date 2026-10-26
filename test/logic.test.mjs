@@ -210,3 +210,18 @@ test('a late shift that ends at midnight is not a night: no sleeping the next mo
   assert.equal(L.shiftFor(st, 'sophie', k(8)).type, 'late');
   assert.equal(L.buildDay(st, k(9)).persons.sophie.sleep, null);
 });
+
+test('changing the day of something overnight or over several days keeps its end', () => {
+  const night = { start: atTime(k(3), '22:00'), end: atTime(k(4), '01:00') };
+  assert.deepEqual(L.editTimes(night, { day: k(5) }), { day: k(5), start: '22:00', end: '01:00', endDay: k(6) });
+  const conf = { start: atTime(k(3), '09:00'), end: atTime(k(5), '17:00') };
+  assert.deepEqual(L.editTimes(conf, { day: k(10) }), { day: k(10), start: '09:00', end: '17:00', endDay: k(12) });
+  const toMidnight = { start: atTime(k(3), '20:00'), end: atTime(k(4), '00:00') };
+  assert.equal(L.editTimes(toMidnight, { start: '21:00' }).endDay, k(4));
+  // an overnight one can become a same-day one
+  assert.equal(L.editTimes(night, { end: '23:30' }).endDay, undefined);
+  // a same-day one still can't end before it starts
+  const dentist = { start: atTime(k(3), '16:30'), end: atTime(k(3), '17:15') };
+  assert.match(L.editTimes(dentist, { end: '09:00' }).error, /end needs to be after/);
+  assert.deepEqual(L.editTimes(dentist, { day: k(4) }), { day: k(4), start: '16:30', end: '17:15' });
+});

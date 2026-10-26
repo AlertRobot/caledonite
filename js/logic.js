@@ -2,7 +2,7 @@
 // Pure functions over the store's state. No network, no DOM.
 import {
   dayKey, fromDayKey, addDays, addMinutes, atTime, startOfDay, isoWeekday, fmtTime, fmtHM, fmtRange,
-  relDay, relDayLower, roundDown, roundUp, mergeIntervals, subtractIntervals, intersectIntervals, DAY_NAMES, minutesOf
+  relDay, relDayLower, roundDown, roundUp, mergeIntervals, subtractIntervals, intersectIntervals, DAY_NAMES, minutesOf, hhmm
 } from './util.js';
 
 export const DEFAULT_SHIFT_TYPES = {
@@ -678,6 +678,27 @@ export function sleepingUntil(state, pid, now = new Date()) {
   const p = d.persons[pid];
   if (p && p.sleep && p.sleep.start <= now && p.sleep.end > now) return p.sleep.end;
   return null;
+}
+
+// ---------- changing an event's time ----------
+// The new timing for an event being changed (d: what was typed, any of day, start, end). Something that runs
+// over several days keeps its length in days; something that already ran past midnight can still end the next
+// morning. Returns { day, start, end, endDay? }, or { error }.
+export function editTimes(src, d) {
+  const day = d.day || dayKey(src.start);
+  const start = d.start || hhmm(src.start);
+  const end = d.end || hhmm(src.end);
+  const nights = Math.round((startOfDay(src.end) - startOfDay(src.start)) / 86400000);
+  let endDay = day;
+  if (src.end - src.start >= 86400000) endDay = dayKey(addDays(fromDayKey(day), nights));
+  else if (end <= start) {
+    if (nights < 1) return { error: 'The end needs to be after the start.' };
+    endDay = dayKey(addDays(fromDayKey(day), 1));
+  }
+  if (atTime(endDay, end) <= atTime(day, start)) return { error: 'The end needs to be after the start.' };
+  const out = { day, start, end };
+  if (endDay !== day) out.endDay = endDay;
+  return out;
 }
 
 // ---------- reminders ----------

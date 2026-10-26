@@ -930,13 +930,23 @@ function patchFor_(changes, calId, eventId, zone) {
     p.start = { date: day, dateTime: null };
     p.end = { date: keyPlus_(day, len), dateTime: null };
   } else {
+    zone = zone || TZ;
     var exSt = wasAllDay ? '' : String(exStart.dateTime || '').slice(11, 16);
-    var exEn = wasAllDay ? '' : String(exEnd.dateTime || '').slice(11, 16);
     var st = hm_(changes.start) || exSt || '09:00';
-    var en = hm_(changes.end) || (exSt && exEn ? addMins_(st, Math.max(15, mins_(exEn) - mins_(exSt))) : addMins_(st, 60));
-    if (mins_(en) <= mins_(st)) en = addMins_(st, 60);
-    p.start = { dateTime: day + 'T' + st + ':00', timeZone: zone || TZ, date: null };
-    p.end = { dateTime: day + 'T' + en + ':00', timeZone: zone || TZ, date: null };
+    p.start = { dateTime: day + 'T' + st + ':00', timeZone: zone, date: null };
+    // the end on its own day: overnight, or the last day of something longer
+    var endDay = /^\d{4}-\d{2}-\d{2}$/.test(String(changes.endDay || '')) && changes.endDay > day ? changes.endDay : day;
+    var en = hm_(changes.end);
+    var len = wasAllDay ? 0 : Date.parse(exEnd.dateTime) - Date.parse(exStart.dateTime);
+    if (!en && len > 0) {
+      // no new end: keep how long it was, even past midnight
+      var startMs = Utilities.parseDate(day + ' ' + st + ':00', zone, 'yyyy-MM-dd HH:mm:ss').getTime();
+      p.end = { dateTime: Utilities.formatDate(new Date(startMs + len), zone, "yyyy-MM-dd'T'HH:mm:ss"), timeZone: zone, date: null };
+    } else {
+      en = en || addMins_(st, 60);
+      if (endDay === day && mins_(en) <= mins_(st)) en = addMins_(st, 60);
+      p.end = { dateTime: endDay + 'T' + en + ':00', timeZone: zone, date: null };
+    }
   }
   return p;
 }

@@ -168,7 +168,7 @@ export function createDemoBackend(me = 'ethan') {
           if (ch.day && !e.ad) {
             const len = e.e - e.s;
             const s0 = atTime(ch.day, ch.start || new Date(e.s).toTimeString().slice(0, 5));
-            e.s = s0.getTime(); e.e = ch.end ? atTime(ch.day, ch.end).getTime() : e.s + len;
+            e.s = s0.getTime(); e.e = ch.end ? atTime(ch.endDay || ch.day, ch.end).getTime() : e.s + len;
           }
         }
       } else if (o.op === 'delete' || o.op === 'remove') {
