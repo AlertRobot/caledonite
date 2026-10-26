@@ -993,10 +993,11 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   var win = { from: now - 864e5, to: now + 21 * 864e5 };
   var map = {};
   // in time order, so a day's second shift is always its second, however Google listed them
-  var startOf = function (e) { return e.ad ? Utilities.parseDate(e.sd, TZ, 'yyyy-MM-dd').getTime() : e.s; };
-  events = events.slice().sort(function (a, b) { return startOf(a) - startOf(b) || (a.ad ? -1 : 0) - (b.ad ? -1 : 0); });
-  events.forEach(function (e) {
-    var s = e.ad ? Utilities.parseDate(e.sd, TZ, 'yyyy-MM-dd').getTime() : e.s;
+  // (each start worked out once: Utilities calls aren't free)
+  events = events.map(function (e) { return { e: e, s: e.ad ? Utilities.parseDate(e.sd, TZ, 'yyyy-MM-dd').getTime() : e.s }; })
+    .sort(function (a, b) { return a.s - b.s || (a.e.ad ? -1 : 0) - (b.e.ad ? -1 : 0); });
+  events.forEach(function (x) {
+    var e = x.e, s = x.s;
     var en = e.ad ? Utilities.parseDate(e.ed || keyPlus_(e.sd, 1), TZ, 'yyyy-MM-dd').getTime() : e.e;
     if (s < win.from || s > win.to) return;
     // shared as working hours: your partner never sees all-day entries or very long ones, so never hears of them
