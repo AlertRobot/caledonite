@@ -268,3 +268,15 @@ test('signing out takes this phone off your notifications first', async () => {
   assert.match(so, /fs\.deleteDoc\(ref\(`people\/\$\{me\}\/tokens\/\$\{id\}`\)\)/);
   assert.match(so, /removeItem\('caledonite\.push'\)/);
 });
+
+test("the rules: a request's asker, who it's for and whether it's just for one of you can't be changed or forged", async () => {
+  const { readFileSync } = await import('node:fs');
+  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const rq = rules.slice(rules.indexOf('match /requests/{id}'), rules.indexOf('match /outbox/{id}'));
+  assert.match(rq, /allow create: if member\(\) && personEmail\(request\.resource\.data\.from\) == myEmail\(\);/);
+  assert.match(rq, /allow update: if member\(\) && !changed\(\)\.hasAny\(\['from', 'to', 'type', 'own', 'people'\]\);/);
+  assert.match(rq, /allow delete: if false;/);
+  // and the catch-all for shared lists no longer lets requests through
+  const generic = rules.slice(rules.indexOf('match /{coll}/{id}'));
+  assert.doesNotMatch(generic, /'requests'/);
+});

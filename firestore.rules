@@ -71,6 +71,18 @@ service cloud.firestore {
         match /tokens/{t} {
           allow read, write: if member() && personEmail(pid) == myEmail();
         }
+        // things just for you (reminders, private countdowns): they can name events you share only as "Busy"
+        match /private/{doc} {
+          allow read, write: if member() && personEmail(pid) == myEmail();
+        }
+      }
+      // requests: anyone can answer, but who asked, who it's for and whether it's just for one of you are fixed
+      // (the calendar sync uses them to decide whether your partner may change the event that came from it)
+      match /requests/{id} {
+        allow read: if member();
+        allow create: if member() && personEmail(request.resource.data.from) == myEmail();
+        allow update: if member() && !changed().hasAny(['from', 'to', 'type', 'own', 'people']);
+        allow delete: if false;
       }
       // asks to add, change or remove things in Google Calendar: always signed with who asked.
       // Only your own: they can hold the names of things you share with your partner only as "Busy".
@@ -85,7 +97,7 @@ service cloud.firestore {
         allow read, update, delete: if false;
       }
       match /{coll}/{id} {
-        allow read, write: if member() && coll in ['requests', 'notes', 'shifts', 'jobs', 'ideas'];
+        allow read, write: if member() && coll in ['notes', 'shifts', 'jobs', 'ideas'];
       }
     }
   }
