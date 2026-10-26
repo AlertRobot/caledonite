@@ -25,6 +25,8 @@ export function viewRequests(state) {
     <div class="stack">${recent.length ? recent.map((r) => reqCard(state, r)).join('') : empty(ui.reqTab === 'for' ? 'Nothing waiting for you.' : 'You haven’t asked anything lately.')}</div>
     ${older.length ? `<details class="older"><summary class="b">Older (${older.length})</summary><div class="stack">${older.slice(0, 20).map((r) => reqCard(state, r)).join('')}</div></details>` : ''}`;
 }
+// worked out afresh each time: a saved "Tomorrow, 7pm" would be wrong by the next day
+function whenText(w) { return w ? whenLabel(w) || w.label || '' : ''; }
 function isOpen(r) { return r.status === 'waiting' || r.status === 'maybe' || r.status === 'other' || r.status === 'sent'; }
 
 function reqCard(state, r) {
@@ -32,7 +34,7 @@ function reqCard(state, r) {
   const other = mine ? r.to : r.from;
   const on = nameOf(state, other);
   const head = `<div class="row">${mine ? '' : avatar(state, r.from, 32)}<span class="grow b small muted">${mine ? 'You asked' : esc(nameOf(state, r.from))}, ${esc(agoText(r.created))}</span><span class="pill">${esc(TYPE_LABEL[r.type] || 'Request')}</span></div>`;
-  const when = r.when ? `<p class="row small-gap b">${icon.clock(18)}${esc(r.when.label || whenLabel(r.when))}</p>` : '';
+  const when = r.when ? `<p class="row small-gap b">${icon.clock(18)}${esc(whenText(r.when))}</p>` : '';
   let body = '';
   const id = esc(r.id);
   if (!mine) {
@@ -54,7 +56,7 @@ function reqCard(state, r) {
     } else if (r.status === 'sent') {
       body = `<p class="small muted">No answer needed.</p><button type="button" class="btn sec self-start" data-act="answer" data-a="seen" data-id="${id}">Got it</button>`;
     } else if (r.status === 'other') {
-      body = `<p class="note-box">You suggested ${esc(r.counter && r.counter.label)}. Waiting for ${esc(on)}.</p>`;
+      body = `<p class="note-box">You suggested ${esc(whenText(r.counter))}. Waiting for ${esc(on)}.</p>`;
     } else body = resultLine(state, r, false);
   } else {
     if (r.status === 'waiting') {
@@ -65,7 +67,7 @@ function reqCard(state, r) {
     } else if (r.status === 'maybe') {
       body = `<p class="note-box">${esc(on)} isn't sure yet.${r.hold ? ' It stays pencilled in.' : ''}</p>`;
     } else if (r.status === 'other') {
-      body = `<p class="note-box">${esc(on)} suggested <b>${esc(r.counter && r.counter.label)}</b> instead.</p>
+      body = `<p class="note-box">${esc(on)} suggested <b>${esc(whenText(r.counter))}</b> instead.</p>
         <div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="accept-counter" data-id="${id}">That works</button><button type="button" class="btn link-btn" data-act="answer" data-a="cancel" data-id="${id}">Not this time</button></div>`;
     } else if (r.status === 'sent') {
       body = `<p class="small muted">Sent. No answer needed.</p>`;
