@@ -852,6 +852,10 @@ test('the morning summary reads only the jobs still to do, not every job ever do
   ctx.fsQuery_ = (coll, eqs) => { asked.push(['query', coll, JSON.stringify(eqs)]); return []; };
   ctx.digestData_({ person: 'ethan' }, { settings: {}, people: { ethan: {} } });
   assert.ok(!asked.some((a) => a[0] === 'list' && a[1].endsWith('/jobs')));
+  // nor every shift ever put in by hand: from yesterday on
+  assert.ok(!asked.some((a) => a[0] === 'list' && a[1].endsWith('/shifts')));
+  const sh = asked.find((a) => a[1] === 'shifts');
+  assert.ok(sh && JSON.parse(sh[2])[0][2] === '>=', 'shifts from a day on');
   assert.ok(asked.some((a) => a[1] === 'jobs' && a[2] === '[["done",false]]'));
 });
 
@@ -1079,4 +1083,16 @@ test("a rota calendar that isn't read (not shown, shared as Nothing) doesn't for
     [key]: { owner: 'sophie', calKey: key, calId, name: 'Rota', color: '#1', canWrite: true, primary: false, account: 's@x.com', lastSeen: Date.now(), show: false, share: 'none', role: 'rota', layer: 'own' }
   } }, []);
   assert.match(store[`rota_${key}`], /Long day/);
+});
+
+test('a "from this day on" query asks Firestore for just that', () => {
+  // a fresh copy of the script (other checks stand in for fsQuery_ itself)
+  const c2 = vm.createContext({ Utilities, Logger: { log() {} } });
+  vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8'), c2);
+  let body = null;
+  c2.call_ = (m, url, b) => { body = b; return []; };
+  c2.prop_ = () => 'proj';
+  c2.fsQuery_('shifts', [['day', '2026-10-25', '>=']]);
+  assert.equal(body.structuredQuery.where.fieldFilter.op, 'GREATER_THAN_OR_EQUAL');
+  assert.equal(body.structuredQuery.where.fieldFilter.value.stringValue, '2026-10-25');
 });

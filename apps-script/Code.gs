@@ -1467,7 +1467,9 @@ function digestData_(me, ctx) {
     return list;
   };
   var overrides = {};
-  fsList_(HOUSEHOLD + '/shifts').forEach(function (d) { if (d.data.person && d.data.day) overrides[d.data.person + '|' + d.data.day] = d.data; });
+  // from yesterday on (the summaries look at today and the week ahead): not every shift ever put in by hand
+  var since = keyPlus_(Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), -1);
+  fsQuery_('shifts', [['day', since, '>=']]).forEach(function (d) { if (d.data.person && d.data.day) overrides[d.data.person + '|' + d.data.day] = d.data; });
   // only the ones still to do (done ones are kept, and there are more of them every week)
   var jobs = fsQuery_('jobs', [['done', false]]).map(function (j) { return j.data; });
   return {
@@ -1896,8 +1898,10 @@ function fsList_(coll) {
   } while (token);
   return out;
 }
+// eqs: [field, value] (equal), or [field, value, '>='] for from that value on
 function fsQuery_(collId, eqs) {
-  var filters = eqs.map(function (f) { return { fieldFilter: { field: { fieldPath: f[0] }, op: 'EQUAL', value: toValue_(f[1]) } }; });
+  var ops = { '>=': 'GREATER_THAN_OR_EQUAL' };
+  var filters = eqs.map(function (f) { return { fieldFilter: { field: { fieldPath: f[0] }, op: ops[f[2]] || 'EQUAL', value: toValue_(f[1]) } }; });
   var where = filters.length === 1 ? filters[0] : { compositeFilter: { op: 'AND', filters: filters } };
   var r = call_('post', base_() + '/' + HOUSEHOLD + ':runQuery', { structuredQuery: { from: [{ collectionId: collId }], where: where, limit: 500 } });
   var out = [];
