@@ -62,7 +62,7 @@ function setupProject() {
 
 /** Stop syncing this Google account. */
 function disconnectMe() {
-  removeTriggers_();
+  stopSyncing_();
   Logger.log('This account will no longer sync.');
 }
 
@@ -79,6 +79,34 @@ function backupNow() {
 function forgetThisAccount_(email) {
   var props = PropertiesService.getUserProperties();
   var all = props.getProperties();
+  // never connected here (someone who just opened the connect page): nothing to tidy up
+  if (!Object.keys(all).length && !hasTrigger_()) return;
+  var writes = copiesWritten_(all, email);
+  fsQuery_('calendars', [['account', email]]).forEach(function (d) { writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + d.id) }); });
+  fsCommit_(writes);
+  props.deleteAllProperties();
+  removeTriggers_();
+}
+
+// Stop syncing this account: it stops running, and the copies it wrote go too, so none are left behind that
+// no longer follow your sharing choices. Its calendars' settings stay, for if it's connected again.
+function stopSyncing_() {
+  removeTriggers_();
+  var lock = LockService.getUserLock();
+  if (!lock.tryLock(60000)) throw new Error('This account is in the middle of syncing. Try again in a minute.');
+  try {
+    var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+    var props = PropertiesService.getUserProperties();
+    var all = props.getProperties();
+    fsCommit_(copiesWritten_(all, email));
+    Object.keys(all).forEach(function (k) { if (/^(h|rota)_/.test(k)) props.deleteProperty(k); });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Deleting every copy this account remembers writing, and its status
+function copiesWritten_(all, email) {
   var writes = [];
   Object.keys(all).forEach(function (k) {
     if (k.indexOf('h_') !== 0) return;
@@ -86,11 +114,11 @@ function forgetThisAccount_(email) {
     try { old = JSON.parse(all[k] || '{}'); } catch (e) { old = {}; }
     Object.keys(old).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
   });
-  fsQuery_('calendars', [['account', email]]).forEach(function (d) { writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + d.id) }); });
-  writes.push({ 'delete': docName_(HOUSEHOLD + '/status/' + email.replace(/[^a-z0-9]+/g, '_')) });
-  fsCommit_(writes);
-  props.deleteAllProperties();
-  removeTriggers_();
+  if (email) writes.push({ 'delete': docName_(HOUSEHOLD + '/status/' + email.replace(/[^a-z0-9]+/g, '_')) });
+  return writes;
+}
+function hasTrigger_() {
+  return ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'syncAll'; });
 }
 
 function installTrigger_() {
@@ -158,8 +186,8 @@ function connectFromPage() {
   return 'Connected. ' + (n ? n + ' calendar' + (n === '1' ? '' : 's') + ' synced. ' : '') + 'Caledonite now keeps ' + (me.main ? 'your' : 'this account\'s') + ' calendars up to date by itself. You can close this page.';
 }
 function disconnectFromPage() {
-  removeTriggers_();
-  return 'Stopped. This account no longer syncs to Caledonite.';
+  stopSyncing_();
+  return 'Stopped. This account no longer syncs to Caledonite, and its events have been taken out of the app.';
 }
 function nameOf_(me) {
   for (var i = 0; i < me.people.length; i++) if (me.people[i].id === me.person) return me.people[i].data.name || me.person;
@@ -185,6 +213,8 @@ function doPost(e) {
   if (!body.secret || !secret || body.secret !== secret) return text_('no');
   if (cache.get('last_ping')) return text_('ok');
   cache.put('last_ping', String(Date.now()), 45);
+  // the owner's account stopped syncing: a ping doesn't start it again
+  if (!hasTrigger_()) return text_('not connected');
   try { syncAll(); } catch (err) { return text_('error: ' + err.message); }
   return text_('ok');
 }
@@ -318,6 +348,9 @@ function syncCalendars_(me, ctx, errors) {
       // the same calendar seen from another of this person's accounts: let that account handle it. It marks the
       // calendar as seen at least every 6 hours; after 12 without, this account takes over (keeping its settings)
       if (doc && doc.account && doc.account !== me.email && Date.now() - (doc.lastSeen || 0) < 12 * 3600e3) { delete seenCalKeys[calKey]; handledElsewhere[calKey] = true; continue; }
+      // written by another of your accounts until now, or not kept up for a while: what this account remembers
+      // writing may not be all there is, so start from what's really there (no month is left behind)
+      var reseed = !!doc && (String(doc.account || '') !== me.email || !doc.lastSeen || Date.now() - doc.lastSeen > 12 * 3600e3 || props.getProperty('h_' + calKey) === null);
       // calendars set up before family calendars were recognised
       if (doc && !doc.userSet && doc.layer === 'own' && isFamilyCal_(id, meta.name)) {
         writes.push(upd_(docPath, { layer: 'family', share: 'all' }, ['layer', 'share']));
@@ -335,7 +368,7 @@ function syncCalendars_(me, ctx, errors) {
       if (doc.show !== false || (doc.share && doc.share !== 'none')) events = readEvents_(cal, id, from, to);
       var d2 = doc;
       events.forEach(function (o) { seen.push({ calKey: calKey, shown: d2.show !== false, share: d2.share || 'busy', doc: d2, ev: o }); });
-      var fw = feedWrites_(me, ctx, calKey, doc, events, props);
+      var fw = feedWrites_(me, ctx, calKey, doc, events, props, reseed ? copiesOf_(me.person, calKey) : null);
       writes = writes.concat(fw.writes);
       pending[fw.key] = fw.value;
       if (doc.role === 'rota') rotaChanged_(me, ctx, calKey, events, props, doc);
@@ -360,9 +393,19 @@ function syncCalendars_(me, ctx, errors) {
     toForget.push(k);
   });
   // and their records, once they've been gone a couple of days (so they leave Settings too)
+  var listed = me.main ? accountsOf_(me, ctx) : {};
   Object.keys(ctx.calDocs || {}).forEach(function (ck) {
     var d = ctx.calDocs[ck];
-    if (ck === 'rotalink' || seenCalKeys[ck] || String(d.account || '') !== me.email || Date.now() - (d.lastSeen || 0) < 2 * 864e5) return;
+    if (ck === 'rotalink' || seenCalKeys[ck] || handledElsewhere[ck]) return;
+    var acc = String(d.account || '');
+    if (acc === me.email) {
+      if (Date.now() - (d.lastSeen || 0) >= 2 * 864e5) writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + me.person + '__' + ck) });
+      return;
+    }
+    // an account taken out in the app that can't run any more to tidy up after itself (disconnected, access
+    // taken away, or the account closed): your main account takes its calendars and their copies out
+    if (!me.main || !acc || acc === 'Rota link' || listed[acc] || Date.now() - (d.lastSeen || 0) < 12 * 3600e3) return;
+    Object.keys(copiesOf_(me.person, ck)).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
     writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + me.person + '__' + ck) });
   });
   fsCommit_(writes);
@@ -372,6 +415,30 @@ function syncCalendars_(me, ctx, errors) {
   return { count: count, seen: seen };
 }
 function safeName_(cal) { try { return cal.getName(); } catch (e) { return ''; } }
+
+// Every copy of one of this person's calendars in Firestore, whichever account wrote it: { path: '' }
+function copiesOf_(person, calKey) {
+  var out = {};
+  var prefix = person + '__' + calKey + '__';
+  ['privateFeeds', 'sharedFeeds'].forEach(function (coll) {
+    fsQuery_(coll, [['owner', person], ['calKey', calKey]]).forEach(function (d) {
+      if (String(d.id).indexOf(prefix) === 0) out[HOUSEHOLD + '/' + coll + '/' + d.id] = '';
+    });
+  });
+  return out;
+}
+// The Google accounts that are this person's in Caledonite: { email: true }
+function accountsOf_(me, ctx) {
+  var out = {};
+  (me.people || []).forEach(function (p) {
+    if (p.id !== me.person) return;
+    if (p.data.email) out[String(p.data.email).toLowerCase()] = true;
+    (p.data.linked || []).forEach(function (x) { if (x) out[String(x).toLowerCase()] = true; });
+  });
+  ((ctx.hh || {}).linked || []).forEach(function (x) { if (x && x.person === me.person && x.email) out[String(x.email).toLowerCase()] = true; });
+  out[me.email] = true;
+  return out;
+}
 
 function defaultsFor_(cal, isPrimary, me) {
   var id = cal.getId();
@@ -490,11 +557,14 @@ function norm_(ev) {
 
 // Turn one calendar's events into the owner's copy and the partner's filtered copy, by month.
 // Returns the writes and the property to save once they have gone through.
-function feedWrites_(me, ctx, calKey, doc, events, props) {
+// known: copies found in Firestore ({ path: '' }), when what this account remembers may not be all of them
+function feedWrites_(me, ctx, calKey, doc, events, props, known) {
   var writes = [];
   var pk = 'h_' + calKey;
   var old = {};
   try { old = JSON.parse(props.getProperty(pk) || '{}'); } catch (e) { old = {}; }
+  // anything found that this account didn't write is written again (or taken out)
+  if (known) Object.keys(known).forEach(function (path) { if (!(path in old)) old[path] = ''; });
   var next = {};
   var byMonth = {};
   events.forEach(function (e) {

@@ -228,7 +228,8 @@ test("a calendar that's gone from Google leaves Settings after a couple of days"
   // the account still has its main calendar (read with an error here, which is fine)
   ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'p@x', getName: () => 'Main' }], getDefaultCalendar: () => ({ getId: () => 'p@x' }) };
   const old = Date.now() - 5 * 864e5;
-  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true }, { calDocs: {
+  // work@x.com is another of your accounts, still in Caledonite: its records are its own to tidy up
+  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true, people: [{ id: 'ethan', data: { email: 'e@x.com', linked: ['work@x.com'] } }] }, { calDocs: {
     gone: { account: 'e@x.com', lastSeen: old }, recent: { account: 'e@x.com', lastSeen: Date.now() - 3600e3 },
     other: { account: 'work@x.com', lastSeen: old }, rotalink: { account: 'Rota link', lastSeen: old }
   } }, []);
@@ -584,4 +585,113 @@ test('a rota shift marked Private: a change to its name alone is not sent to you
   ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', sh('Clinic A'), api, { share: 'all' });
   ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', sh('Clinic B'), api, { share: 'all' });
   assert.equal(writes.length, 0);
+});
+
+function fakeProps(init = {}) {
+  const store = Object.assign({}, init);
+  return { store, api: { getProperty: (k) => (k in store ? store[k] : null), getProperties: () => Object.assign({}, store), setProperty: (k, v) => { store[k] = String(v); }, setProperties: (o) => Object.assign(store, o), deleteProperty: (k) => { delete store[k]; }, deleteAllProperties: () => { for (const k of Object.keys(store)) delete store[k]; } } };
+}
+function asUser(email, active = email) {
+  ctx.Session = { getEffectiveUser: () => ({ getEmail: () => email }), getActiveUser: () => ({ getEmail: () => active }) };
+}
+
+test('"Stop syncing this account" takes its copies out too, so none are left that no longer follow your sharing', () => {
+  asUser('work@x.com');
+  const { store, api } = fakeProps({ h_abc: JSON.stringify({ 'households/main/privateFeeds/ethan__abc__2026-11': 'h', 'households/main/sharedFeeds/ethan__abc__2026-11': 'h' }), rota_abc: '{}', rem_fired: '{"k":1}' });
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, waitLock() {}, releaseLock() {} }) };
+  let removed = 0;
+  ctx.ScriptApp = { getProjectTriggers: () => [{ getHandlerFunction: () => 'syncAll' }], deleteTrigger: () => { removed++; } };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.disconnectFromPage();
+  assert.equal(removed, 1);
+  assert.deepEqual(writes.map((w) => w.delete).sort(), ['households/main/privateFeeds/ethan__abc__2026-11', 'households/main/sharedFeeds/ethan__abc__2026-11', 'households/main/status/work_x_com']);
+  assert.deepEqual(Object.keys(store), ['rem_fired'], 'what was already sent is still remembered');
+});
+
+test('a ping never syncs an account that has stopped syncing', () => {
+  let synced = 0;
+  const realSync = ctx.syncAll;
+  ctx.syncAll = () => { synced++; return 'ok'; };
+  const cache = {};
+  ctx.CacheService = { getScriptCache: () => ({ get: (k) => cache[k] || null, put: (k, v) => { cache[k] = v; }, remove: (k) => { delete cache[k]; } }) };
+  ctx.fsGet_ = () => ({ pingSecret: 's3cret' });
+  ctx.ContentService = { createTextOutput: (t) => ({ t, setMimeType() { return this; } }), MimeType: { TEXT: 'text' } };
+  let triggers = [];
+  ctx.ScriptApp = { getProjectTriggers: () => triggers };
+  const post = () => ctx.doPost({ postData: { contents: JSON.stringify({ secret: 's3cret' }) } });
+  post();
+  assert.equal(synced, 0);
+  delete cache.last_ping;
+  triggers = [{ getHandlerFunction: () => 'syncAll' }];
+  post();
+  assert.equal(synced, 1);
+  ctx.syncAll = realSync;
+});
+
+test('an account taken out in the app that can no longer run: your main account takes its calendars out', () => {
+  withDigest();
+  const { api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'p@x', getName: () => 'Main' }], getDefaultCalendar: () => ({ getId: () => 'p@x' }) };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsQuery_ = (coll, eqs) => {
+    const calKey = (eqs.find((f) => f[0] === 'calKey') || [])[1];
+    return ['privateFeeds', 'sharedFeeds'].includes(coll) && calKey ? [{ id: `ethan__${calKey}__2026-11`, data: {} }] : [];
+  };
+  const old = Date.now() - 3 * 864e5;
+  const me = { email: 'e@x.com', person: 'ethan', main: true, people: [{ id: 'ethan', data: { email: 'e@x.com', linked: ['work@x.com'] } }] };
+  ctx.syncCalendars_(me, { hh: {}, calDocs: {
+    gone: { account: 'old@x.com', lastSeen: old },
+    listed: { account: 'work@x.com', lastSeen: old },
+    recent: { account: 'old2@x.com', lastSeen: Date.now() - 3600e3 }
+  } }, []);
+  assert.deepEqual(writes.map((w) => w.delete).filter(Boolean).sort(), ['households/main/calendars/ethan__gone', 'households/main/privateFeeds/ethan__gone__2026-11', 'households/main/sharedFeeds/ethan__gone__2026-11']);
+  // only your main account does this
+  writes.length = 0;
+  ctx.syncCalendars_(Object.assign({}, me, { main: false, email: 'work@x.com' }), { hh: {}, calDocs: { gone: { account: 'old@x.com', lastSeen: old } } }, []);
+  assert.deepEqual(writes.filter((w) => w.delete), []);
+});
+
+test('taking over a calendar from another of your accounts also takes out the months only that account had written', () => {
+  withDigest();
+  const calId = 'ethan@work.example';
+  const key = ctx.shortKey_(calId);
+  const { store, api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => calId, getName: () => 'Work', getColor: () => '#123456', isOwnedByMe: () => false }], getDefaultCalendar: () => ({ getId: () => 'e@x.com' }) };
+  const s = ctx.localTime_('2026-11-10', '09:00');
+  ctx.Calendar = { Events: { list: () => ({ items: [{ id: 'g1', iCalUID: 'g1@x', summary: 'Standup', start: { dateTime: new Date(s).toISOString() }, end: { dateTime: new Date(s + 3600e3).toISOString() } }] }) } };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  // what the work account had written: November, and a January with an event since deleted
+  ctx.fsQuery_ = (coll, eqs) => (['privateFeeds', 'sharedFeeds'].includes(coll) ? ['2026-11', '2027-01'].map((m) => ({ id: `ethan__${key}__${m}`, data: {} })) : []);
+  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true, people: [{ id: 'ethan', data: { email: 'e@x.com', linked: ['ethan@work.example'] } }] }, { appEmail: 'e@x.com', hh: {}, calDocs: {
+    [key]: { owner: 'ethan', calKey: key, calId, name: 'Work', color: '#123456', canWrite: false, primary: false, account: 'ethan@work.example', lastSeen: Date.now() - 13 * 3600e3, show: true, share: 'all', role: 'work', layer: 'own', userSet: true }
+  } }, []);
+  assert.deepEqual(writes.map((w) => w.delete).filter(Boolean).sort(), [`households/main/privateFeeds/ethan__${key}__2027-01`, `households/main/sharedFeeds/ethan__${key}__2027-01`]);
+  assert.ok(writes.some((w) => w.update && w.update.name === `households/main/sharedFeeds/ethan__${key}__2026-11`), 'November is written again');
+  assert.ok(store[`h_${key}`]);
+});
+
+test('someone who was never part of Caledonite opening the connect page writes nothing', () => {
+  ctx.fsList_ = () => [{ id: 'ethan', data: { email: 'e@x.com', linked: [] } }];
+  ctx.fsGet_ = () => ({});
+  asUser('stranger@x.com');
+  const { api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, waitLock() {}, releaseLock() {} }) };
+  ctx.ScriptApp = { getProjectTriggers: () => [], deleteTrigger() {} };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  let queried = 0;
+  ctx.fsQuery_ = () => { queried++; return []; };
+  assert.throws(() => ctx.syncAll(), /not part of Caledonite/);
+  assert.equal(writes.length, 0);
+  assert.equal(queried, 0);
 });
