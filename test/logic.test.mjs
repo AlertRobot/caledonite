@@ -242,3 +242,10 @@ test('a reminder to answer comes with the Yes and Can’t buttons', async () => 
   assert.equal(n.data.reqId, 'r9');
   assert.equal(n.data.ask, '1');
 });
+
+test('the rules: on a calendar record you can change only what you see and share', async () => {
+  const { readFileSync } = await import('node:fs');
+  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const cal = rules.slice(rules.indexOf('match /calendars/{id}'), rules.indexOf('match /people/{pid}'));
+  assert.match(cal, /changed\(\)\.hasOnly\(\['show', 'share', 'role', 'layer', 'userSet'\]\)/);
+});

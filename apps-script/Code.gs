@@ -250,7 +250,8 @@ function loadCtx_(me) {
 }
 function loadCalDocs_(me) {
   var calDocs = {};
-  fsQuery_('calendars', [['owner', me.person]]).forEach(function (d) { calDocs[d.data.calKey] = d.data; });
+  // only the record at this person's own address for each calendar
+  fsQuery_('calendars', [['owner', me.person]]).forEach(function (d) { if (d.id === me.person + '__' + d.data.calKey) calDocs[d.data.calKey] = d.data; });
   return calDocs;
 }
 

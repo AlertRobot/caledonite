@@ -193,3 +193,11 @@ test('changing the day of something overnight or over several days keeps its end
   p = ctx.patchFor_({ day: '2026-11-07', start: '10:00', end: '11:00' }, 'c', 'night', 'Europe/London');
   assert.equal(p.end.dateTime, '2026-11-07T11:00:00');
 });
+
+test("a calendar record moved to someone else's calendar is ignored", () => {
+  ctx.fsQuery_ = () => [
+    { id: 'ethan__Y', data: { owner: 'ethan', calKey: 'Y', share: 'none' } },
+    { id: 'sophie__X', data: { owner: 'ethan', calKey: 'Y', share: 'all' } }
+  ];
+  assert.equal(ctx.loadCalDocs_({ person: 'ethan' }).Y.share, 'none');
+});

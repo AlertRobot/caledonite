@@ -38,8 +38,11 @@ service cloud.firestore {
       }
       match /calendars/{id} {
         allow read: if member();
-        // only the owner of a calendar decides what's shared from it
-        allow update: if member() && personEmail(resource.data.owner) == myEmail();
+        // only the owner of a calendar decides what's shared from it, and only that: whose it is and which
+        // calendar it points at are the sync's (changing them could share someone else's calendar)
+        allow update: if member() && personEmail(resource.data.owner) == myEmail()
+          && changed().hasOnly(['show', 'share', 'role', 'layer', 'userSet'])
+          && request.resource.data.get('share', 'busy') in ['all', 'busy', 'none', 'hours'];
         allow create, delete: if false;
       }
       match /people/{pid} {
