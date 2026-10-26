@@ -157,7 +157,7 @@ export function createDemoBackend(me = 'ethan') {
       if (o.op === 'create') {
         const ev = o.event;
         const day = ev.day;
-        const off = Math.round((new Date(day + 'T12:00') - addDays(T, 0)) / 86400000);
+        const off = Math.round((new Date(day + 'T00:00') - T) / 86400000); // whole days from today (noon would round up a day)
         add(o.person, ev.calKey || cal, ev.title, off, ev.allDay ? null : ev.start, ev.allDay ? null : ev.end, { tag: o.tag, b: ev.busyOnly ? 1 : 0 });
       } else if (o.op === 'update' || o.op === 'edit') {
         const ch = o.changes || o.event || {};
