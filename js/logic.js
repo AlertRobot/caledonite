@@ -277,6 +277,7 @@ export function buildDay(state, key, now = new Date()) {
   const layers = {};
   const seenTags = new Set();
   const tagEvents = {};
+  const myLayerEvents = new Set();
 
   for (const pid of ids) {
     const s = settingsOf(state, pid);
@@ -335,6 +336,10 @@ export function buildDay(state, key, now = new Date()) {
         ref: evRef(ev), owner: ev.owner, repeats: !!ev.sid, src: ev, cal: `${ev.owner}__${ev.calKey}`, low: isLowCal(state, `${ev.owner}__${ev.calKey}`)
       };
       if (c.layer && c.layer !== 'own') {
+        // a family or friends calendar you both have: once, as yours
+        const dup = `${ev.uid || ev.id}|${ev.start.getTime()}`;
+        if (pid === state.me) myLayerEvents.add(dup);
+        else if (myLayerEvents.has(dup)) continue;
         const lk = layerKey(pid, c.layer);
         it.who = lk; it.layer = lk;
         (layers[lk] = layers[lk] || []).push(it);

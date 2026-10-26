@@ -249,3 +249,14 @@ test('the rules: on a calendar record you can change only what you see and share
   const cal = rules.slice(rules.indexOf('match /calendars/{id}'), rules.indexOf('match /people/{pid}'));
   assert.match(cal, /changed\(\)\.hasOnly\(\['show', 'share', 'role', 'layer', 'userSet'\]\)/);
 });
+
+test('a family calendar you both have shows its events once', () => {
+  const lunch = (owner) => ({ owner, calKey: 'fam', id: `${owner}l`, uid: 'sameUID', t: 'Sunday lunch', s: atTime(sat, '13:00').getTime(), e: atTime(sat, '16:00').getTime() });
+  const st = load({ events: [lunch('ethan'), lunch('sophie')] });
+  st.calendars.ethan__fam = { owner: 'ethan', calKey: 'fam', name: 'Family', share: 'all', role: 'normal', layer: 'family', show: true };
+  st.calendars.sophie__fam = { owner: 'sophie', calKey: 'fam', name: 'Family', share: 'all', role: 'normal', layer: 'family', show: true };
+  L.clearDayCache();
+  const rows = L.dayList(st, sat).filter((it) => it.title === 'Sunday lunch');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].who, 'ethan:family');
+});
