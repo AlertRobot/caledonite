@@ -1131,3 +1131,19 @@ test("an extra account isn't synced while its person's email is also someone els
   people[1].data.email = 's@x.com';
   assert.equal(ctx.loadCtx_({ email: 's.work@x.com', person: 'sophie', main: false, people }).appEmail, 's@x.com');
 });
+
+test("someone who isn't one of you, trying again and again, reads the household once every couple of minutes at most", () => {
+  fakeCache();
+  let reads = 0;
+  ctx.fsList_ = () => { reads++; return [{ id: 'ethan', data: { email: 'e@x.com' } }]; };
+  ctx.fsGet_ = () => ({});
+  asUser('stranger@x.com');
+  for (let i = 0; i < 5; i++) assert.throws(() => ctx.whoAmI_(), /not part of Caledonite/);
+  assert.equal(reads, 1);
+  // and only the first one can count as "taken out" (so tidying up happens once)
+  let err; try { ctx.whoAmI_(); } catch (e) { err = e; }
+  assert.equal(err.notMember, false);
+  // a member is never held back by it
+  asUser('e@x.com');
+  assert.equal(ctx.whoAmI_().person, 'ethan');
+});

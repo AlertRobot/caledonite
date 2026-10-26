@@ -321,6 +321,18 @@ function isCreator_(me, ctx) {
 function whoAmI_() {
   var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
   if (!email) throw new Error('Could not tell which Google account this is.');
+  var notOne = function (taken) {
+    var e = new Error(email + ' is not part of Caledonite. Add it in Caledonite: Settings, Account, then connect it again.');
+    e.notMember = taken;
+    e.email = email;
+    return e;
+  };
+  // found not to be one of you a moment ago: no reading the household again (someone who isn't one of you,
+  // opening the connect page over and over, can't use up the day's free database reads)
+  var nmKey = 'nm_' + email.replace(/[^a-z0-9]+/g, '_');
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (err) { cache = null; }
+  if (cache && cache.get(nmKey)) throw notOne(false);
   var people = fsList_(HOUSEHOLD + '/people');
   // Each account belongs to exactly one of you. If two records claim it, sync nothing: syncing it as the wrong
   // person would copy that account's whole calendar into the other person's private copy.
@@ -339,10 +351,9 @@ function whoAmI_() {
   (hh.linked || []).forEach(function (x) { if (String(x.email || '').toLowerCase() === email && x.person) claims.push(x.person); });
   found = one(claims, false);
   if (found) return found;
-  var e = new Error(email + ' is not part of Caledonite. Add it in Caledonite: Settings, Account, then connect it again.');
   // only when the household could be read: a passing problem must never look like being taken out
-  e.notMember = people.length > 0;
-  e.email = email;
+  var e = notOne(people.length > 0);
+  if (e.notMember && cache) { try { cache.put(nmKey, '1', 120); } catch (err) { /* it's only a saving */ } }
   throw e;
 }
 
