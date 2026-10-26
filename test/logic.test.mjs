@@ -204,3 +204,9 @@ test('a countdown to something private shows only on your own Today', () => {
   const titles = L.countdowns(asSophie).map((c) => c.title);
   assert.ok(titles.includes('Party') && !titles.includes('Job interview'));
 });
+
+test('a late shift that ends at midnight is not a night: no sleeping the next morning', () => {
+  const st = load({ events: [timed('sophie', 'rota', k(8), '16:00', '16:00', { t: 'Shift', e: atTime(k(9), '00:00').getTime() })] });
+  assert.equal(L.shiftFor(st, 'sophie', k(8)).type, 'late');
+  assert.equal(L.buildDay(st, k(9)).persons.sophie.sleep, null);
+});

@@ -107,7 +107,8 @@ function inferShift(ev) {
   if (/long/.test(t)) return 'long';
   if (/early/.test(t)) return 'early';
   if (/late/.test(t)) return 'late';
-  const crosses = ev.end.getDate() !== ev.start.getDate();
+  // ending at midnight is still the same day's shift (a late until 12), not a night
+  const crosses = new Date(ev.end.getTime() - 1).getDate() !== ev.start.getDate();
   const hours = (ev.end - ev.start) / 3600000;
   if (crosses || ev.start.getHours() >= 18) return 'night';
   if (hours >= 11) return 'long';
