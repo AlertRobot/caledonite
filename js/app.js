@@ -545,7 +545,8 @@ const C = {
   hhBday: (el) => {
     const h = store.state.household || {};
     const b = Object.assign({}, h.birthdays || {});
-    if (el.value) b[el.dataset.p] = el.value.slice(5); else delete b[el.dataset.p];
+    // cleared: an empty value, as a saved change merges into what's there (a removed key would come back)
+    b[el.dataset.p] = el.value ? el.value.slice(5) : '';
     run(actions.updateHousehold({ birthdays: b }), 'Saved.');
   },
   hhField: (el) => run(actions.updateHousehold({ [el.dataset.f]: el.dataset.f === 'nudgeHours' ? Number(el.value) : el.value }))
