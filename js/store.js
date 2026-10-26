@@ -247,11 +247,13 @@ export const actions = {
     if (endDay && endDay !== day) ev.endDay = endDay;
     if (repeat) ev.repeat = repeat;
     const ops = [];
+    // a calendar in another of your Google accounts: that account's sync adds it (your main one can't)
+    const account = accountOf(st, st.me, ev.calKey);
     if (who === 'both') {
-      for (const pid of [st.me, st.partner]) ops.push(outboxOp({ person: pid, op: 'create', tag, both: true, event: Object.assign({}, ev, { calKey: pid === st.me ? ev.calKey : null }) }));
+      for (const pid of [st.me, st.partner]) ops.push(outboxOp({ person: pid, op: 'create', tag, both: true, account: pid === st.me ? account : null, event: Object.assign({}, ev, { calKey: pid === st.me ? ev.calKey : null }) }));
       ops.push(notifyOp(st.partner, `${nameOf(st, st.me)} added something for you both`, `${ev.title} (${whenLabel(when)})`, '#calendar'));
     } else {
-      ops.push(outboxOp({ person: st.me, op: 'create', tag, event: ev }));
+      ops.push(outboxOp({ person: st.me, op: 'create', tag, account, event: ev }));
     }
     await commit(ops);
     return tag;
@@ -265,7 +267,7 @@ export const actions = {
     if (ev.tag) {
       const parties = partiesOf(st, ev);
       const inst = scope !== 'all' ? occurrenceOf(ev) : null;
-      for (const pid of parties) ops.push(outboxOp({ person: pid, op: 'update', tag: ev.tag, changes, inst }));
+      for (const pid of parties) ops.push(outboxOp({ person: pid, op: 'update', tag: ev.tag, changes, inst, account: copyAccount(st, ev.tag, pid) }));
       const other = parties.find((p) => p !== st.me);
       if (other) ops.push(notifyOp(other, `${nameOf(st, st.me)} changed something`, `${changes.title || ev.title}`, '#calendar'));
     } else {
@@ -280,7 +282,7 @@ export const actions = {
     if (ev.tag) {
       const parties = partiesOf(st, ev);
       const inst = scope !== 'all' ? occurrenceOf(ev) : null;
-      for (const pid of parties) ops.push(outboxOp({ person: pid, op: 'delete', tag: ev.tag, inst }));
+      for (const pid of parties) ops.push(outboxOp({ person: pid, op: 'delete', tag: ev.tag, inst, account: copyAccount(st, ev.tag, pid) }));
       const other = parties.find((p) => p !== st.me);
       if (other) ops.push(notifyOp(other, `${nameOf(st, st.me)} removed something`, ev.title, '#calendar'));
       if (ev.tag.startsWith('req:')) ops.push({ type: 'update', path: `requests/${ev.tag.slice(4)}`, data: { status: 'cancelled', answeredAt: now() } });
@@ -502,6 +504,18 @@ export function occurrenceOf(ev) {
   return m ? m[1] : null;
 }
 
+// The Google account a calendar of yours is in (null for your main one, or one not known yet)
+function accountOf(st, pid, calKey) {
+  const c = calKey ? st.calendars[`${pid}__${calKey}`] : null;
+  return (c && c.account && c.account !== 'Rota link') ? c.account : null;
+}
+// Your copy of something made in this app is changed by the account whose calendar it's in.
+// Your partner's copy always by their main account.
+function copyAccount(st, tag, pid) {
+  if (pid !== st.me) return null;
+  const mine = st.events.find((e) => e.tag === tag && e.owner === st.me);
+  return mine ? accountOf(st, st.me, mine.calKey) : null;
+}
 // Who has a copy of something made in this app
 function partiesOf(st, ev) {
   const owners = new Set(st.events.filter((e) => e.tag === ev.tag).map((e) => e.owner));

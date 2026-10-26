@@ -227,3 +227,29 @@ test('an odd record in a shared list (a request, job or shift) can’t break you
   }
   await page.context().close();
 });
+
+test('something added to a calendar in your other Google account goes to that account, and so do its changes', async () => {
+  const page = await open('ethan', '#add');
+  const items = await mods(page, async (store) => {
+    const S = store.store;
+    const d = new Date(); d.setDate(d.getDate() + 2);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const ping = S.backend.ping; S.backend.ping = () => Promise.resolve(true); // hold the pretend sync
+    await store.actions.addEvent({ who: 'me', title: 'Gym', day, start: '07:00', end: '08:00', allDay: false, calKey: 'second' });
+    await store.actions.addEvent({ who: 'both', title: 'Tea', day, start: '17:00', end: '18:00', allDay: false, calKey: 'second' });
+    await store.actions.addEvent({ who: 'me', title: 'Shop', day, start: '12:00', end: '13:00', allDay: false, calKey: 'primary' });
+    const made = Object.values(S.raw.outbox).filter((o) => !o.done).map((o) => ({ title: o.event.title, person: o.person, account: o.account || null }));
+    // and a change to the gym, once it's in that calendar
+    S.backend.ping = ping; await new Promise((r) => { ping(); setTimeout(r, 900); });
+    const gym = S.state.events.find((e) => e.title === 'Gym');
+    S.backend.ping = () => Promise.resolve(true);
+    await store.actions.editEvent({ ev: gym, changes: { title: 'Gym class' } });
+    const edit = Object.values(S.raw.outbox).find((o) => !o.done && o.op === 'update');
+    return { made, edit: edit && edit.account };
+  });
+  assert.deepEqual(items.made.filter((o) => o.title === 'Gym').map((o) => o.account), ['Second Gmail']);
+  assert.deepEqual(items.made.filter((o) => o.title === 'Tea').map((o) => [o.person, o.account]).sort(), [['ethan', 'Second Gmail'], ['sophie', null]]);
+  assert.deepEqual(items.made.filter((o) => o.title === 'Shop').map((o) => o.account), ['Personal Gmail']);
+  assert.equal(items.edit, 'Second Gmail');
+  await page.context().close();
+});
