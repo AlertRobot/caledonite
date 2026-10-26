@@ -107,15 +107,16 @@ test('adding an event saves the phone time zone with it', async () => {
 });
 
 // ---------- the service worker, run outside a browser with a stand-in for its surroundings ----------
-async function loadSw({ cacheKeys = [], fetchRes = null } = {}) {
+async function loadSw({ cacheKeys = [], fetchRes = null, fetchFails = false, own = {}, other = {} } = {}) {
   const { readFileSync } = await import('node:fs');
   const vm = await import('node:vm');
   const handlers = {}; const deleted = []; const puts = [];
-  const cacheObj = { match: async () => undefined, put: async (req) => { puts.push(String(req.url || req)); }, add: async () => {}, addAll: async () => {} };
+  const cacheObj = { match: async (req) => own[String(req.url || req)], put: async (req) => { puts.push(String(req.url || req)); }, add: async () => {}, addAll: async () => {} };
   const sandbox = {
     URL, Promise, console, Request: class { constructor(u) { this.url = u; } },
-    caches: { keys: async () => cacheKeys, delete: async (k) => { deleted.push(k); return true; }, open: async () => cacheObj, match: async () => undefined },
-    fetch: async () => fetchRes, location: { origin: 'https://alertrobot.github.io' }
+    caches: { keys: async () => cacheKeys, delete: async (k) => { deleted.push(k); return true; }, open: async () => cacheObj, match: async (req) => other[String(req.url || req)] },
+    Response: { error: () => 'network error' },
+    fetch: async () => { if (fetchFails) throw new TypeError('offline'); return fetchRes; }, location: { origin: 'https://alertrobot.github.io' }
   };
   sandbox.self = Object.assign(sandbox, { addEventListener: (n, fn) => { handlers[n] = fn; }, clients: { claim: async () => {} }, skipWaiting: () => {}, registration: {} });
   sandbox.importScripts = (p) => vm.runInContext(readFileSync(new URL(`../${p.replace('./', '')}`, import.meta.url), 'utf8'), ctx);
@@ -332,4 +333,12 @@ test('reminders and private countdowns are kept where your partner can’t read 
   // what's in the private place counts as yours
   setRaw(Object.assign({}, store.raw, { private: { reminders: { r9: { ref: 'e:ethan:primary:z', owner: 'ethan', times: ['d0'] } } } }), { phase: 'ready', me: 'ethan', user: { email: 'e@x.com' } });
   assert.ok(store.state.people.ethan.reminders.r9 && store.state.people.ethan.reminders.r1);
+});
+
+test('offline, the service worker answers only from Caledonite’s own saved copies, and the app page only for a page', async () => {
+  const lib = 'https://alertrobot.github.io/es-kitchen/data/library.json';
+  const { handlers } = await loadSw({ fetchFails: true, own: { './index.html': 'APP PAGE' }, other: { [lib]: 'PECKISH COPY', './index.html': 'SOMEONE ELSE' } });
+  const ask = async (url, mode) => { let p; handlers.fetch({ request: { method: 'GET', url, mode }, respondWith: (x) => { p = x; } }); return p; };
+  assert.equal(await ask(lib, 'cors'), 'network error', 'not another app’s copy, and not the app page as a JSON file');
+  assert.equal(await ask('https://alertrobot.github.io/caledonite/', 'navigate'), 'APP PAGE');
 });

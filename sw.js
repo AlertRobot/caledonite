@@ -36,7 +36,9 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(fetch(e.request, { cache: 'no-cache' }).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
       return res;
-    }).catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match('./index.html'))));
+    }).catch(() => caches.open(VERSION).then((c) => c.match(e.request, { ignoreSearch: true })
+      // only Caledonite's own saved copies (Peckish keeps its own on this website), and the app page only for a page
+      .then((r) => r || (e.request.mode === 'navigate' ? c.match('./index.html') : Response.error())))));
     return;
   }
   // the Firebase library: its own cache, kept across updates
