@@ -360,6 +360,8 @@ const H = {
   addWho: (el) => { ui.add.who = el.dataset.v; render(); },
   addDay: (el) => { ui.add.day = el.dataset.v; if (el.dataset.v === 'pick' && !ui.add.date) ui.add.date = dayKey(new Date()); render(); },
   addBusy: (el) => { ui.add.busyOnly = el.dataset.v === 'busy'; render(); },
+  addAllDayT: () => { ui.add.allDay = !ui.add.allDay; render(); },
+  addMore: () => { ui.add.more = !ui.add.more; render(); },
   addSave: async () => {
     const a = ui.add;
     const st = store.state;
@@ -519,6 +521,7 @@ const C = {
   },
   askLeaveDate: () => render(),
   addLeaveDate: () => render(),
+  addRerender: () => render(),
   hhField: (el) => run(actions.updateHousehold({ [el.dataset.f]: el.dataset.f === 'nudgeHours' ? Number(el.value) : el.value }))
 };
 

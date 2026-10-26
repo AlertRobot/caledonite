@@ -1,10 +1,15 @@
 {
+  "id": "/caledonite/",
   "name": "Caledonite",
   "short_name": "Caledonite",
   "description": "Your two calendars, side by side.",
   "start_url": "./#today",
   "scope": "./",
-  "display": "standalone",
+  "display": "fullscreen",
+  "display_override": [
+    "fullscreen",
+    "standalone"
+  ],
   "orientation": "portrait",
   "background_color": "#F3F5F8",
   "theme_color": "#F3F5F8",

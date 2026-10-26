@@ -7,15 +7,15 @@ import { APP, FIREBASE } from './config.js';
 import { THEMES, PALETTES, getLook } from './theme.js';
 
 export const SECTIONS = [
-  ['calendars', 'Calendars', 'C'],
-  ['shifts', 'Shifts', 'S'],
-  ['routine', 'Our routine', 'R'],
-  ['requests', 'Requests', 'Q'],
-  ['notifications', 'Notifications', 'N'],
-  ['holidays', 'Holidays', 'H'],
-  ['theme', 'Theme', 'T'],
-  ['apps', 'Linked apps', 'L'],
-  ['account', 'Account', 'A']
+  ['calendars', 'Calendars', 'calendar'],
+  ['shifts', 'Shifts', 'work'],
+  ['routine', 'Our routine', 'clock'],
+  ['requests', 'Requests', 'requests'],
+  ['notifications', 'Notifications', 'bell'],
+  ['holidays', 'Holidays', 'plane'],
+  ['theme', 'Theme', 'drop'],
+  ['apps', 'Linked apps', 'link'],
+  ['account', 'Account', 'user']
 ];
 
 export function viewSettings(state) {
@@ -53,8 +53,8 @@ function settingsHome(state) {
   const tint = { calendars: 'blue', shifts: 'orange', routine: 'tog', requests: 'grey', notifications: 'grey', holidays: 'orange', theme: 'family', apps: 'tog', account: 'blue' };
   return `<a href="#today" class="back-link">${icon.back(20)}Today</a>
     <h1 class="h1">Settings</h1>
-    <div class="card flush menu">${SECTIONS.map(([k, l, letter]) => `<button type="button" class="menu-row" data-act="setPage" data-v="${k}">
-      <span class="menu-ic tint-${tint[k]}">${letter}</span>
+    <div class="card flush menu">${SECTIONS.map(([k, l, ic]) => `<button type="button" class="menu-row" data-act="setPage" data-v="${k}">
+      <span class="menu-ic tint-${tint[k]}">${icon[ic](20)}</span>
       <span class="grow col"><span class="b">${esc(l)}</span><span class="small muted">${esc(status[k])}</span></span>${icon.next(20)}</button>`).join('')}</div>
     <p class="small muted pad-x">Settings are saved to your account, so they follow you to a new phone. Your theme is just for this phone.</p>`;
 }

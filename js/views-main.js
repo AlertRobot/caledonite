@@ -18,8 +18,8 @@ function motif() {
 }
 export function pageHeader(state, title, small) {
   return `<header class="page-head">
-    <div class="col"><span class="small b muted">${esc(small || '')}</span><h1>${esc(title)}</h1></div>
-    <span class="row small-gap">${motif()}<a href="#settings" class="av-btn" aria-label="Settings">${avatar(state, state.me, 44)}</a></span>
+    <div class="col">${small ? `<span class="head-small">${esc(small)}</span>` : ''}<h1>${esc(title)}</h1></div>
+    <span class="row small-gap">${motif()}<a href="#settings" class="head-btn" aria-label="Settings">${icon.settings(24)}</a></span>
   </header>`;
 }
 
@@ -29,6 +29,8 @@ export function waitingForMe(state) {
 }
 
 // ---------------- TODAY ----------------
+// One screen, read top to bottom: anything that needs you, what you're both doing now,
+// then the day itself. The week ahead lives on Calendar.
 export function viewToday(state) {
   const now = new Date();
   const key = dayKey(now);
@@ -36,36 +38,28 @@ export function viewToday(state) {
   const P = state.partner;
   const me = state.me;
   const out = [];
-  out.push(pageHeader(state, 'Today', `Hi ${nameOf(state, me)} · ${fmtDate(now)}`));
+  const cd = countdowns(state, now)[0];
+  out.push(pageHeader(state, 'Today', `${fmtDate(now)}${cd ? ` · ${countdownText(cd)}` : ''}`));
 
   // something wrong with the sync or this phone's notifications
   out.push(...warnings(state, now));
-  // countdowns
-  const cds = countdowns(state, now).slice(0, 3);
-  if (cds.length) out.push(`<div class="countdowns" role="list" aria-label="Countdowns">${cds.map((c) => `<span class="cd-chip" role="listitem" aria-label="${esc(countdownText(c))}"><b>${c.days === 0 ? 'Today' : c.days}</b><span>${c.days === 0 ? '' : c.days === 1 ? 'day until ' : 'days until '}${esc(c.title)}</span></span>`).join('')}</div>`);
 
-  // requests waiting
+  // anything that needs you: requests, notes, reminders
+  const att = [];
   const waiting = waitingForMe(state);
   if (waiting.length && P) {
     const fromPartner = waiting.filter((r) => r.from === P).length;
     const label = fromPartner === waiting.length ? `${nameOf(state, P)} asked you ${waiting.length === 1 ? 'something' : waiting.length + ' things'}` : `${waiting.length} request${waiting.length === 1 ? '' : 's'} need you`;
-    out.push(`<a class="card row link-card" href="#requests">${avatar(state, P, 32)}<span class="grow b">${esc(label)}</span><span class="b link">Open</span></a>`);
+    att.push(`<a class="att-row" href="#requests">${avatar(state, P, 34)}<span class="grow b">${esc(label)}</span><span class="att-go">${icon.next(18)}</span></a>`);
   }
-  // notes for me
   for (const n of state.notes.filter((x) => x.to === me && !x.seen && (x.showAfter || 0) <= Date.now()).slice(0, 3)) {
-    out.push(`<div class="card stack">
-      <div class="row">${avatar(state, n.from, 32)}<span class="b muted grow">A note from ${esc(nameOf(state, n.from))}</span></div>
-      <p class="note-text">${esc(n.text)}</p>
-      <button type="button" class="btn sec self-start" data-act="noteSeen" data-id="${esc(n.id)}">Got it</button></div>`);
+    att.push(`<div class="att-row">${avatar(state, n.from, 34)}<span class="grow col"><span class="small muted b">Note from ${esc(nameOf(state, n.from))}</span><span>${esc(n.text)}</span></span>
+      <button type="button" class="btn sec sm" data-act="noteSeen" data-id="${esc(n.id)}">Got it</button></div>`);
   }
+  for (const x of myReminders(state, now).filter((r) => r.active).slice(0, 4)) att.push(reminderRow(state, x, now));
+  if (att.length) out.push(`<div class="card flush att">${att.join('')}</div>`);
 
-  // reminders that are due (a week before a birthday, on the day...)
-  const due = myReminders(state, now).filter((x) => x.active);
-  if (due.length) {
-    out.push(`<section class="stack"><h2 class="label">To remember</h2>${due.slice(0, 4).map((x) => reminderCard(state, x, now)).join('')}</section>`);
-  }
-
-  // my shift today (big card, like Sophie's design)
+  // my shift today (big, as Sophie asked)
   const mine = d.persons[me];
   const myShift = mine && mine.items.find((it) => it.kind === 'shift' && !it.allDay && !it.cont);
   if (myShift) {
@@ -74,100 +68,68 @@ export function viewToday(state) {
     out.push(`<section class="shift-card">
       <span class="b small shift-ink">Your shift today</span>
       <span class="h2">${esc(itemTitle(state, myShift))}</span>
-      <span class="big b">${esc(fmtRange(myShift.start, myShift.end))}</span>
-      <span>Home about ${esc(fmtTime(home))}${myShift.end.getDate() !== myShift.start.getDate() ? ' tomorrow morning' : ''}.</span>
+      <span class="b">${esc(fmtRange(myShift.start, myShift.end))}. Home about ${esc(fmtTime(home))}${myShift.end.getDate() !== myShift.start.getDate() ? ' tomorrow morning' : ''}.</span>
     </section>`);
   }
 
-  // right now
+  // right now, the two of you
   if (P) {
     const ps = statusNow(state, P, now);
     const ms = statusNow(state, me, now);
     const sleeping = ps && ps.kind === 'sleep';
-    let noteBlock = '';
-    if (ui.noteOpen) {
-      noteBlock = `<div class="stack-s">
+    const note = ui.noteOpen ? `<div class="now-note stack-s">
         <label for="note" class="b">Note for ${esc(nameOf(state, P))}</label>
         <textarea id="note" rows="3" data-bind="noteText" placeholder="Hope you slept well. I've done the food shop.">${esc(ui.noteText)}</textarea>
         <span class="small muted">${sleeping ? `${esc(nameOf(state, P))} sees it after waking up.` : `${esc(nameOf(state, P))} gets it straight away.`}</span>
-        <div class="row-wrap"><button type="button" class="btn" data-act="saveNote">Save note</button><button type="button" class="btn sec" data-act="noteCancel">Cancel</button></div>
-      </div>`;
-    } else {
-      noteBlock = `<button type="button" class="btn sec self-start" data-act="noteOpen">Leave ${esc(nameOf(state, P))} a note</button>`;
-    }
-    out.push(`<section class="stack">
-      <h2 class="label">Right now</h2>
-      <div class="card stack">
-        <div class="row">${avatar(state, P, 44)}<div class="grow col"><span class="b small ink-${personColour(state, P)}">${esc(nameOf(state, P))}</span><span class="h3">${esc(ps.title)}</span></div>${sleeping ? `<span class="ink-${personColour(state, P)}">${icon.moon(26)}</span>` : ''}</div>
-        <p class="muted">${esc(ps.sub)}</p>
-        ${sleeping ? '<span class="pill self-start">Quiet hours: notifications held</span>' : ''}
-        ${noteBlock}
-      </div>
-      <div class="card stack">
-        <div class="row">${avatar(state, me, 44)}<div class="grow col"><span class="b small ink-${personColour(state, me)}">You</span><span class="h3">${esc(ms.title)}</span></div></div>
-        <p class="muted">${esc(ms.sub)}</p>
-        ${ms.kind === 'work' ? `<div class="row small-gap">${icon.eye(20)}<span class="grow">${esc(nameOf(state, P))} sees: <b>${esc(workSeenAs(state))}</b></span><a href="#settings/calendars" class="b pad-y">Change</a></div>` : ''}
+        <div class="row-wrap"><button type="button" class="btn sm" data-act="saveNote">Save note</button><button type="button" class="btn link-btn" data-act="noteCancel">Cancel</button></div>
+      </div>` : '';
+    const seen = ms.kind === 'work' ? ` ${nameOf(state, P)} sees “${workSeenAs(state)}”.` : '';
+    out.push(`<section class="stack-s"><h2 class="label">Right now</h2>
+      <div class="card flush now">
+        <div class="now-row">${avatar(state, P, 36)}<span class="grow col"><span class="b now-title">${esc(nameOf(state, P))}: ${esc(ps.title)}${sleeping ? ` <span class="ink-${personColour(state, P)} now-moon">${icon.moon(16)}</span>` : ''}</span><span class="small muted">${esc(ps.sub)}${sleeping ? ' Notifications wait until then.' : ''}</span></span>
+          ${ui.noteOpen ? '' : `<button type="button" class="icon-btn plain" aria-label="Leave ${esc(nameOf(state, P))} a note" data-act="noteOpen">${icon.pencil(20)}</button>`}</div>
+        ${note}
+        <div class="now-row">${avatar(state, me, 36)}<span class="grow col"><span class="b now-title">You: ${esc(ms.title)}</span><span class="small muted">${esc(ms.sub + seen)}</span></span></div>
         ${quietLine(state, now)}
-      </div>
-    </section>`);
-
-    const nf = nextBothFree(state, now);
-    if (nf) {
-      out.push(`<section class="banner stack-s">
-        <span class="b small banner-label">Next time you're both free</span>
-        <span class="h2">${esc(nf.label)}</span>
-        <span>${esc(nf.sub)}</span>
-        <div class="row-wrap"><a href="#ask" class="btn banner-btn" data-act="askFrom" data-day="${nf.key}" data-start="${hm(nf.start)}">Plan something</a>
-        <a href="#jar" class="btn banner-ghost">Ideas jar</a></div>
-      </section>`);
-    }
+      </div></section>`);
   } else {
     out.push(`<div class="card stack"><span class="h3">Waiting for your partner</span><p class="muted">Once they sign in, you'll see what they're up to here. Add their Google email in Settings, Account.</p><a class="btn sec self-start" href="#settings/account">Open Account settings</a></div>`);
   }
 
-  // jobs for today (and anything overdue)
-  const jobs = jobsOn(state, key);
-  if (jobs.length || state.jobs.length) {
-    out.push(`<section class="stack-s"><div class="row between"><h2 class="label">Jobs today</h2><a href="#jobs" class="b small">All jobs</a></div>
-      ${jobs.length ? `<div class="card flush">${jobs.map((j) => jobRow(state, j, key, true)).join('')}</div>` : '<p class="muted empty">No jobs today.</p>'}</section>`);
-  }
-
-  // today's plans
-  const filter = {};
-  if (P && ui.todayFilter === 'me') filter[P] = false;
-  if (P && ui.todayFilter === 'partner') filter[me] = false;
-  let items = dayList(state, key, Object.assign({}, filter, layerFilter()));
-  if (ui.todayFilter === 'me') items = items.filter((it) => it.who !== P && !(it.layer && it.layer.startsWith(P + ':')));
-  if (ui.todayFilter === 'partner') items = items.filter((it) => it.who !== me && !(it.layer && it.layer.startsWith(me + ':')));
+  // the day
+  let items = dayList(state, key, layerFilter());
   items = items.filter((it) => !(it.kind === 'shift' && it.allDay && it.who === me && myShift));
-  const segItems = P ? [{ v: 'both', label: 'Both', on: ui.todayFilter === 'both' }, { v: 'me', label: 'You', on: ui.todayFilter === 'me' }, { v: 'partner', label: nameOf(state, P), on: ui.todayFilter === 'partner' }] : [];
-  out.push(`<section class="stack">
-    <div class="row between"><h2 class="label">Today's plans</h2>${P ? seg(segItems, { act: 'todayFilter', label: 'Show plans for', cls: 'seg-sm' }) : ''}</div>
-    ${items.length ? items.map((it) => itemRow(state, it, key)).join('') : empty('Nothing planned today.')}
-    ${freeRows(state, d)}
+  const free = freeTonight(state, d);
+  out.push(`<section class="stack-s"><h2 class="label">The day</h2>
+    ${items.length || free ? `<div class="card flush agenda">${items.map((it) => agendaRow(state, it, key)).join('')}${free}</div>` : `<div class="card pad muted">Nothing planned today.</div>`}
   </section>`);
 
-  // coming up
-  if (P) {
-    const rows = [];
-    for (let i = 1; i <= 3; i++) {
-      const dk = dayKey(addDays(now, i));
-      rows.push(comingUp(state, dk));
+  // next time you're both free (when it isn't tonight)
+  if (P && !free) {
+    const nf = nextBothFree(state, now);
+    if (nf) {
+      out.push(`<div class="card flush"><div class="now-row"><span class="tog-ic">${icon.heart(18)}</span>
+        <span class="grow col"><span class="b">Both free ${esc(nf.label.charAt(0).toLowerCase() + nf.label.slice(1))}</span><span class="small muted">${esc(nf.sub)} <a href="#jar">Ideas jar</a></span></span>
+        <a href="#ask" class="btn tog sm" data-act="askFrom" data-day="${nf.key}" data-start="${hm(nf.start)}">Plan</a></div></div>`);
     }
-    out.push(`<section class="stack"><h2 class="label">Coming up</h2>${rows.join('')}</section>`);
   }
+
+  // jobs for today (and anything overdue)
+  const jobs = jobsOn(state, key);
+  if (jobs.length) {
+    out.push(`<section class="stack-s"><div class="row between"><h2 class="label">Jobs</h2><a href="#jobs" class="b small">All jobs</a></div>
+      <div class="card flush">${jobs.map((j) => jobRow(state, j, key, true)).join('')}</div></section>`);
+  }
+  out.push(`<a href="#calendar" class="small-link center-link" data-act="calGo" data-day="${dayKey(addDays(now, 1))}">See the rest of the week ${icon.next(16)}</a>`);
   return out.join('');
 }
 function hm(d) { return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
 
-function reminderCard(state, x, now) {
+function reminderRow(state, x, now) {
   const day = x.ev.allDay ? (x.ev.startKey || dayKey(x.ev.start)) : dayKey(x.ev.start);
-  return `<div class="card stack-s remind-card">
-    <div class="row"><span class="remind-ic">${icon.bell(22)}</span><span class="grow col"><span class="h3">${esc(x.title)}</span><span>${esc(reminderLine(x.ev, now))}</span></span></div>
-    ${x.note ? `<p class="b remind-note">${esc(x.note)}</p>` : ''}
-    <div class="row-wrap"><button type="button" class="btn" data-act="remDone" data-ref="${esc(x.ref)}" data-occ="${esc(x.occ)}" data-title="${esc(x.title)}">${icon.check(18)} Done</button>
-    <button type="button" class="btn sec" data-act="openEv" data-ref="${esc(x.ref)}" data-day="${day}">Change reminder</button></div>
-  </div>`;
+  return `<div class="att-row"><span class="remind-ic">${icon.bell(18)}</span>
+    <button type="button" class="grow col att-open" data-act="openEv" data-ref="${esc(x.ref)}" data-day="${day}"><span class="b">${esc(x.title)}</span><span class="small muted">${esc(reminderLine(x.ev, now).replace(/\.+$/, ''))}${x.note ? `. ${esc(x.note)}` : ''}</span></button>
+    <button type="button" class="tick-btn" aria-label="Done: ${esc(x.title)}" data-act="remDone" data-ref="${esc(x.ref)}" data-occ="${esc(x.occ)}" data-title="${esc(x.title)}">${icon.check(18)}</button></div>`;
 }
 
 // A sync that has stopped, or a phone that has stopped getting notifications
@@ -203,7 +165,7 @@ function warnings(state, now) {
   } catch (e) { /* no storage */ }
   return out;
 }
-// Quiet hours, with a one-tap "not tonight"
+// Quiet hours, with a one-tap "not tonight" (shown from three hours before)
 function quietLine(state, now) {
   const s = settingsOf(state, state.me);
   const q = s.quiet;
@@ -216,8 +178,8 @@ function quietLine(state, now) {
   const skipped = q.skip === night;
   if (!soon && !inside && !skipped) return '';
   const t = (hmv) => fmtTime(atTime('2000-01-01', hmv));
-  if (skipped) return `<div class="row small-gap">${icon.moon(20)}<span class="grow">No quiet hours tonight.</span><button type="button" class="btn link-btn" data-act="quietTonight" data-v="on">Turn back on</button></div>`;
-  return `<div class="row small-gap">${icon.moon(20)}<span class="grow">${inside ? 'Quiet hours now' : 'Quiet hours'} from ${esc(t(q.from))} to ${esc(t(q.to))}.</span><button type="button" class="btn link-btn" data-act="quietTonight" data-v="off">Not tonight</button></div>`;
+  if (skipped) return `<div class="now-row quiet-row">${icon.moon(18)}<span class="grow small">No quiet hours tonight.</span><button type="button" class="btn link-btn sm" data-act="quietTonight" data-v="on">Turn back on</button></div>`;
+  return `<div class="now-row quiet-row">${icon.moon(18)}<span class="grow small">${inside ? 'Quiet hours now' : 'Quiet hours'}, ${esc(t(q.from))} to ${esc(t(q.to))}.</span><button type="button" class="btn link-btn sm" data-act="quietTonight" data-v="off">Not tonight</button></div>`;
 }
 
 function workSeenAs(state) {
@@ -227,61 +189,56 @@ function workSeenAs(state) {
   return share === 'hours' ? 'Working' : share === 'busy' ? 'Busy' : share === 'all' ? 'Everything' : 'Nothing';
 }
 
-function freeRows(state, d) {
+// both free this evening: the last line of the day, with a way to plan it
+function freeTonight(state, d) {
   if (!state.partner) return '';
   const now = new Date();
-  const rows = d.bothFree.filter((iv) => iv[1] - iv[0] >= 90 * 60000 && new Date(iv[1]).getHours() >= 18).slice(0, 1);
-  return rows.map((iv) => {
-    const s = new Date(iv[0]); const e = new Date(iv[1]);
-    const open = e >= atTime(d.key, '22:30');
-    return `<div class="item free-row"><span class="item-time">${esc(open ? 'From ' + fmtTime(s) : fmtRange(s, e))}</span><div class="item-main"><span class="chip chip-tog">Both of you</span><span class="b">Free together</span><span class="small muted">${s < now ? '' : 'Nothing planned yet.'}</span></div></div>`;
-  }).join('');
+  const iv = d.bothFree.find((x) => x[1] - x[0] >= 90 * 60000 && new Date(x[1]).getHours() >= 18 && x[1] > now.getTime());
+  if (!iv) return '';
+  const s = new Date(Math.max(iv[0], now.getTime())); const e = new Date(iv[1]);
+  const open = e >= atTime(d.key, '22:30');
+  return `<div class="ag-row ag-free"><span class="ag-time"><b>${esc(open ? 'From' : fmtTime(s))}</b><span>${esc(open ? fmtTime(new Date(iv[0])) : fmtTime(e))}</span></span><span class="ag-bar"></span>
+    <span class="ag-main"><span class="b ink-tog">Free together</span><span class="small muted">Nothing planned yet. <a href="#jar">Ideas jar</a></span></span>
+    <a href="#ask" class="btn tog sm" data-act="askFrom" data-day="${d.key}" data-start="${hm(new Date(iv[0]))}">Plan</a></div>`;
 }
 
-export function itemRow(state, it, key, { compact = false } = {}) {
-  const cls = ['item'];
-  if (it.kind === 'hold' || it.pending) cls.push('item-dashed');
-  if (it.kind === 'together' || it.kind === 'hold') cls.push('item-tog');
-  const sub = itemSub(state, it);
-  const inner = `<span class="item-time">${esc(itemTime(it, key))}</span>
-    <span class="item-main">
-      ${whoChip(state, it.who)}
-      <span class="b">${esc(itemTitle(state, it))}${bellFor(state, it)}</span>
-      ${sub && !compact ? `<span class="small muted">${esc(sub)}</span>` : ''}
-    </span>`;
-  if (!it.ref) return `<div class="${cls.join(' ')}">${inner}</div>`;
-  cls.push('item-tap');
-  return `<button type="button" class="${cls.join(' ')}" data-act="openEv" data-ref="${esc(it.ref)}" data-day="${key}" aria-label="${esc(itemTitle(state, it))}, ${esc(itemTime(it, key))}. Open for reminders.">${inner}<span class="item-go" aria-hidden="true">${icon.next(18)}</span></button>`;
+// who something belongs to, in words and as a colour
+export function whoLabel(state, who) {
+  if (who === 'both') return 'Together';
+  if (who && who.includes(':')) {
+    const [owner, layer] = who.split(':');
+    const info = LAYER_INFO[layer] || LAYER_INFO.other;
+    const l = owner === state.me ? `Your ${info.label}` : `${nameOf(state, owner)}'s ${info.label}`;
+    return l.charAt(0).toUpperCase() + l.slice(1);
+  }
+  return who === state.me ? 'You' : nameOf(state, who);
 }
+function whoColour(state, who) {
+  if (who === 'both') return 'var(--tog)';
+  if (who && who.includes(':')) return barColour(state, who);
+  return `var(--${personColour(state, who)})`;
+}
+function timeCell(t) {
+  const parts = t.split(' to ');
+  return parts.length === 2 ? `<b>${esc(parts[0])}</b><span>${esc(parts[1])}</span>` : `<b>${esc(t)}</b>`;
+}
+export function agendaRow(state, it, key) {
+  const dashed = it.kind === 'hold' || it.pending;
+  const sub = itemSub(state, it);
+  const inner = `<span class="ag-time">${timeCell(itemTime(it, key))}</span>
+    <span class="ag-bar${dashed ? ' dashed' : ''}" style="background:${whoColour(state, it.who)}"></span>
+    <span class="ag-main"><span class="b ag-title">${esc(itemTitle(state, it))}${bellFor(state, it)}</span>
+    <span class="small muted ag-sub">${esc(whoLabel(state, it.who))}${sub ? ` · ${esc(sub)}` : ''}</span></span>`;
+  if (!it.ref) return `<div class="ag-row">${inner}</div>`;
+  return `<button type="button" class="ag-row ag-tap" data-act="openEv" data-ref="${esc(it.ref)}" data-day="${key}" aria-label="${esc(itemTitle(state, it))}, ${esc(itemTime(it, key))}, ${esc(whoLabel(state, it.who))}">${inner}</button>`;
+}
+
+export function itemRow(state, it, key) { return agendaRow(state, it, key); }
 // a small bell after the name when there's a reminder
 export function bellFor(state, it) {
   if (!it.ref) return '';
   const r = reminderFor(state, it.ref, it);
-  return r && (r.times || []).length ? `<span class="bell-mark" title="Reminder set">${icon.bell(16)}<span class="sr">Reminder set</span></span>` : '';
-}
-
-function comingUp(state, key) {
-  const d = buildDay(state, key);
-  const date = fromDayKey(key);
-  const lines = [];
-  for (const pid of [state.partner, state.me]) {
-    const p = d.persons[pid];
-    const bits = [];
-    for (const it of p.items) {
-      if (it.cont || it.kind === 'sleep') continue;
-      if (it.kind === 'money') { bits.push(it.money && it.money.pay ? 'Payday' : `${it.title} (${(it.sub || 'bill').toLowerCase()})`); continue; }
-      if (it.kind === 'shift') bits.push(it.allDay ? it.title : `${itemTitle(state, it)}, ${fmtRange(it.start, it.end)}`);
-      else if (it.kind === 'work') bits.push(`${it.title}, ${fmtRange(it.start, it.end)}`);
-      else if (bits.length < 3) bits.push(it.allDay ? it.title : `${it.title} at ${fmtTime(it.start)}`);
-    }
-    if (settingsOf(state, pid).hasShifts && !p.items.some((it) => it.kind === 'shift')) bits.unshift('No shift');
-    if (bits.length) lines.push(`<span><b class="ink-${personColour(state, pid)}">${pid === state.me ? 'You' : esc(nameOf(state, pid))}:</b> ${esc(bits.join('. '))}.</span>`);
-  }
-  const tog = d.together.filter((t) => !(t.auto && t.title === 'Dinner together'));
-  if (tog.length) lines.push(`<span><b class="ink-tog">Together:</b> ${esc(tog.map((t) => t.allDay ? t.title : `${t.title} at ${fmtTime(t.start)}`).join('. '))}.</span>`);
-  if (d.freeEvening && !tog.some((t) => !t.auto && t.start.getHours() >= 17)) lines.push(`<span class="ink-tog b">You're both free in the evening.</span>`);
-  if (!lines.length) lines.push('<span class="muted">Nothing planned.</span>');
-  return `<a class="card stack-s plain" href="#calendar" data-act="calGo" data-day="${key}"><span class="b">${esc(relDay(date))}</span>${lines.join('')}</a>`;
+  return r && (r.times || []).length ? `<span class="bell-mark" title="Reminder set">${icon.bell(14)}<span class="sr">Reminder set</span></span>` : '';
 }
 
 export function layerFilter() {
@@ -367,7 +324,7 @@ function monthView(state) {
   const showLegend = [
     ['me', 'Your plans'], ...(P ? [['partner', `${nameOf(state, P)}'s plans`]] : []),
     ...(P && settingsOf(state, P).hasShifts ? [['sleep', `${nameOf(state, P)} sleeping`]] : []),
-    ['together', 'Together'], ...allLayers(state).map((lk) => [lk, layerChipLabel(state, lk)])
+    ['together', 'Together']
   ];
   return `<div class="card month">
     <div class="row between month-nav">
@@ -380,11 +337,13 @@ function monthView(state) {
     <div class="legend">${showLegend.map(([k, l]) => `<span><span class="lbar" style="background:${barColour(state, k)}"></span>${esc(l)}</span>`).join('')}<span><span class="ldot"></span>Both free in the evening</span></div>
   </div>
   ${P ? `<div class="count-card"><span class="count">${freeCount}</span><span class="b">evenings left in ${MONTH_NAMES[ui.calMonth.getMonth()]} when you're both free</span></div>` : ''}
-  <section class="card stack-s">
-    <h2 class="h3">${esc(fmtDate(selDate))}${selKey === dayKey(new Date()) ? ' (today)' : ''}</h2>
-    ${items.length ? items.map((it) => miniRow(state, it, selKey)).join('') : '<p class="muted">Nothing planned.</p>'}
-    ${P && d.freeEvening && selKey >= dayKey(new Date()) ? `<div class="row between pad-top"><span class="b ink-tog">You're both free this evening.</span><a href="#ask" class="btn tog sm" data-act="askFrom" data-day="${selKey}" data-start="19:00">Plan something</a></div>` : ''}
-    <a href="#add" class="b small-link" data-act="addFor" data-day="${selKey}">${icon.plus(18)} Add something on this day</a>
+  <section class="stack-s">
+    <h2 class="label">${esc(fmtDate(selDate))}${selKey === dayKey(new Date()) ? ' (today)' : ''}</h2>
+    <div class="card flush agenda">
+      ${items.length ? items.map((it) => agendaRow(state, it, selKey)).join('') : '<p class="muted pad">Nothing planned.</p>'}
+      ${P && d.freeEvening && selKey >= dayKey(new Date()) ? `<div class="ag-row ag-free"><span class="ag-time"><b>Evening</b></span><span class="ag-bar"></span><span class="ag-main"><span class="b ink-tog">You're both free</span></span><a href="#ask" class="btn tog sm" data-act="askFrom" data-day="${selKey}" data-start="19:00">Plan</a></div>` : ''}
+      <a href="#add" class="ag-add" data-act="addFor" data-day="${selKey}">${icon.plus(18)} Add on this day</a>
+    </div>
   </section>`;
 }
 
@@ -458,7 +417,7 @@ function weekView(state) {
       </button>
       <div class="strips">${rows.join('')}</div>
       ${P ? `<p class="b small ink-tog">${esc(freeText(d))}</p>` : ''}
-      ${open ? `<div class="wday-list">${items.length ? items.map((it) => miniRow(state, it, k)).join('') : '<p class="muted">Nothing planned.</p>'}</div>` : ''}
+      ${open ? `<div class="wday-list agenda">${items.length ? items.map((it) => agendaRow(state, it, k)).join('') : '<p class="muted">Nothing planned.</p>'}</div>` : ''}
     </article>`);
   }
   return `<div class="row between week-nav">

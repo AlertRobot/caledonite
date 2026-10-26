@@ -1,6 +1,6 @@
 // Requests, asking something, and adding something.
 import { esc, dayKey, addDays, fromDayKey, fmtTime, agoText, relDay, atTime } from './util.js';
-import { nameOf, freeSlots, sleepingUntil, settingsOf, personColour, SHIFT_ORDER, REMIND_OPTIONS, REMIND_NOTES, leaveDaysFor, leaveSummary, JOB_REPEATS } from './logic.js';
+import { nameOf, freeSlots, sleepingUntil, settingsOf, personColour, SHIFT_ORDER, REMIND_OPTIONS, REMIND_NOTES, remindSummary, leaveDaysFor, leaveSummary, JOB_REPEATS } from './logic.js';
 import { whenLabel } from './store.js';
 import { icon, avatar, seg, toggleRow, empty } from './ui.js';
 import { ui } from './uistate.js';
@@ -199,7 +199,7 @@ export function viewAdd(state) {
   const me = state.me;
   const meShifts = settingsOf(state, me).hasShifts;
   const paShifts = P && settingsOf(state, P).hasShifts;
-  const out = [pageHeader(state, 'Add something', '')];
+  const out = [pageHeader(state, 'Add', '')];
   if (a.done) {
     out.push(`<section class="card stack done-card"><span class="tick">${icon.check(26)}</span><p class="b">${esc(a.done)}</p>
       <div class="row-wrap"><button type="button" class="btn" data-act="addAgain">Add another</button><a href="#calendar" class="btn sec">See the calendar</a></div></section>`);
@@ -207,73 +207,76 @@ export function viewAdd(state) {
   }
   const kinds = [{ v: 'event', label: 'Event' }, { v: 'job', label: 'Job' }, { v: 'leave', label: 'Holiday' }];
   if (meShifts || paShifts) kinds.push({ v: 'shift', label: 'Shift' });
-  out.push(seg(kinds.map((k) => Object.assign(k, { on: a.kind === k.v })), { act: 'addKind', label: 'What are you adding?', cls: 'seg-full' }));
+  out.push(seg(kinds.map((k) => Object.assign(k, { on: a.kind === k.v })), { act: 'addKind', label: 'What are you adding?', cls: 'seg-full kind-seg' }));
   if (a.kind === 'job') { out.push(addJobForm(state)); return out.join(''); }
   if (a.kind === 'leave') { out.push(addLeaveForm(state)); return out.join(''); }
-  if (a.kind === 'shift') {
-    const who = a.shiftWho || (meShifts ? me : P);
-    const types = settingsOf(state, who).shiftTypes;
-    const options = [me, P].filter((x) => x && settingsOf(state, x).hasShifts);
-    out.push(`${options.length > 1 ? seg(options.map((x) => ({ v: x, label: x === me ? 'My shift' : `${nameOf(state, x)}'s shift`, on: who === x })), { act: 'addShiftWho', label: 'Whose shift', cls: 'seg-full' }) : `<p class="muted">${who === me ? 'Your shifts' : `${esc(nameOf(state, who))}'s shifts`}. Changes here win over the rota for that day.</p>`}
-      ${dayPicker(a)}
-      <section class="stack-s"><h2 class="h4">Which shift?</h2>
-      <div class="grid2">${SHIFT_ORDER.map((t) => {
-        const def = types[t] || {};
-        return `<button type="button" class="type-card ${a.shiftType === t ? 'on' : ''}" aria-pressed="${a.shiftType === t}" data-act="addShiftType" data-v="${t}"><span class="b">${esc(def.label)}</span><span class="small muted">${def.allDay ? (t === 'off' ? 'Not working' : 'Annual leave') : esc(`${fmtHMs(def.start)} to ${fmtHMs(def.end)}`)}</span></button>`;
-      }).join('')}</div></section>
-      <button type="button" class="btn big-btn" data-act="addShiftSave">Save shift</button>`);
-    return out.join('');
-  }
-  // who
-  const whos = [['me', 'Me', [me]]];
-  if (P) { whos.push(['partner', nameOf(state, P), [P]]); whos.push(['both', 'Both of us', [me, P]]); }
-  out.push(`<section class="stack-s"><h2 class="h4">Who is it for?</h2>
-    <div class="grid${whos.length}">${whos.map(([v, l, ids]) => `<button type="button" class="who-card ${a.who === v ? 'on' : ''}" aria-pressed="${a.who === v}" data-act="addWho" data-v="${v}"><span class="row avs">${ids.map((x) => avatar(state, x, 32)).join('')}</span>${esc(l)}</button>`).join('')}</div>
-    <p class="note-box">${esc(whoNote(state, a.who))}</p></section>`);
-  out.push(`<section class="stack-s"><label for="add-title" class="h4">What is it?</label><input id="add-title" type="text" data-bind="add.title" value="${esc(a.title)}" placeholder="For example: Dentist" autocomplete="off"></section>`);
-  out.push(dayPicker(a));
-  out.push(`<section class="stack-s">
-    ${a.allDay ? '' : `<div class="grid2">
-      <div class="field"><label for="add-start">Starts</label><input id="add-start" type="time" data-bind="add.start" value="${esc(a.start)}"></div>
-      <div class="field"><label for="add-end">Ends</label><input id="add-end" type="time" data-bind="add.end" value="${esc(a.end)}"></div></div>`}
-    <label class="check"><input type="checkbox" data-act="addAllDay" ${a.allDay ? 'checked' : ''}> All day</label>
-    ${a.who !== 'partner' ? `<div class="field"><label for="add-repeat">Repeats</label><select id="add-repeat" data-bind="add.repeat">${EVENT_REPEATS.map(([v, l]) => `<option value="${v}" ${(a.repeat || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}</section>`);
-  if (a.who === 'me') {
-    const cals = Object.values(state.calendars).filter((c) => c.owner === me && c.canWrite && c.role !== 'rota');
-    if (cals.length > 1) {
-      out.push(`<section class="stack-s"><label for="add-cal" class="h4">Which calendar?</label><select id="add-cal" data-bind="add.cal">${cals.map((c) => `<option value="${esc(c.calKey)}" ${a.cal === c.calKey || (!a.cal && c.primary) ? 'selected' : ''}>${esc(c.name)}${c.account ? ` (${esc(c.account)})` : ''}</option>`).join('')}</select></section>`);
-    }
-    if (P) out.push(`<section class="stack-s"><span class="h4">${esc(nameOf(state, P))} sees it as</span>${seg([{ v: 'all', label: 'Full details', on: !a.busyOnly }, { v: 'busy', label: 'Just “Busy”', on: a.busyOnly }], { act: 'addBusy', label: 'What your partner sees', cls: 'seg-full' })}</section>`);
-  }
+  if (a.kind === 'shift') { out.push(addShiftForm(state)); return out.join(''); }
+
+  // what, who, when
+  const whos = [{ v: 'me', label: 'Me' }];
+  if (P) { whos.push({ v: 'partner', label: nameOf(state, P) }); whos.push({ v: 'both', label: 'Both' }); }
+  out.push(`<div class="card flush form-card">
+    ${titleRow('add-title', 'add.title', a.title, 'What is it?', 'For example: Dentist')}
+    ${P ? fRow('Who', seg(whos.map((w) => Object.assign(w, { on: a.who === w.v })), { act: 'addWho', label: 'Who is it for?' })) : ''}
+    ${dayRows(a)}
+    <button type="button" class="f-row" aria-pressed="${a.allDay}" data-act="addAllDayT"><span class="b grow">All day</span><span class="switch ${a.allDay ? 'on' : ''}"><span></span></span></button>
+    ${a.allDay ? '' : fRow('<label for="add-start">Time</label>', `<input id="add-start" type="time" aria-label="Starts" data-bind="add.start" value="${esc(a.start)}"><span class="muted">to</span><input id="add-end" type="time" aria-label="Ends" data-bind="add.end" value="${esc(a.end)}">`)}
+  </div>`);
+  if (a.who !== 'me' && P) out.push(`<p class="small muted f-hint">${esc(whoNote(state, a.who))}</p>`);
+
+  // the rest, folded away
   if (a.who !== 'partner') {
-    const opts = REMIND_OPTIONS.filter((o) => !a.allDay || !o.timedOnly);
-    out.push(`<section class="stack-s"><h2 class="h4">Remind me</h2>
-      <div class="row-wrap">${opts.map((o) => `<button type="button" class="chip-btn ${a.remind.includes(o.v) ? 'on' : ''}" aria-pressed="${a.remind.includes(o.v)}" data-act="addRemind" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
-      ${a.remind.length ? `<span class="b">What do you need to do?</span>
-      <div class="row-wrap">${REMIND_NOTES.map((n) => `<button type="button" class="chip-btn ${a.note === n ? 'on' : ''}" aria-pressed="${a.note === n}" data-act="addNotePick" data-v="${esc(n)}">${esc(n)}</button>`).join('')}</div>
-      <div class="field"><label for="add-note">Or write your own</label><input id="add-note" type="text" data-bind="add.note" value="${esc(REMIND_NOTES.includes(a.note) ? '' : a.note)}" placeholder="Optional" autocomplete="off"></div>` : '<span class="small muted">Optional. Shows on Today and on your phone.</span>'}
-    </section>`);
+    const cals = Object.values(state.calendars).filter((c) => c.owner === me && c.canWrite && c.role !== 'rota');
+    const cal = cals.find((c) => c.calKey === a.cal) || cals.find((c) => c.primary) || cals[0];
+    const bits = [(EVENT_REPEATS.find(([v]) => v === (a.repeat || '')) || EVENT_REPEATS[0])[1]];
+    if (a.who === 'me' && cals.length > 1 && cal) bits.push(cal.name);
+    if (a.who === 'me' && P && a.busyOnly) bits.push(`${nameOf(state, P)} sees “Busy”`);
+    bits.push(a.remind.length ? remindSummary(a.remind) : 'No reminder');
+    const inner = [];
+    if (a.more) {
+      inner.push(fRow('<label for="add-repeat">Repeats</label>', `<select id="add-repeat" data-bind="add.repeat" data-act="addRerender">${EVENT_REPEATS.map(([v, l]) => `<option value="${v}" ${(a.repeat || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`));
+      if (a.who === 'me' && cals.length > 1) inner.push(fRow('<label for="add-cal">Calendar</label>', `<select id="add-cal" data-bind="add.cal" data-act="addRerender">${cals.map((c) => `<option value="${esc(c.calKey)}" ${cal && cal.calKey === c.calKey ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`));
+      if (a.who === 'me' && P) inner.push(fRow(`${esc(nameOf(state, P))} sees`, seg([{ v: 'all', label: 'Everything', on: !a.busyOnly }, { v: 'busy', label: '“Busy”', on: a.busyOnly }], { act: 'addBusy', label: 'What your partner sees' })));
+      const opts = REMIND_OPTIONS.filter((o) => !a.allDay || !o.timedOnly);
+      inner.push(`<div class="f-block"><span class="b">Remind me</span>
+        <div class="row-wrap">${opts.map((o) => `<button type="button" class="chip-btn ${a.remind.includes(o.v) ? 'on' : ''}" aria-pressed="${a.remind.includes(o.v)}" data-act="addRemind" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
+        ${a.remind.length ? `<span class="b pad-top">What do you need to do?</span>
+        <div class="row-wrap">${REMIND_NOTES.map((n) => `<button type="button" class="chip-btn ${a.note === n ? 'on' : ''}" aria-pressed="${a.note === n}" data-act="addNotePick" data-v="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+        <input id="add-note" type="text" aria-label="Or write your own" data-bind="add.note" value="${esc(REMIND_NOTES.includes(a.note) ? '' : a.note)}" placeholder="Or write your own" autocomplete="off">` : '<span class="small muted">It shows on Today and pops up on your phone.</span>'}
+      </div>`);
+    }
+    out.push(`<div class="card flush form-card">
+      <button type="button" class="f-row more-btn" aria-expanded="${!!a.more}" data-act="addMore">${icon.sliders(20)}<span class="grow col"><span class="b">More options</span><span class="small muted">${esc(bits.join(' · '))}</span></span><span class="chev ${a.more ? 'open' : ''}">${icon.next(18)}</span></button>
+      ${inner.join('')}
+    </div>`);
   }
   const label = a.who === 'me' ? 'Add to my calendar' : a.who === 'both' ? 'Add for both of us' : `Send to ${nameOf(state, P)}`;
-  out.push(`<button type="button" class="btn big-btn" data-act="addSave">${esc(label)}</button>`);
+  out.push(`<div class="save-bar"><button type="button" class="btn big-btn" data-act="addSave">${esc(label)}</button></div>`);
   return out.join('');
 }
 function fmtHMs(hm) { return fmtTime(atTime('2000-01-01', hm)); }
+function fRow(label, ctl) { return `<div class="f-row"><span class="f-label">${label}</span><div class="f-ctl">${ctl}</div></div>`; }
+function titleRow(id, bind, value, label, placeholder) {
+  return `<div class="f-title"><label for="${id}" class="sr">${esc(label)}</label><input id="${id}" class="title-input" type="text" data-bind="${bind}" value="${esc(value)}" placeholder="${esc(label)}" autocomplete="off" enterkeyhint="done"></div>`;
+}
+function dayRows(a) {
+  const opts = [{ v: 'today', label: 'Today' }, { v: 'tomorrow', label: 'Tomorrow' }, { v: 'pick', label: 'Pick' }];
+  return fRow('Day', seg(opts.map((o) => Object.assign(o, { on: a.day === o.v })), { act: 'addDay', label: 'Which day' }))
+    + (a.day === 'pick' ? fRow('<label for="add-date">Date</label>', `<input id="add-date" type="date" data-bind="add.date" value="${esc(a.date || dayKey(new Date()))}">`) : '');
+}
 function addJobForm(state) {
   const a = ui.add;
   const P = state.partner;
   const whos = [['me', 'Me'], ...(P ? [['partner', nameOf(state, P)], ['both', 'Together']] : [])];
-  return `<section class="stack-s"><label for="job-title" class="h4">What needs doing?</label>
-      <input id="job-title" type="text" data-bind="add.title" value="${esc(a.title)}" placeholder="For example: Food shop" autocomplete="off"></section>
-    <section class="stack-s"><h2 class="h4">Who's doing it?</h2>
-      ${seg(whos.map(([v, l]) => ({ v, label: l, on: (a.jobWho || 'me') === v })), { act: 'addJobWho', label: 'Who is doing it', cls: 'seg-full' })}
-      ${(a.jobWho || 'me') === 'both' ? '<p class="small muted">A job you do together, like the food shop. You both get the reminder.</p>' : ''}</section>
-    ${dayPicker(a)}
-    <section class="stack-s"><div class="grid2">
-      <div class="field"><label for="job-time">Time (optional)</label><input id="job-time" type="time" data-bind="add.start" value="${esc(a.start)}"></div>
-      <div class="field"><label for="job-repeat">Repeats</label><select id="job-repeat" data-bind="add.jobRepeat">${JOB_REPEATS.map((o) => `<option value="${o.v}" ${(a.jobRepeat || '') === o.v ? 'selected' : ''}>${o.label}</option>`).join('')}</select></div></div>
-      <span class="small muted">It shows on Today and in the morning summary, with a reminder on the day.</span></section>
-    <button type="button" class="btn big-btn" data-act="addJobSave">Add the job</button>`;
+  return `<div class="card flush form-card">
+      ${titleRow('job-title', 'add.title', a.title, 'What needs doing?', 'Food shop')}
+      ${fRow('Who', seg(whos.map(([v, l]) => ({ v, label: l, on: (a.jobWho || 'me') === v })), { act: 'addJobWho', label: 'Who is doing it' }))}
+      ${dayRows(a)}
+      ${fRow('<label for="job-time">Time</label>', `<input id="job-time" type="time" data-bind="add.start" value="${esc(a.start)}">`)}
+      ${fRow('<label for="job-repeat">Repeats</label>', `<select id="job-repeat" data-bind="add.jobRepeat">${JOB_REPEATS.map((o) => `<option value="${o.v}" ${(a.jobRepeat || '') === o.v ? 'selected' : ''}>${o.label}</option>`).join('')}</select>`)}
+    </div>
+    <p class="small muted f-hint">${(a.jobWho || 'me') === 'both' ? 'One you do together, like the food shop. You both get the reminder on the day.' : 'It shows on Today, with a reminder on the day. The time is optional.'}</p>
+    <div class="save-bar"><button type="button" class="btn big-btn" data-act="addJobSave">Add the job</button></div>`;
 }
 function addLeaveForm(state) {
   const a = ui.add;
@@ -281,26 +284,38 @@ function addLeaveForm(state) {
   const to = a.lto && a.lto >= from ? a.lto : from;
   const n = leaveDaysFor(state, state.me, from, to);
   const sum = leaveSummary(state, state.me);
-  return `<p class="note-box">Holiday just for you. To book time off together, ask ${esc(nameOf(state, state.partner) || 'your partner')} from Requests.</p>
-    <section class="stack-s"><label for="lv-title" class="h4">Where or what? (optional)</label>
-      <input id="lv-title" type="text" data-bind="add.title" value="${esc(a.title)}" placeholder="For example: Lads' trip" autocomplete="off"></section>
-    <section class="stack-s"><h2 class="h4">When?</h2>
-      <div class="grid2"><div class="field"><label for="al-from">First day off</label><input id="al-from" type="date" data-bind="add.lfrom" data-act="addLeaveDate" value="${esc(from)}"></div>
-      <div class="field"><label for="al-to">Last day off</label><input id="al-to" type="date" data-bind="add.lto" data-act="addLeaveDate" value="${esc(to)}"></div></div>
-      <div class="card row pad"><span class="grow">From your allowance</span><span class="b">${n} day${n === 1 ? '' : 's'}</span><span class="small muted">${sum.left - n} left after</span></div></section>
-    <button type="button" class="btn big-btn" data-act="addLeaveSave">Book it</button>`;
+  return `<div class="card flush form-card">
+      ${titleRow('lv-title', 'add.title', a.title, 'Where or what? (optional)', '')}
+      ${fRow('<label for="al-from">First day</label>', `<input id="al-from" type="date" data-bind="add.lfrom" data-act="addLeaveDate" value="${esc(from)}">`)}
+      ${fRow('<label for="al-to">Last day</label>', `<input id="al-to" type="date" data-bind="add.lto" data-act="addLeaveDate" value="${esc(to)}">`)}
+      ${fRow('Uses', `<span class="b">${n} day${n === 1 ? '' : 's'}</span><span class="small muted">${sum.left - n} left after</span>`)}
+    </div>
+    <p class="small muted f-hint">Just for you. To book time off together, ask ${esc(nameOf(state, state.partner) || 'your partner')} from Requests.</p>
+    <div class="save-bar"><button type="button" class="btn big-btn" data-act="addLeaveSave">Book it</button></div>`;
+}
+function addShiftForm(state) {
+  const a = ui.add;
+  const me = state.me; const P = state.partner;
+  const who = a.shiftWho || (settingsOf(state, me).hasShifts ? me : P);
+  const types = settingsOf(state, who).shiftTypes;
+  const options = [me, P].filter((x) => x && settingsOf(state, x).hasShifts);
+  return `<div class="card flush form-card">
+      ${options.length > 1 ? fRow('Whose', seg(options.map((x) => ({ v: x, label: x === me ? 'Mine' : nameOf(state, x), on: who === x })), { act: 'addShiftWho', label: 'Whose shift' })) : ''}
+      ${dayRows(a)}
+      <div class="f-block"><span class="b">Which shift?</span>
+      <div class="grid2">${SHIFT_ORDER.map((t) => {
+        const def = types[t] || {};
+        return `<button type="button" class="type-card ${a.shiftType === t ? 'on' : ''}" aria-pressed="${a.shiftType === t}" data-act="addShiftType" data-v="${t}"><span class="b">${esc(def.label)}</span><span class="small muted">${def.allDay ? (t === 'off' ? 'Not working' : 'Annual leave') : esc(`${fmtHMs(def.start)} to ${fmtHMs(def.end)}`)}</span></button>`;
+      }).join('')}</div></div>
+    </div>
+    <p class="small muted f-hint">${who === me ? 'Your shifts' : `${esc(nameOf(state, who))}'s shifts`}. A change here wins over the rota for that day.</p>
+    <div class="save-bar"><button type="button" class="btn big-btn" data-act="addShiftSave">Save shift</button></div>`;
 }
 function whoNote(state, who) {
   const P = state.partner;
   if (who === 'me') return 'Saves to your Google Calendar.';
   if (who === 'both') return `Goes in both your Google Calendars. ${nameOf(state, P)} gets a notification.`;
   return `${nameOf(state, P)}'s calendar is theirs, so this goes to them as a request. It's added when they say yes.`;
-}
-function dayPicker(a) {
-  return `<section class="stack-s"><h2 class="h4">When?</h2>
-    <div class="row-wrap">${[['today', 'Today'], ['tomorrow', 'Tomorrow'], ['pick', 'Choose a date']].map(([v, l]) => `<button type="button" class="chip-btn ${a.day === v ? 'on' : ''}" aria-pressed="${a.day === v}" data-act="addDay" data-v="${v}">${l}</button>`).join('')}</div>
-    ${a.day === 'pick' ? `<div class="field"><label for="add-date">Date</label><input id="add-date" type="date" data-bind="add.date" value="${esc(a.date || dayKey(new Date()))}"></div>` : ''}
-  </section>`;
 }
 export function addDayKey() {
   const a = ui.add;
