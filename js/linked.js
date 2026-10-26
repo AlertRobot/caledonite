@@ -1,5 +1,5 @@
-// Peckish and Budgie live on the same website as Caledonite, so on a phone where you use them,
-// Caledonite can read what they've saved on the phone. Nothing is sent anywhere; nothing is changed.
+// Peckish lives on the same website as Caledonite, so on a phone where you use it, Caledonite reads what it has
+// saved on the phone. Budgie has its own website and a limited link (below).
 import { dayKey, addDays, fromDayKey } from './util.js';
 
 const BASE = new URL('../', location.href).href; // https://alertrobot.github.io/
@@ -42,79 +42,46 @@ export async function loadPeckish() {
 }
 
 // ---------- Budgie: paydays, bills and what's left for fun ----------
-function idbGet(name, store, key) {
-  return new Promise((resolve) => {
-    try {
-      const req = indexedDB.open(name);
-      req.onupgradeneeded = () => { req.transaction.abort(); resolve(null); };
-      req.onerror = () => resolve(null);
-      req.onsuccess = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(store)) { db.close(); resolve(null); return; }
-        const q = db.transaction(store).objectStore(store).get(key);
-        q.onsuccess = () => { resolve(q.result || null); db.close(); };
-        q.onerror = () => { resolve(null); db.close(); };
-      };
-    } catch (e) { resolve(null); }
-  });
-}
-function loadEngine() {
-  if (window.Budgie && window.Budgie.load) return Promise.resolve(window.Budgie);
-  return new Promise((resolve) => {
-    const s = document.createElement('script');
-    s.src = `${BASE}budgie/engine.js`;
-    s.onload = () => resolve(window.Budgie || null);
-    s.onerror = () => resolve(null);
-    document.head.appendChild(s);
-  });
-}
-const FUN_RE = /fun|entertain|going out|leisure|social|date|treat/i;
-const money = (n) => `£${(Math.round((+n || 0) * 100) / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-
-export async function loadBudgie() {
-  let data = await idbGet('budgie', 'kv', 'data');
-  if (!data) { try { data = JSON.parse(localStorage.getItem('budgie.kv.data') || 'null'); } catch (e) { data = null; } }
-  if (!data || !data.tables || !data.me) return { found: false };
-  const B = await loadEngine();
-  if (!B || !B.load || !B.coming) return { found: true, error: 'Budgie is on this phone, but its engine could not be loaded.' };
+// Budgie lives on its own website now (budgie-money.github.io), so Caledonite can't read it from the phone.
+// Instead it has its own limited link, made in Budgie (Settings, Linked apps), which can only ask Budgie's sheet
+// for your paydays, bills and what's left for fun. It can't see anything else or change anything.
+const BG_LINK = 'cal.budgieLink', BG_CACHE = 'cal.budgieCache';
+const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } };
+export function parseBudgieLink(text) {
+  const m = String(text || '').match(/#connect=([A-Za-z0-9_\-=]+)/); if (!m) return null;
   try {
-    const today = dayKey(new Date());
-    const db = B.load(data.tables, today);
-    const me = data.me;
-    const days = {};
-    for (const c of B.coming(db, me, addDays14(today, -14), 120) || []) {
-      if (!c || !c.date) continue;
-      const isPay = /payday/i.test(c.name || '') || c.table === 'income';
-      if (!isPay && c.table !== 'bills') continue;
-      (days[c.date] = days[c.date] || []).push({
-        name: isPay ? (c.name || 'Payday') : `${c.name}`,
-        sub: c.amount ? `${isPay ? '' : 'Bill, '}${money(c.amount)}` : (isPay ? '' : 'Bill'),
-        pay: isPay, amount: c.amount || 0
-      });
+    const b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+    const j = JSON.parse(decodeURIComponent(escape(atob(b64 + '==='.slice((b64.length + 3) % 4)))));
+    if (!j.u || !j.k) return null;
+    const host = new URL(j.u).hostname; // only ever a Google Apps Script web app
+    if (!/^script\.google(usercontent)?\.com$/.test(host)) return null;
+    return { u: j.u, k: j.k };
+  } catch (e) { return null; }
+}
+export function budgieLinked() { return !!lsGet(BG_LINK); }
+export function setBudgieLink(cfg) { lsSet(BG_LINK, cfg); lsSet(BG_CACHE, null); }
+export function unlinkBudgie() { lsSet(BG_LINK, null); lsSet(BG_CACHE, null); }
+export async function loadBudgie() {
+  const cfg = lsGet(BG_LINK);
+  if (!cfg) return { found: false, needsLink: true };
+  const cached = lsGet(BG_CACHE);
+  try {
+    const res = await fetch(cfg.u, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ key: cfg.k, action: 'app.calendar' }) });
+    const j = await res.json();
+    if (!j.ok) {
+      if (/not allowed|key|link/i.test(j.error || '')) return { found: true, error: 'Budgie turned this link down. Make a new one in Budgie (Settings, Linked apps) and paste it here.' };
+      throw new Error(j.error || 'Budgie said no');
     }
-    // what's left to spend on fun until payday
-    let fun = null;
-    try {
-      const per = B.periodAt(db, me, today);
-      const plan = B.planFor(db, me, per);
-      const st = B.budgetState(db, me, per);
-      let left = 0; const names = [];
-      for (const l of plan.lines || []) {
-        if (l.kind !== 'spend' || !FUN_RE.test(l.name || '')) continue;
-        const x = st[l.id];
-        if (!x) continue;
-        left += Math.max(0, +x.left || 0);
-        names.push(l.name);
-      }
-      if (names.length) fun = { left: Math.round(left * 100) / 100, names, until: per.next || null };
-    } catch (e) { fun = null; }
-    return { found: true, days, fun, synced: data.lastSync || null };
+    const out = { found: true, days: j.days || {}, fun: j.fun || null, synced: j.synced || Date.now(), name: j.name || '' };
+    lsSet(BG_CACHE, out);
+    return out;
   } catch (e) {
-    console.warn('budgie', e);
-    return { found: true, error: 'Budgie is on this phone, but its data could not be read.' };
+    // offline: what Budgie said last time
+    if (cached) return Object.assign({}, cached, { stale: true });
+    return { found: true, error: 'Couldn\u2019t reach Budgie just now.' };
   }
 }
-function addDays14(k, n) { return dayKey(addDays(fromDayKey(k), n)); }
 
 export async function loadLinked() {
   const [peckish, budgie] = await Promise.all([loadPeckish().catch(() => ({ found: false })), loadBudgie().catch(() => ({ found: false }))]);

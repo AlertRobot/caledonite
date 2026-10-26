@@ -67,8 +67,8 @@ function linkedStatus(state) {
   const L = state.linked || {};
   const names = [];
   if (L.peckish && L.peckish.found) names.push('Peckish');
-  if (L.budgie && L.budgie.found) names.push('Budgie');
-  return names.length ? `${names.join(' and ')} found on this phone` : 'Peckish and Budgie';
+  if (L.budgie && L.budgie.found && !L.budgie.error) names.push('Budgie');
+  return names.length ? `${names.join(' and ')} linked` : 'Peckish and Budgie';
 }
 function reminderCount(state) {
   const n = myReminders(state).length;
@@ -378,14 +378,17 @@ function secTheme(state) {
 function secApps(state) {
   const L = state.linked || {};
   const pk = L.peckish || {}; const bg = L.budgie || {};
-  return `<p class="muted">Peckish and Budgie are on the same website as Caledonite. On a phone where you use them, Caledonite reads what they've saved on that phone. Nothing is sent anywhere.</p>
+  return `<p class="muted">Peckish is on the same website as Caledonite, so on a phone where you use it, Caledonite reads what it has saved there. Budgie has a website of its own and gives Caledonite a limited link.</p>
     <div class="card stack pad"><div class="row"><span class="grow h3">Peckish</span><span class="pill ${pk.found ? 'ok' : ''}">${pk.found ? 'Found on this phone' : 'Not on this phone'}</span></div>
       <p class="small muted">${pk.found ? 'Tonight\u2019s dinner shows on Today. Before a long shift, it reminds you to make extra for a packed lunch.' : 'Open Peckish on this phone once, and tonight\u2019s dinner shows on Today.'}</p>
       <a class="b small" href="../es-kitchen/" target="_blank" rel="noopener">Open Peckish</a></div>
-    <div class="card stack pad"><div class="row"><span class="grow h3">Budgie</span><span class="pill ${bg.found && !bg.error ? 'ok' : ''}">${bg.found ? (bg.error ? 'Problem' : 'Found on this phone') : 'Not on this phone'}</span></div>
-      <p class="small muted">${bg.error ? esc(bg.error) : bg.found ? 'Your paydays and bills show in your calendar, only on this phone. The ideas jar knows what\u2019s left for fun until payday.' : 'Open Budgie on this phone once, and your paydays and bills show in your calendar.'}</p>
+    <div class="card stack pad"><div class="row"><span class="grow h3">Budgie</span><span class="pill ${bg.found && !bg.error ? 'ok' : ''}">${bg.found ? (bg.error ? 'Problem' : 'Linked') : 'Not linked'}</span></div>
+      ${bg.found ? `<p class="small muted">${bg.error ? esc(bg.error) : 'Your paydays and bills show in your calendar, only on this phone. The ideas jar knows what\u2019s left for fun until payday.' + (bg.stale ? ' (From the last time Budgie could be reached.)' : '')}</p>
       ${bg.fun ? `<p class="small">Left for fun: <b>£${esc(String(Math.floor(bg.fun.left)))}</b> (${esc(bg.fun.names.join(', '))}).</p>` : ''}
-      <a class="b small" href="../budgie/" target="_blank" rel="noopener">Open Budgie</a></div>
+      <div class="row wrap"><a class="b small" href="https://budgie-money.github.io/" target="_blank" rel="noopener">Open Budgie</a><button type="button" class="b small" data-act="budgieUnlink">Unlink</button></div>` :
+      `<p class="small muted">In Budgie, go to Settings, then Linked apps, and tap Link Caledonite. Copy the link it makes and paste it here. It only lets Caledonite see your paydays, bills and what's left for fun.</p>
+      <div class="row"><label class="sr" for="bg-link">Your Caledonite link from Budgie</label><input id="bg-link" class="grow" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://budgie-money.github.io/#connect=..." data-bind="settings.budgieDraft" value="${esc(ui.settings.budgieDraft || '')}"><button type="button" class="btn" data-act="budgieLink">Link</button></div>
+      <a class="b small" href="https://budgie-money.github.io/" target="_blank" rel="noopener">Open Budgie</a>`}</div>
     <button type="button" class="btn sec self-start" data-act="linkedReload">Check again</button>`;
 }
 

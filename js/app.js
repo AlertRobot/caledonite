@@ -6,7 +6,7 @@ import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey, leaveWhen } from '.
 import { viewSettings, viewSignedOut, viewSetup, viewNotMember, viewLoading } from './views-settings.js';
 import { viewEvent, findEvent } from './views-event.js';
 import { viewJobs, viewJar, STARTER_IDEAS, pickIdea, jarBudget } from './views-extra.js';
-import { loadLinked } from './linked.js';
+import { loadLinked, parseBudgieLink, setBudgieLink, unlinkBudgie } from './linked.js';
 import { applyLook, setLook } from './theme.js';
 import { FIREBASE, APP } from './config.js';
 import { icon } from './ui.js';
@@ -187,6 +187,14 @@ const H = {
   myToggle: (el) => { const s = settingsOf(store.state, store.state.me); const f = el.dataset.f; run(actions.updateMySettings({ [f]: s[f] === false })); },
   leaveToggle: () => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ leave: Object.assign({}, s.leave, { bankHolsCount: !s.leave.bankHolsCount }) })); },
   linkedReload: async () => { setLinked(await loadLinked()); toast('Checked.'); },
+  budgieLink: async () => {
+    const cfg = parseBudgieLink(ui.settings.budgieDraft);
+    if (!cfg) return toast('That doesn\u2019t look like a Budgie link. Make one in Budgie: Settings, then Linked apps.');
+    setBudgieLink(cfg); ui.settings.budgieDraft = '';
+    const L = await loadLinked(); setLinked(L);
+    toast(L.budgie && L.budgie.found && !L.budgie.error ? 'Budgie linked.' : (L.budgie && L.budgie.error) || 'Linked.');
+  },
+  budgieUnlink: async () => { unlinkBudgie(); setLinked(await loadLinked()); toast('Budgie unlinked.'); },
   // ----- jobs -----
   addJobNew: () => { resetAdd(); ui.add.kind = 'job'; },
   addJobWho: (el) => { ui.add.jobWho = el.dataset.v; render(); },
