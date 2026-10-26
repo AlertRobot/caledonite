@@ -8,6 +8,7 @@ import {
 import { jobRow } from './views-extra.js';
 import { icon, avatar, whoChip, seg } from './ui.js';
 import { ui } from './uistate.js';
+import { requestPassed } from './store.js';
 
 function motif() {
   const t = document.documentElement.dataset.theme;
@@ -21,9 +22,10 @@ export function pageHeader(state, title, small) {
   </header>`;
 }
 
+// (not one whose time has passed while it waited: there's nothing left to answer)
 export function waitingForMe(state) {
-  return state.requests.filter((r) => (r.to === state.me && (r.status === 'waiting' || r.status === 'maybe' || (r.type === 'heads' && r.status === 'sent')))
-    || (r.from === state.me && r.status === 'other'));
+  return state.requests.filter((r) => ((r.to === state.me && (r.status === 'waiting' || r.status === 'maybe' || (r.type === 'heads' && r.status === 'sent')))
+    || (r.from === state.me && r.status === 'other')) && !requestPassed(r));
 }
 
 // ---------------- TODAY ----------------

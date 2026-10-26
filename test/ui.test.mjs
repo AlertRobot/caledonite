@@ -425,3 +425,31 @@ test('a request your partner isn\'t sure about can still be called off (and its 
   assert.equal(await mods(page, (store) => store.store.state.requests.find((r) => r.id === 'r_keep').status), 'cancelled');
   await page.context().close();
 });
+
+test('a request whose time went by while it waited no longer asks for an answer, and can be cleared away', async () => {
+  const page = await open('ethan', '#requests');
+  const before = await page.textContent('.bottom-nav .badge');
+  await mods(page, (store) => {
+    const d = new Date(); d.setDate(d.getDate() - 2);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return store.store.backend.commit([
+      { type: 'set', path: 'requests/r_gone', data: { from: 'sophie', to: 'ethan', type: 'plan', title: 'Gone by', when: { day, start: '10:00', end: '12:00', allDay: false, label: '' }, hold: true, status: 'waiting', created: Date.now() - 3 * 864e5 } },
+      { type: 'set', path: 'requests/r_mine', data: { from: 'ethan', to: 'sophie', type: 'plan', title: 'Mine gone by', when: { day, start: '19:00', end: '21:00', allDay: false, label: '' }, hold: false, status: 'waiting', created: Date.now() - 3 * 864e5 } }
+    ]);
+  });
+  await page.waitForTimeout(150);
+  assert.equal(await page.textContent('.bottom-nav .badge'), before, 'not counted as waiting for you');
+  const card = page.locator('article', { hasText: 'Gone by' });
+  assert.match(await card.textContent(), /This time has passed/);
+  assert.equal(await card.locator('[data-a="yes"], [data-act="suggestOpen"], [data-a="maybe"]').count(), 0);
+  await card.locator('[data-a="no"]').click();
+  await page.waitForTimeout(150);
+  assert.equal(await mods(page, (store) => store.store.raw.requests.r_gone.status), 'no');
+  // what you asked: no reminder to send, just call it off
+  await page.click('[data-act="reqTab"][data-v="sent"]');
+  const mine = page.locator('article', { hasText: 'Mine gone by' });
+  assert.equal(await mine.locator('[data-a="remind"]').count(), 0);
+  assert.equal(await mine.locator('[data-a="cancel"]').count(), 1);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});

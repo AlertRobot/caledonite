@@ -14,6 +14,20 @@
     if (w.endDay && w.endDay !== w.day) ev.endDay = w.endDay;
     return ev;
   }
+  // the time asked for has gone by (all day: once its last day is over). For one with another time suggested, that time
+  function whenPassed(w, now) {
+    if (!w || !/^\d{4}-\d{2}-\d{2}$/.test(String(w.day || ''))) return false;
+    var p = String(w.allDay && w.endDay ? w.endDay : w.day).split('-').map(Number);
+    var end = new Date(p[0], p[1] - 1, p[2] + 1);
+    if (!w.allDay && w.start) {
+      var t = String(w.end && w.end > w.start ? w.end : plusHour(w.start)).split(':').map(Number);
+      end = new Date(p[0], p[1] - 1, p[2], t[0] || 0, t[1] || 0);
+    }
+    return end.getTime() <= (now || Date.now());
+  }
+  function requestPassed(r, now) {
+    return !!r && whenPassed(r.status === 'other' ? r.counter : r.when, now);
+  }
   function eventTitle(r) {
     if (r.type === 'free') return 'Kept free: ' + r.title;
     if (r.type === 'leave') return r.title ? 'Holiday: ' + r.title : 'Holiday';
@@ -89,5 +103,5 @@
     return { patch: patch, outbox: out, notify: notify };
   }
 
-  root.CaledoniteOps = { buildAnswer: buildAnswer, evFromWhen: evFromWhen, eventTitle: eventTitle, plusHour: plusHour };
+  root.CaledoniteOps = { buildAnswer: buildAnswer, evFromWhen: evFromWhen, eventTitle: eventTitle, plusHour: plusHour, whenPassed: whenPassed, requestPassed: requestPassed };
 })(typeof self !== 'undefined' ? self : this);

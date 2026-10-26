@@ -6,6 +6,8 @@ import { clearDayCache, settingsOf, sleepingUntil, nameOf, reminderId, nextJobDa
 import './ops.js';
 
 const Ops = (typeof self !== 'undefined' ? self : window).CaledoniteOps;
+// a request still waiting whose time has gone by: nothing to answer any more, only to clear away
+export const requestPassed = (r, now = Date.now()) => Ops.requestPassed(r, now);
 const listeners = new Set();
 export const store = {
   backend: null,

@@ -1,7 +1,7 @@
 // Requests, asking something, and adding something.
 import { esc, dayKey, addDays, fmtTime, agoText, atTime } from './util.js';
 import { nameOf, freeSlots, sleepingUntil, settingsOf, SHIFT_ORDER, REMIND_OPTIONS, REMIND_NOTES, remindSummary, leaveDaysFor, leaveSummary, JOB_REPEATS } from './logic.js';
-import { whenLabel } from './store.js';
+import { whenLabel, requestPassed } from './store.js';
 import { icon, avatar, seg, toggleRow, empty } from './ui.js';
 import { ui } from './uistate.js';
 import { pageHeader } from './views-main.js';
@@ -14,8 +14,8 @@ export function viewRequests(state) {
   const P = state.partner;
   const forMe = state.requests.filter((r) => r.to === state.me && r.status !== 'cancelled');
   const sent = state.requests.filter((r) => r.from === state.me && r.status !== 'cancelled');
-  const openForMe = forMe.filter((r) => r.status === 'waiting' || r.status === 'maybe' || r.status === 'sent').length;
-  const openSent = sent.filter((r) => r.status === 'waiting' || r.status === 'maybe' || r.status === 'other').length;
+  const openForMe = forMe.filter((r) => isOpen(r) && r.status !== 'other').length;
+  const openSent = sent.filter((r) => isOpen(r) && r.status !== 'sent').length;
   const list = ui.reqTab === 'for' ? forMe : sent;
   const recent = list.filter((r) => isOpen(r) || (Date.now() - (r.answeredAt || r.created || 0)) < 7 * 86400000);
   const older = list.filter((r) => !recent.includes(r));
@@ -27,7 +27,8 @@ export function viewRequests(state) {
 }
 // worked out afresh each time: a saved "Tomorrow, 7pm" would be wrong by the next day
 function whenText(w) { return w ? whenLabel(w) || w.label || '' : ''; }
-function isOpen(r) { return r.status === 'waiting' || r.status === 'maybe' || r.status === 'other' || r.status === 'sent'; }
+// still to be answered (not one whose time went by while it waited)
+function isOpen(r) { return (r.status === 'waiting' || r.status === 'maybe' || r.status === 'other' || r.status === 'sent') && !requestPassed(r); }
 
 function reqCard(state, r) {
   const mine = r.from === state.me;
@@ -37,7 +38,14 @@ function reqCard(state, r) {
   const when = r.when ? `<p class="row small-gap b">${icon.clock(18)}${esc(whenText(r.when))}</p>` : '';
   let body = '';
   const id = esc(r.id);
-  if (!mine) {
+  // still waiting, but its time has gone by: only clearing it away is left (that frees anything pencilled in)
+  const passed = ['waiting', 'maybe', 'other'].includes(r.status) && requestPassed(r);
+  const passedLine = passed ? `<p class="note-box">${r.status === 'other' ? `The other time, ${esc(whenText(r.counter))}, has passed.` : 'This time has passed.'}</p>` : '';
+  if (passed && !mine) {
+    body = r.status === 'other' ? passedLine : `${passedLine}<div class="row-wrap"><button type="button" class="btn sec" data-act="answer" data-a="no" data-id="${id}">Not this time</button></div>`;
+  } else if (passed) {
+    body = `${passedLine}<div class="row-wrap"><button type="button" class="btn sec" data-act="answer" data-a="cancel" data-id="${id}">Cancel request</button></div>`;
+  } else if (!mine) {
     if (r.status === 'waiting' || r.status === 'maybe') {
       const maybeNote = r.status === 'maybe' ? '<p class="small muted">You said you’re not sure yet.</p>' : '';
       if (ui.suggestFor === r.id) {

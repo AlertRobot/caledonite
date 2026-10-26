@@ -107,7 +107,7 @@ test('adding an event saves the phone time zone with it', async () => {
 });
 
 // ---------- the service worker, run outside a browser with a stand-in for its surroundings ----------
-async function loadSw({ cacheKeys = [], fetchRes = null, fetchFails = false, own = {}, other = {}, windows = [], opened = [] } = {}) {
+async function loadSw({ cacheKeys = [], fetchRes = null, fetchFails = false, own = {}, other = {}, windows = [], opened = [], shown = [], extra = {} } = {}) {
   const { readFileSync } = await import('node:fs');
   const vm = await import('node:vm');
   const handlers = {}; const deleted = []; const puts = [];
@@ -118,7 +118,8 @@ async function loadSw({ cacheKeys = [], fetchRes = null, fetchFails = false, own
     Response: { error: () => 'network error' },
     fetch: async () => { if (fetchFails) throw new TypeError('offline'); return fetchRes; }, location: { origin: 'https://alertrobot.github.io' }
   };
-  sandbox.self = Object.assign(sandbox, { addEventListener: (n, fn) => { handlers[n] = fn; }, clients: { claim: async () => {}, matchAll: async () => windows, openWindow: async (u) => { opened.push(u); return null; } }, skipWaiting: () => {}, registration: { scope: 'https://alertrobot.github.io/caledonite/', showNotification: async () => {} } });
+  Object.assign(sandbox, extra);
+  sandbox.self = Object.assign(sandbox, { addEventListener: (n, fn) => { handlers[n] = fn; }, clients: { claim: async () => {}, matchAll: async () => windows, openWindow: async (u) => { opened.push(u); return null; } }, skipWaiting: () => {}, registration: { scope: 'https://alertrobot.github.io/caledonite/', showNotification: async (t, o) => { shown.push([t, o]); } } });
   sandbox.importScripts = (p) => vm.runInContext(readFileSync(new URL(`../${p.replace('./', '')}`, import.meta.url), 'utf8'), ctx);
   const ctx = vm.createContext(sandbox);
   vm.runInContext(readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), ctx);
@@ -138,6 +139,51 @@ test('the service worker never keeps a failed download of the Firebase library',
   let p; handlers.fetch({ request: { method: 'GET', url: 'https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js' }, respondWith: (x) => { p = x; } });
   assert.equal(await p, bad);
   assert.deepEqual(puts, []);
+});
+
+// what Firestore's REST API hands the service worker for a document
+const restDoc = (o) => ({ fields: Object.fromEntries(Object.entries(o).map(([key, v]) => [key, v === null ? { nullValue: null } : typeof v === 'number' ? { integerValue: String(v) } : typeof v === 'object' ? restDoc(v).fields && { mapValue: restDoc(v) } : { stringValue: v }])) });
+test("a notification's Yes on a request whose time went by while it waited adds nothing", async () => {
+  const past = dayKey(addDays(T, -2));
+  const answerWith = async (req, action = 'yes') => {
+    const calls = []; const shown = [];
+    const idb = { open: () => { const r = { result: { close() {}, transaction: () => ({ objectStore: () => ({ get: () => { const q = {}; setTimeout(() => { q.result = { value: { email: 'e@x.com', stsTokenManager: { accessToken: 't', expirationTime: Date.now() + 3600e3 } } }; q.onsuccess(); }); return q; } }) }) } }; setTimeout(() => r.onsuccess()); return r; } };
+    const fetch = async (url, o = {}) => {
+      calls.push([o.method || 'GET', String(url)]);
+      const body = /requests\/r1$/.test(url) ? restDoc(req) : /people/.test(url) ? { documents: [{ name: 'x/people/ethan', ...restDoc({ email: 'e@x.com', name: 'Ethan' }) }, { name: 'x/people/sophie', ...restDoc({ email: 's@x.com', name: 'Sophie' }) }] } : {};
+      return { ok: true, json: async () => body };
+    };
+    const { handlers } = await loadSw({ shown, extra: { indexedDB: idb, fetch, crypto: globalThis.crypto, Intl } });
+    let p; handlers.notificationclick({ action, notification: { data: { reqId: 'r1' }, close() {} }, waitUntil: (x) => { p = x; } });
+    await p;
+    return { saved: calls.some(([m, u]) => m === 'POST' && /:commit$/.test(u)), text: shown.map(([, o]) => o.body).join(' ') };
+  };
+  const req = { from: 'sophie', to: 'ethan', type: 'plan', title: 'IKEA', status: 'waiting', hold: 0, created: 1, when: { day: past, start: '10:00', end: '12:00' } };
+  let r = await answerWith(req);
+  assert.equal(r.saved, false);
+  assert.match(r.text, /passed/);
+  // still in time: answered as before
+  r = await answerWith(Object.assign({}, req, { when: { day: dayKey(addDays(T, 2)), start: '10:00', end: '12:00' } }));
+  assert.equal(r.saved, true);
+  assert.match(r.text, /You said yes/);
+  // called off meanwhile: said so, not "you already answered"
+  r = await answerWith(Object.assign({}, req, { status: 'cancelled' }));
+  assert.equal(r.saved, false);
+  assert.match(r.text, /called off/);
+});
+
+test("a request whose time went by while it waited isn't waiting for an answer any more", () => {
+  const past = dayKey(addDays(T, -1));
+  const st = load({ requests: {
+    old: { from: 'sophie', to: 'ethan', type: 'plan', title: 'IKEA', status: 'waiting', hold: true, created: Date.now() - 3 * 864e5, when: { day: past, start: '10:00', end: '12:00', allDay: false } },
+    soon: { from: 'sophie', to: 'ethan', type: 'plan', title: 'Later', status: 'waiting', created: Date.now(), when: { day: k(1), start: '08:00', end: '09:00', allDay: false } },
+    trip: { from: 'sophie', to: 'ethan', type: 'leave', title: 'Spain', status: 'waiting', created: Date.now(), people: ['sophie', 'ethan'], when: { day: past, endDay: k(0), allDay: true } },
+    countered: { from: 'ethan', to: 'sophie', type: 'plan', title: 'Film', status: 'other', created: Date.now(), when: { day: k(3), start: '19:00', end: '21:00' }, counter: { day: past, start: '19:00', end: '21:00' } }
+  } });
+  assert.equal(Ops.requestPassed(st.requests.find((r) => r.id === 'old')), true);
+  assert.equal(Ops.requestPassed(st.requests.find((r) => r.id === 'soon')), false);
+  assert.equal(Ops.requestPassed(st.requests.find((r) => r.id === 'trip')), false, 'a holiday still on its last day');
+  assert.equal(Ops.requestPassed(st.requests.find((r) => r.id === 'countered')), true, 'the other time suggested has gone by');
 });
 
 test("your partner's own holiday has no Change or Delete for you", async () => {

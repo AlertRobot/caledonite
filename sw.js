@@ -169,7 +169,10 @@ async function answerFromNotification(reqId, action) {
   for (const d of peopleRes.documents || []) people[d.name.split('/').pop()] = fromDoc(d);
   const me = Object.keys(people).find((pid) => (people[pid].email || '').toLowerCase() === email);
   if (!me || req.to !== me) throw new Error('not for you');
+  if (req.status === 'cancelled') return 'That was called off, so there’s nothing to answer.';
   if (req.status !== 'waiting' && req.status !== 'maybe') return 'You already answered that one.';
+  // its time went by while it waited: a yes would only put it in the calendars in the past
+  if (action === 'yes' && self.CaledoniteOps.requestPassed(req, Date.now())) return 'That time has passed, so nothing was added. You can clear it in Caledonite.';
   const names = {};
   for (const pid of Object.keys(people)) names[pid] = people[pid].name || 'Your partner';
   let tz = null;
