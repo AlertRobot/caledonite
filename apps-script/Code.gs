@@ -578,7 +578,7 @@ function readEvents_(cal, id, from, to) {
         var res = Calendar.Events.list(id, {
           timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: true, showDeleted: false, maxResults: 2500,
           pageToken: token || undefined,
-          fields: 'nextPageToken,items(id,iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,visibility,attendees(self,responseStatus))'
+          fields: 'nextPageToken,items(id,iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,visibility,birthdayProperties(type),attendees(self,responseStatus))'
         });
         // (one odd event is left out, never the reason the whole calendar is read the slow way every run, which
         // can use up the account's daily time for its 10-minute runs)
@@ -630,6 +630,9 @@ function normApi_(it) {
   if (m) o.tag = m[1];
   // "#busy", or marked Private in Google Calendar: your partner only ever sees "Busy"
   if (/#busy\b/i.test(desc) || it.visibility === 'private' || it.visibility === 'confidential') o.pb = 1;
+  // your contacts' birthdays and anniversaries, which Google now puts in your own calendar: never in your
+  // partner's copy (they're other people's dates, as the old Birthdays calendar was). Your own birthday is.
+  if (it.eventType === 'birthday' && !(it.birthdayProperties && it.birthdayProperties.type === 'self')) o.np = 1;
   return o;
 }
 
@@ -660,6 +663,7 @@ function norm_(ev) {
     var vis = ev.getVisibility();
     if (vis === CalendarApp.Visibility.PRIVATE || vis === CalendarApp.Visibility.CONFIDENTIAL) o.pb = 1;
   } catch (e) { /* ignore */ }
+  try { if (CalendarApp.EventType && ev.getEventType() === CalendarApp.EventType.BIRTHDAY) o.np = 1; } catch (e) { /* older events */ }
   return o;
 }
 
@@ -688,7 +692,8 @@ function feedWrites_(me, ctx, calKey, doc, events, props, known) {
     var list = byMonth[mk];
     var base = { owner: me.person, ownerEmail: ctx.appEmail, calKey: calKey, month: mk, account: me.email };
     if (doc.show !== false) {
-      var priv = list.map(function (e) { var c = clone_(e); delete c.pb; return c; });
+      // (pb stays: the app never shows the names of things you share only as "Busy", say in a shared countdown)
+      var priv = list.map(function (e) { var c = clone_(e); delete c.np; return c; });
       put_(HOUSEHOLD + '/privateFeeds/' + me.person + '__' + calKey + '__' + mk, base, priv);
     }
     var shared = shareFilter_(doc, list);
@@ -707,6 +712,7 @@ function feedWrites_(me, ctx, calKey, doc, events, props, known) {
 function shareFilter_(doc, list) {
   var share = doc.share || 'busy';
   if (share === 'none') return null;
+  list = list.filter(function (e) { return !e.np; });
   if (share === 'hours') {
     var days = {};
     list.forEach(function (e) {
@@ -720,7 +726,7 @@ function shareFilter_(doc, list) {
   return list.map(function (e) {
     var c = clone_(e);
     if (share === 'busy' || c.pb) { c.t = 'Busy'; c.b = 1; delete c.l; }
-    delete c.pb; delete c.gid; delete c.rid;
+    delete c.pb; delete c.np; delete c.gid; delete c.rid;
     return c;
   });
 }

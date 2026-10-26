@@ -1385,3 +1385,51 @@ test('one odd event from Google never sends the whole calendar the slow way', ()
   assert.equal(slow, 0);
   assert.equal(JSON.stringify(evs.map((e) => e.t)), '["Tea"]');
 });
+
+// ---------- round 8 ----------
+test("your contacts' birthdays (which Google now puts in your own calendar) never reach your partner's copy", () => {
+  withDigest();
+  const bday = (type) => ctx.normApi_({ id: 'b1', iCalUID: 'b1@google.com', summary: "Jane Doe's birthday", eventType: 'birthday', birthdayProperties: { type }, start: { date: '2026-11-06' }, end: { date: '2026-11-07' } });
+  const tea = ctx.normApi_({ id: 't1', iCalUID: 't1@google.com', summary: 'Tea', start: { dateTime: '2026-11-06T10:00:00Z' }, end: { dateTime: '2026-11-06T11:00:00Z' } });
+  for (const share of ['all', 'busy']) {
+    const shared = ctx.shareFilter_({ share }, [bday('birthday'), bday('anniversary'), tea]);
+    assert.equal(shared.length, 1, share);
+    assert.ok(!('np' in shared[0]));
+  }
+  // your own birthday is yours to share
+  assert.equal(ctx.shareFilter_({ share: 'all' }, [bday('self')]).length, 1);
+  // still in your own copy
+  const { api } = fakeProps();
+  const w = ctx.feedWrites_({ person: 'ethan', email: 'e@x.com' }, { appEmail: 'e@x.com' }, 'k', { share: 'all' }, [bday('birthday')], api).writes;
+  const priv = w.find((x) => x.update.name.includes('/privateFeeds/'));
+  const shared = w.find((x) => x.update.name.includes('/sharedFeeds/'));
+  assert.equal(priv.update.fields.events.arrayValue.values.length, 1);
+  assert.equal((shared.update.fields.events.arrayValue.values || []).length, 0);
+  // and the slow way (CalendarApp) too
+  ctx.CalendarApp = { Visibility: { PRIVATE: 'P', CONFIDENTIAL: 'C' }, GuestStatus: { NO: 'NO' }, EventType: { BIRTHDAY: 'BIRTHDAY' } };
+  const old = { getMyStatus: () => null, getDescription: () => '', getStartTime: () => new Date('2026-11-06T00:00:00Z'), getId: () => 'b@google.com', getTitle: () => "Jane's birthday", isRecurringEvent: () => true, isAllDayEvent: () => true, getAllDayStartDate: () => new Date('2026-11-06T00:00:00Z'), getAllDayEndDate: () => new Date('2026-11-07T00:00:00Z'), getLocation: () => '', getVisibility: () => 'D', getEventType: () => 'BIRTHDAY' };
+  assert.equal(ctx.shareFilter_({ share: 'all' }, [ctx.norm_(old)]).length, 0);
+  // so your partner's reminder on it never goes off either
+  const now = Date.now();
+  const { api: a2 } = smallProps();
+  ctx.PropertiesService = { getUserProperties: () => a2 };
+  const writes = [];
+  ctx.fsCommit_ = (x) => writes.push(...x);
+  ctx.docName_ = (p) => p;
+  ctx.fsGet_ = (path) => (path === 'households/main/people/sophie/private/main' ? { reminders: { r1: { ref: 'e:ethan:primary:u1', owner: 'ethan', times: ['h1'] } } } : null);
+  const me = { person: 'ethan', email: 'e@x.com', main: true, people: [{ id: 'ethan', data: { settings: {} } }, { id: 'sophie', data: { settings: {} } }] };
+  ctx.fireReminders_(me, {}, [{ calKey: 'primary', shown: true, share: 'all', doc: { share: 'all' }, ev: { id: 'e1', uid: 'u1', t: "Jane's birthday", np: 1, s: now + 30 * 60e3, e: now + 90 * 60e3 } }]);
+  assert.equal(writes.length, 0);
+});
+
+test('your own copy keeps the "seen only as Busy" mark (the app uses it); your partner\'s copy never has it', () => {
+  withDigest();
+  const s = ctx.localTime_('2026-11-10', '09:00');
+  const { api } = fakeProps();
+  const w = ctx.feedWrites_({ person: 'ethan', email: 'e@x.com' }, { appEmail: 'e@x.com' }, 'k', { share: 'all' }, [{ id: 'a', t: 'Therapy', pb: 1, s, e: s + 3600e3 }], api).writes;
+  const ev = (path) => w.find((x) => x.update.name.includes(path)).update.fields.events.arrayValue.values[0].mapValue.fields;
+  assert.equal(ev('/privateFeeds/').pb.integerValue, '1');
+  assert.equal(ev('/privateFeeds/').t.stringValue, 'Therapy');
+  assert.ok(!('pb' in ev('/sharedFeeds/')));
+  assert.equal(ev('/sharedFeeds/').t.stringValue, 'Busy');
+});
