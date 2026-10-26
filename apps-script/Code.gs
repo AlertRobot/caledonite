@@ -1009,7 +1009,8 @@ function patchFor_(changes, calId, eventId, zone) {
 }
 
 // ===================== event reminders =====================
-// Reminders are kept on each person's record (people/{id}.reminders), set in the app.
+// Reminders are set in the app and kept where only that person can read them (people/{id}/private/main),
+// or on their record (people/{id}.reminders) if they were set before that.
 // This account sends the ones for events in its own calendars, whoever set them.
 var REMIND_DAYS_ = { w2: 14, w1: 7, d1: 1, d0: 0 };
 var REMIND_MINS_ = { h1: 60, m30: 30 };
@@ -1113,7 +1114,8 @@ function fireReminders_(me, ctx, seen) {
   }
 
   me.people.forEach(function (p) {
-    var rems = p.data.reminders || {};
+    var priv = fsGet_(HOUSEHOLD + '/people/' + p.id + '/private/main') || {};
+    var rems = merge_(p.data.reminders || {}, priv.reminders || {});
     var settings = p.data.settings || {};
     var bdays = (settings.autoRemind && settings.autoRemind.birthdays) || [];
     Object.keys(rems).forEach(function (id) {
@@ -1401,6 +1403,8 @@ function backup_(me, ctx, force) {
   ['people', 'calendars', 'requests', 'notes', 'shifts', 'jobs', 'ideas'].forEach(function (c) {
     dump[c] = fsList_(HOUSEHOLD + '/' + c).map(function (d) { return merge_({ id: d.id }, d.data); });
   });
+  // your own reminders and private countdowns, never your partner's (this goes in your Google Drive)
+  dump.mine = { person: me.person, private: fsGet_(HOUSEHOLD + '/people/' + me.person + '/private/main') || {} };
   var token = ScriptApp.getOAuthToken();
   var api = 'https://www.googleapis.com/drive/v3/files';
   var auth = { Authorization: 'Bearer ' + token };

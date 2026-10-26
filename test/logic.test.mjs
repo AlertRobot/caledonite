@@ -302,3 +302,34 @@ test('changing or deleting just one occurrence of something repeating sends whic
   await actions.editEvent({ ev, changes: { start: '20:00' }, scope: 'one' });
   assert.ok(seen.filter((o) => o.path === 'outbox').every((o) => o.data.inst === '20261113T190000Z'));
 });
+
+test('reminders and private countdowns are kept where your partner can’t read them, and older ones move there', async () => {
+  const seen = [];
+  store.backend = { commit: async (ops) => { seen.push(...ops); }, ping() {} };
+  setRaw({
+    household: {}, private: {},
+    people: {
+      ethan: { name: 'Ethan', email: 'e@x.com', reminders: { r1: { ref: 'e:ethan:primary:x', owner: 'ethan', title: 'Ring shop', times: ['d1'] } },
+        countdowns: { c1: { title: 'Ring shop', date: sat, shared: false }, c2: { title: 'Party', date: sat, shared: true } } },
+      sophie: { name: 'Sophie', email: 's@x.com' }
+    },
+    calendars: {}, feeds: [], shifts: {}, requests: {}, notes: {}, outbox: {}, jobs: {}, ideas: {}, status: {}
+  }, { phase: 'ready', me: 'ethan', user: { email: 'e@x.com' } });
+  await actions.movePrivate();
+  const up = seen.find((o) => o.type === 'update');
+  assert.equal(up.path, 'people/ethan/private/main');
+  assert.deepEqual(Object.keys(up.data.reminders), ['r1']);
+  assert.deepEqual(Object.keys(up.data.countdowns), ['c1']);
+  assert.ok(seen.some((o) => o.type === 'unset' && o.path === 'people/ethan' && o.field === 'reminders'));
+  assert.ok(seen.some((o) => o.type === 'unset' && o.path === 'people/ethan' && o.field === 'countdowns.c1'));
+  assert.ok(!seen.some((o) => o.field === 'countdowns.c2'), 'a shared countdown stays where you both see it');
+  seen.length = 0;
+  await actions.setCountdown({ id: 'c3', title: 'Interview', date: sat, shared: false });
+  assert.equal(seen[0].path, 'people/ethan/private/main');
+  seen.length = 0;
+  await actions.setReminder({ ref: 'e:ethan:primary:y', owner: 'ethan', title: 'Interview', times: ['d1'] });
+  assert.ok(seen.every((o) => o.path === 'people/ethan/private/main'));
+  // what's in the private place counts as yours
+  setRaw(Object.assign({}, store.raw, { private: { reminders: { r9: { ref: 'e:ethan:primary:z', owner: 'ethan', times: ['d0'] } } } }), { phase: 'ready', me: 'ethan', user: { email: 'e@x.com' } });
+  assert.ok(store.state.people.ethan.reminders.r9 && store.state.people.ethan.reminders.r1);
+});

@@ -53,6 +53,15 @@ export function setRaw(raw, extra = {}) {
   } else {
     s.me = Object.keys(s.people).find((pid) => (s.people[pid].email || '').toLowerCase() === email) || null;
   }
+  // your reminders and private countdowns live where only you can read them (older ones may still be on your record)
+  s.privateReady = raw.private !== undefined;
+  if (s.me && s.people[s.me] && raw.private) {
+    const p = s.people[s.me];
+    s.people[s.me] = Object.assign({}, p, {
+      reminders: Object.assign({}, p.reminders || {}, raw.private.reminders || {}),
+      countdowns: Object.assign({}, p.countdowns || {}, raw.private.countdowns || {})
+    });
+  }
   s.partner = Object.keys(s.people).find((pid) => pid !== s.me) || null;
   s.calendars = {};
   for (const [k, c] of Object.entries(raw.calendars || {})) {
@@ -119,6 +128,7 @@ export function setPhase(phase, extra = {}) {
 
 // ---------- actions ----------
 function db() { return store.backend; }
+function privatePath() { return `people/${store.state.me}/private/main`; }
 const now = () => Date.now();
 function myEmail() {
   const st = store.state;
@@ -323,16 +333,22 @@ export const actions = {
     if (ops.length) await commit(ops, false);
   },
 
-  // ----- reminders (on your own record) -----
+  // ----- reminders (just for you: they can name things you share only as "Busy") -----
   async setReminder({ ref, owner, title, times, note }) {
     const st = store.state;
     const id = reminderId(ref);
     const cur = ((st.people[st.me] || {}).reminders || {})[id] || {};
     const r = { ref, owner, title: title || cur.title || '', times: times ?? cur.times ?? [], note: note ?? cur.note ?? '', created: cur.created || now(), updated: now() };
-    await commit([{ type: 'update', path: `people/${st.me}`, data: { reminders: { [id]: r } } }], false);
+    if (cur.done) r.done = cur.done;
+    if (cur.auto) r.auto = cur.auto;
+    await commit([{ type: 'update', path: privatePath(), data: { reminders: { [id]: r } } }], false);
   },
   async removeReminder(ref) {
-    await commit([{ type: 'unset', path: `people/${store.state.me}`, field: `reminders.${reminderId(ref)}` }], false);
+    const id = reminderId(ref);
+    await commit([
+      { type: 'unset', path: privatePath(), field: `reminders.${id}` },
+      { type: 'unset', path: `people/${store.state.me}`, field: `reminders.${id}` }
+    ], false);
   },
   async reminderDone(ref, occ, title) {
     const st = store.state;
@@ -341,19 +357,44 @@ export const actions = {
     if (!cur) {
       // an automatic birthday reminder: keep a record so it stays ticked off
       const s = settingsOf(st, st.me);
-      await commit([{ type: 'update', path: `people/${st.me}`, data: { reminders: { [id]: { ref, owner: st.me, title: title || '', times: s.autoRemind.birthdays || [], note: '', auto: true, created: now(), done: { [occ]: now() } } } } }], false);
+      await commit([{ type: 'update', path: privatePath(), data: { reminders: { [id]: { ref, owner: st.me, title: title || '', times: s.autoRemind.birthdays || [], note: '', auto: true, created: now(), done: { [occ]: now() } } } } }], false);
       return;
     }
-    await commit([{ type: 'update', path: `people/${st.me}`, data: { reminders: { [id]: { done: { [occ]: now() } } } } }], false);
+    // the whole reminder, in case it's one still on your record from before
+    await commit([{ type: 'update', path: privatePath(), data: { reminders: { [id]: Object.assign({}, cur, { done: Object.assign({}, cur.done || {}, { [occ]: now() }) }) } } }], false);
   },
 
-  // ----- countdowns (on your own record, shown to you both) -----
+  // ----- countdowns (on your own record, shown to you both; a private one just for you) -----
   async setCountdown({ id, title, date, ref, shared = true }) {
     const st = store.state;
-    await commit([{ type: 'update', path: `people/${st.me}`, data: { countdowns: { [id]: { title, date, ref: ref || null, shared: !!shared, created: now() } } } }], false);
+    const c = { title, date, ref: ref || null, shared: !!shared, created: now() };
+    await commit([
+      { type: 'update', path: shared ? `people/${st.me}` : privatePath(), data: { countdowns: { [id]: c } } },
+      { type: 'unset', path: shared ? privatePath() : `people/${st.me}`, field: `countdowns.${id}` }
+    ], false);
   },
   async removeCountdown(id) {
-    await commit([{ type: 'unset', path: `people/${store.state.me}`, field: `countdowns.${id}` }], false);
+    await commit([
+      { type: 'unset', path: `people/${store.state.me}`, field: `countdowns.${id}` },
+      { type: 'unset', path: privatePath(), field: `countdowns.${id}` }
+    ], false);
+  },
+  // Reminders and private countdowns saved on your record before they had a place of their own: move them there
+  async movePrivate() {
+    const st = store.state;
+    const mine = store.raw && store.raw.people && store.raw.people[st.me];
+    if (!st.me || !st.privateReady || !mine) return;
+    const priv = (store.raw && store.raw.private) || {};
+    const rems = mine.reminders || {};
+    const cds = Object.entries(mine.countdowns || {}).filter(([, c]) => c && c.shared === false);
+    if (!Object.keys(rems).length && !cds.length) return;
+    const move = { reminders: {}, countdowns: {} };
+    for (const [id, r] of Object.entries(rems)) if (!(priv.reminders || {})[id]) move.reminders[id] = r;
+    for (const [id, c] of cds) if (!(priv.countdowns || {})[id]) move.countdowns[id] = c;
+    const ops = [{ type: 'update', path: privatePath(), data: move }];
+    if (Object.keys(rems).length) ops.push({ type: 'unset', path: `people/${st.me}`, field: 'reminders' });
+    for (const [id] of cds) ops.push({ type: 'unset', path: `people/${st.me}`, field: `countdowns.${id}` });
+    await commit(ops, false);
   },
 
   // ----- jobs -----

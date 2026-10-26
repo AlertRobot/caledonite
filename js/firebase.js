@@ -27,7 +27,7 @@ export async function createFirebaseBackend() {
   let timer = null;
   let lastPing = 0;
   function fresh() {
-    return { household: {}, people: {}, calendars: {}, feeds: [], shifts: {}, requests: {}, notes: {}, outbox: {}, status: {}, jobs: {}, ideas: {}, tokens: undefined, _priv: {}, _shared: {} };
+    return { household: {}, people: {}, calendars: {}, feeds: [], shifts: {}, requests: {}, notes: {}, outbox: {}, status: {}, jobs: {}, ideas: {}, tokens: undefined, private: undefined, _priv: {}, _shared: {} };
   }
   function publish() {
     clearTimeout(timer);
@@ -103,6 +103,12 @@ export async function createFirebaseBackend() {
       refreshPush(me, obj);
     }, (err) => console.warn('tokens', err));
     unsubs.push(() => { if (tokenUnsub) tokenUnsub(); tokenUnsub = null; });
+    // what's just for you (reminders, private countdowns): only you can read it
+    const privUnsub = fs.onSnapshot(ref(`people/${me}/private/main`), (snap) => {
+      raw.private = snap.exists() ? snap.data() : {};
+      publish();
+    }, (err) => console.warn('private', err));
+    unsubs.push(privUnsub);
   }
   // Notification addresses change now and then. Each time the app opens, make sure this phone's is saved.
   let pushChecked = false;
@@ -142,7 +148,8 @@ export async function createFirebaseBackend() {
         else if (o.type === 'update') b.set(ref(o.path), o.data, { merge: true });
         else if (o.type === 'add') b.set(fs.doc(fs.collection(db, `${H}/${o.path}`)), o.data);
         else if (o.type === 'delete') b.delete(ref(o.path));
-        else if (o.type === 'unset') b.update(ref(o.path), { [o.field]: fs.deleteField() });
+        // taken out of a map (a.b.c), whether or not the document is there yet
+        else if (o.type === 'unset') b.set(ref(o.path), o.field.split('.').reduceRight((inner, k) => ({ [k]: inner }), fs.deleteField()), { merge: true });
       }
       const p = b.commit();
       // offline the server never answers; the change is already saved on the phone.

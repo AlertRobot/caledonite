@@ -279,3 +279,31 @@ test('an occurrence that has already gone is not an error', () => {
   const writes = runOutbox([{ person: 'ethan', op: 'delete', tag: 'add:gym', inst: '20261120', byEmail: 'e@x.com', done: false, created: 1 }], { calendar });
   assert.equal(writes[0].update.fields.done.booleanValue, true);
 });
+
+test('reminders kept where only their owner can read them still go off', () => {
+  const now = Date.now();
+  const props = {};
+  ctx.PropertiesService = { getUserProperties: () => ({ getProperty: (k) => props[k] ?? null, setProperty: (k, v) => { props[k] = v; } }) };
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsGet_ = (path) => (path === 'households/main/people/ethan/private/main'
+    ? { reminders: { r1: { ref: 'e:ethan:primary:u1', owner: 'ethan', times: ['h1'], note: '' } } } : null);
+  const me = { person: 'ethan', email: 'e@x.com', main: true, people: [{ id: 'ethan', data: { settings: {} } }] };
+  const seen = [{ calKey: 'primary', shown: true, share: 'all', doc: { share: 'all' }, ev: { id: 'e1', uid: 'u1', t: 'Dentist', s: now + 30 * 60e3, e: now + 90 * 60e3 } }];
+  ctx.fireReminders_(me, {}, seen);
+  const n = writes.map((w) => w.update.fields).find((f) => f.kind && f.kind.stringValue === 'reminders');
+  assert.ok(n, 'the reminder was sent');
+  assert.equal(n.title.stringValue, 'Dentist');
+});
+
+test('the rules: what is just for you (reminders, private countdowns) only you can read', async () => {
+  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const pv = rules.slice(rules.indexOf('match /private/{doc}'));
+  assert.match(pv.slice(0, 200), /allow read, write: if member\(\) && personEmail\(pid\) == myEmail\(\);/);
+  // and the app keeps reminders there, not on the record your partner can read
+  const store = readFileSync(new URL('../js/store.js', import.meta.url), 'utf8');
+  const sr = store.slice(store.indexOf('async setReminder('), store.indexOf('async removeReminder('));
+  assert.match(sr, /path: privatePath\(\)/);
+});

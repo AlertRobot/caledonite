@@ -637,6 +637,13 @@ async function boot() {
     joinedChecked = true;
     actions.markJoined().catch((e) => console.warn('joined', e));
   });
+  // reminders and private countdowns from before they had a place of their own
+  let movedPrivate = false;
+  store.subscribe((st) => {
+    if (movedPrivate || st.phase !== 'ready' || !st.me || !st.privateReady) return;
+    movedPrivate = true;
+    actions.movePrivate().catch((e) => console.warn('private', e));
+  });
   const params = new URLSearchParams(location.search);
   const demo = params.get('demo');
   if (demo) {

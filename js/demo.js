@@ -61,7 +61,13 @@ export function createDemoBackend(me = 'ethan') {
   add('ethan', 'primary', 'Pencilled in: Keep the day free for me', keepDay, null, null, { tag: 'req:r_keep' });
   add('sophie', 'primary', 'Pencilled in: Keep the day free for me', keepDay, null, null, { tag: 'req:r_keep' });
 
+  // what only the person looking can read (people/{me}/private/main)
+  const privateOf = {
+    ethan: { reminders: { [reminderId('e:ethan:family:dadbday')]: { ref: 'e:ethan:family:dadbday', owner: 'ethan', title: "Dad's birthday", times: ['w1', 'd0'], note: 'Buy a card and a present', created: Date.now() } } },
+    sophie: {}
+  };
   const raw = {
+    private: privateOf[me] || {},
     household: {
       dinnerTime: '19:00', moveDinner: true, pencilDefault: true, nudgeHours: 24,
       favours: ['Put the bins out', 'Pick up some shopping', 'Give me a lift', 'Book a table somewhere'],
@@ -70,10 +76,7 @@ export function createDemoBackend(me = 'ethan') {
     people: {
       ethan: {
         name: 'Ethan', email: 'ethan@example.com', colour: 'blue',
-        settings: { workLabel: 'Working from home', workStart: '09:00', workEnd: '18:00', workDays: [1, 2, 3, 4, 5], hasShifts: false, altOff: { day: 5, from: k(nextWd(5, 0)) }, autoRemind: { birthdays: ['d0'] } },
-        reminders: {
-          [reminderId('e:ethan:family:dadbday')]: { ref: 'e:ethan:family:dadbday', owner: 'ethan', title: "Dad's birthday", times: ['w1', 'd0'], note: 'Buy a card and a present', created: Date.now() }
-        }
+        settings: { workLabel: 'Working from home', workStart: '09:00', workEnd: '18:00', workDays: [1, 2, 3, 4, 5], hasShifts: false, altOff: { day: 5, from: k(nextWd(5, 0)) }, autoRemind: { birthdays: ['d0'] } }
       },
       sophie: { name: 'Sophie', email: 'sophie@example.com', colour: 'orange', settings: { workLabel: 'Working', workDays: [], hasShifts: true, sleepUntil: '14:00', travelMins: 30 } }
     },
@@ -185,6 +188,8 @@ export function createDemoBackend(me = 'ethan') {
 
   function at(path) {
     if (path === '') return { obj: raw, key: 'household' };
+    // people/{me}/private/main: what only you can read
+    if (/^people\/[^/]+\/private\/main$/.test(path)) return { obj: raw, key: 'private' };
     const [coll, id] = path.split('/');
     raw[coll] = raw[coll] || {};
     return { obj: raw[coll], key: id };
