@@ -77,11 +77,12 @@ service cloud.firestore {
         }
       }
       // requests: anyone can answer, but who asked, who it's for and whether it's just for one of you are fixed
-      // (the calendar sync uses them to decide whether your partner may change the event that came from it)
+      // (the calendar sync uses them to decide whether your partner may change the event that came from it),
+      // and so is what was asked: its name, note, holiday days and whether it was pencilled in
       match /requests/{id} {
         allow read: if member();
         allow create: if member() && personEmail(request.resource.data.from) == myEmail();
-        allow update: if member() && !changed().hasAny(['from', 'to', 'type', 'own', 'people']);
+        allow update: if member() && !changed().hasAny(['from', 'to', 'type', 'own', 'people', 'title', 'note', 'days', 'hold', 'created']);
         allow delete: if false;
       }
       // asks to add, change or remove things in Google Calendar: always signed with who asked.

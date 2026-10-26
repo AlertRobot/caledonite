@@ -275,7 +275,7 @@ test("the rules: a request's asker, who it's for and whether it's just for one o
   const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
   const rq = rules.slice(rules.indexOf('match /requests/{id}'), rules.indexOf('match /outbox/{id}'));
   assert.match(rq, /allow create: if member\(\) && personEmail\(request\.resource\.data\.from\) == myEmail\(\);/);
-  assert.match(rq, /allow update: if member\(\) && !changed\(\)\.hasAny\(\['from', 'to', 'type', 'own', 'people'\]\);/);
+  assert.match(rq, /allow update: if member\(\) && !changed\(\)\.hasAny\(\['from', 'to', 'type', 'own', 'people'[^\]]*\]\);/);
   assert.match(rq, /allow delete: if false;/);
   // and the catch-all for shared lists no longer lets requests through
   const generic = rules.slice(rules.indexOf('match /{coll}/{id}'));
@@ -456,4 +456,19 @@ test("Peckish's recipe names come back after a failed download, without reloadin
   assert.equal((await loadPeckish()).days['2026-11-02'].title, 'dinner planned in Peckish');
   online = true;
   assert.equal((await loadPeckish()).days['2026-11-02'].title, 'Chicken fajitas');
+});
+
+test("the rules: once sent, a request's name, note, holiday days and pencilling-in are fixed; answering still works", async () => {
+  const { readFileSync } = await import('node:fs');
+  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const rq = rules.slice(rules.indexOf('match /requests/{id}'), rules.indexOf('match /outbox/{id}'));
+  const fixed = JSON.parse(rq.match(/allow update: if member\(\) && !changed\(\)\.hasAny\((\[[^\]]+\])\);/)[1].replace(/'/g, '"'));
+  for (const f of ['from', 'to', 'type', 'own', 'people', 'title', 'note', 'days', 'hold', 'created']) assert.ok(fixed.includes(f), f);
+  // everything answering, cancelling or reminding writes is still allowed (the app, the notification buttons and the sync)
+  const req = { from: 'ethan', to: 'sophie', type: 'plan', title: 'Film', hold: true, when: { day: sat, start: '19:00', end: '21:00' }, counter: { day: sat, start: '20:00', end: '22:00', label: 'x' } };
+  const written = new Set(['status', 'answeredAt', 'autoNudged']);
+  for (const answer of ['yes', 'no', 'maybe', 'seen', 'other', 'accept-counter', 'cancel', 'remind', 'undo']) {
+    for (const k of Object.keys(Ops.buildAnswer({ req, id: 'r1', answer, me: 'sophie', byEmail: 's@x.com', names: {}, when: req.counter }).patch)) written.add(k);
+  }
+  for (const k of written) assert.ok(!fixed.includes(k), k);
 });
