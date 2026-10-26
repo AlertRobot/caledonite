@@ -156,11 +156,7 @@ function syncCalendars_(me, ctx) {
     count++;
     var events = [];
     if (doc.show !== false || (doc.share && doc.share !== 'none')) {
-      var list = cal.getEvents(from, to);
-      for (var k = 0; k < list.length; k++) {
-        var o = norm_(list[k]);
-        if (o) events.push(o);
-      }
+      events = readEvents_(cal, id, from, to);
     }
     events.forEach(function (o) { seenEvents.push({ calKey: calKey, shown: doc.show !== false, ev: o }); });
     writes = writes.concat(feedWrites_(me, ctx, calKey, doc, events, props));
@@ -206,6 +202,59 @@ function defaultsFor_(cal, isPrimary, me) {
 // Google's family group calendar, or one called "Family"
 function isFamilyCal_(id, name) {
   return /^family\d*@group\.calendar\.google\.com$/i.test(id) || /\bfamily\b/i.test(name || '');
+}
+
+// Read a calendar's events. The Calendar API gets them all in one or two requests;
+// CalendarApp needs a round trip per detail (about 0.3 seconds an event), so it's only the fallback.
+function readEvents_(cal, id, from, to) {
+  if (typeof Calendar !== 'undefined' && Calendar.Events) {
+    try {
+      var out = [];
+      var token = null;
+      do {
+        var res = Calendar.Events.list(id, {
+          timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: true, showDeleted: false, maxResults: 2500,
+          pageToken: token || undefined,
+          fields: 'nextPageToken,items(iCalUID,recurringEventId,summary,description,location,start,end,status,eventType,attendees(self,responseStatus))'
+        });
+        (res.items || []).forEach(function (it) { var o = normApi_(it); if (o) out.push(o); });
+        token = res.nextPageToken;
+      } while (token);
+      return out;
+    } catch (err) {
+      Logger.log('Calendar API failed for ' + id + ', using CalendarApp: ' + err.message);
+    }
+  }
+  var list = cal.getEvents(from, to);
+  var evs = [];
+  for (var k = 0; k < list.length; k++) { var o2 = norm_(list[k]); if (o2) evs.push(o2); }
+  return evs;
+}
+// The same shape as norm_, from a Calendar API event
+function normApi_(it) {
+  if (it.status === 'cancelled' || it.eventType === 'workingLocation') return null;
+  var self = (it.attendees || []).filter(function (a) { return a.self; })[0];
+  if (self && self.responseStatus === 'declined') return null;
+  var desc = it.description || '';
+  var o = { t: it.summary || '' };
+  var startMs;
+  if (it.start && it.start.date) {
+    o.ad = 1;
+    o.sd = it.start.date;
+    o.ed = (it.end && it.end.date) || keyPlus_(it.start.date, 1);
+    startMs = Utilities.parseDate(it.start.date, TZ, 'yyyy-MM-dd').getTime();
+  } else {
+    startMs = new Date(it.start.dateTime).getTime();
+    o.s = startMs;
+    o.e = new Date(it.end.dateTime).getTime();
+  }
+  o.id = shortKey_(it.iCalUID + '|' + startMs);
+  if (it.recurringEventId) o.sid = shortKey_(it.iCalUID);
+  if (it.location) o.l = String(it.location).slice(0, 80);
+  var m = desc.match(/\[caledonite:([^\]\s]+)\]/);
+  if (m) o.tag = m[1];
+  if (/#busy\b/i.test(desc)) o.pb = 1;
+  return o;
 }
 
 function norm_(ev) {

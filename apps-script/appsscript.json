@@ -2,6 +2,11 @@
   "timeZone": "Europe/London",
   "runtimeVersion": "V8",
   "exceptionLogging": "STACKDRIVER",
+  "dependencies": {
+    "enabledAdvancedServices": [
+      { "userSymbol": "Calendar", "version": "v3", "serviceId": "calendar" }
+    ]
+  },
   "oauthScopes": [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/script.external_request",
