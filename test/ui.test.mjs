@@ -176,3 +176,21 @@ test("a partner's shift times can't break the Shifts page", async () => {
   assert.doesNotMatch(src, /data-p="\$\{who\}"/);
   await page.context().close();
 });
+
+test('an overnight event can be moved to another day, and still ends the next morning', async () => {
+  const page = await open('ethan', '#calendar');
+  const dk = (n) => page.evaluate((x) => { const d = new Date(); d.setDate(d.getDate() + x); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }, n);
+  const day = await dk(3); const next = await dk(5); const after = await dk(6);
+  await mods(page, (store, ui, d) => { store.store.backend.commit([{ type: 'add', path: 'outbox', data: { person: 'ethan', op: 'create', tag: 'add:late1', byEmail: 'ethan@example.com', done: false, created: Date.now(), event: { title: 'Late film', day: d, start: '22:00', end: '01:00', allDay: false } } }]); return store.store.backend.ping(); }, day);
+  await page.waitForTimeout(1100);
+  await page.click(`[data-act="calSel"][data-day="${day}"]`);
+  await page.click('button.ag-row:has-text("Late film")');
+  await page.click('[data-act="evEdit"]');
+  await page.fill('#ed-day', next);
+  await page.click('[data-act="evSave"]');
+  assert.match(await page.textContent('.toast'), /Saving the change/);
+  const ch = await mods(page, (store) => Object.values(store.store.raw.outbox).find((o) => o.op === 'update').changes);
+  assert.equal(ch.day, next);
+  assert.equal(ch.endDay, after);
+  await page.context().close();
+});
