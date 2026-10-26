@@ -1026,9 +1026,13 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
 // Returns true when something in Google Calendar changed, so the feeds can catch up.
 function processOutbox_(me, ctx) {
   var items = fsQuery_('outbox', [['person', me.person], ['done', false]]).filter(function (it) {
-    // your partner's asks always go to your main account: they can't pick your work calendar
-    if (String(it.data.byEmail || '').toLowerCase() !== ctx.appEmail) return me.main;
     var acc = String(it.data.account || '').toLowerCase();
+    // your partner's asks go to your main account: they can't add anything to your work calendar. Only a change
+    // to something you share by its tag (both of you, or a request) is handed to the account whose calendar it's in.
+    if (String(it.data.byEmail || '').toLowerCase() !== ctx.appEmail) {
+      var handedOn = !!acc && acc !== (me.main ? me.email : '') && !!it.data.tag && (it.data.op === 'update' || it.data.op === 'delete');
+      return me.main ? !handedOn : handedOn && acc === me.email;
+    }
     return acc ? acc === me.email : me.main;
   });
   if (!items.length) return false;
@@ -1059,6 +1063,17 @@ function processOutbox_(me, ctx) {
       else if (o.op === 'update' || o.op === 'delete') result = own || partnerMayChange_(o.tag, rs) ? changeByTag_(o, rs) : { refused: 'not yours' };
       else if (o.op === 'edit' || o.op === 'remove') result = own ? editOwn_(o, rs) : { refused: 'not yours' };
       else result = { refused: 'unknown change' };
+      // not in any calendar this account has: your copy may be in one of your other accounts' calendars (your
+      // partner's change to something for you both always comes here first). Handed on to that account.
+      if (result.none && me.main && !o.account) {
+        var holder = holderOf_(me, ctx, o.tag, rs);
+        if (holder) {
+          if (key) stuck[key] = true;
+          writes.push(upd_(HOUSEHOLD + '/outbox/' + it.id, { account: holder }, ['account']));
+          return;
+        }
+      }
+      delete result.none;
       if (!result.refused && !result.already && (result.eventId || result.changed)) changed = true;
       writes.push(upd_(HOUSEHOLD + '/outbox/' + it.id, { done: true, doneAt: Date.now(), result: result }, ['done', 'doneAt', 'result']));
     } catch (err) {
@@ -1216,7 +1231,29 @@ function changeByTag_(o, rs) {
     }
   });
   if (o.op === 'delete' && !inst) rs.tagMap[o.tag] = [];
-  return { changed: n };
+  return found.length ? { changed: n } : { changed: 0, none: true };
+}
+
+// Which other of this person's Google accounts has a copy carrying this tag, going by the copies they wrote
+// (only asked when this account has none; only accounts that write to a calendar of theirs)
+function holderOf_(me, ctx, tag, rs) {
+  rs.holders = rs.holders || {};
+  if (tag in rs.holders) return rs.holders[tag];
+  var accs = {};
+  Object.keys(ctx.calDocs || {}).forEach(function (ck) {
+    var d = ctx.calDocs[ck];
+    if (d && d.canWrite && otherAccount_(d, me.email)) accs[String(d.account).toLowerCase()] = true;
+  });
+  var found = '';
+  Object.keys(accs).some(function (acc) {
+    var has = fsQuery_('privateFeeds', [['owner', me.person], ['account', acc]]).some(function (f) {
+      return (f.data.events || []).some(function (e) { return e && e.tag === tag; });
+    });
+    if (has) found = acc;
+    return has;
+  });
+  rs.holders[tag] = found;
+  return found;
 }
 
 // edit or remove one of your own events (or a whole repeating series)

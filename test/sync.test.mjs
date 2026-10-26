@@ -1243,3 +1243,41 @@ test('stopping or losing an account never deletes the copies another of your acc
   assert.equal(p.store.h_abc, undefined, 'and forgotten here');
   assert.equal(p.store.rota_abc, undefined);
 });
+
+test("your partner's change to something for you both reaches your copy, even in one of your other accounts' calendars", () => {
+  ctx.fsGet_ = () => null;
+  const item = { person: 'ethan', op: 'delete', tag: 'both:t1', byEmail: 's@x.com', done: false, created: 1 };
+  const feeds = { 'work@x.com': [{ id: 'ethan__wk__2026-11', data: { calKey: 'wk', events: [{ id: 'x', tag: 'both:t1', t: 'Tea' }] } }] };
+  const calDocs = { wk: { account: 'work@x.com', canWrite: true, calId: 'w@x' }, prim: { account: 'e@x.com', canWrite: true, calId: 'primary@x' } };
+  const run = (email, main, items, calendar, calId) => {
+    const writes = [];
+    ctx.Calendar = calendar;
+    ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => calId, isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => calId }) };
+    ctx.fsQuery_ = (coll, eqs) => (coll === 'outbox' ? items.map((data, i) => ({ id: `o${i}`, data })) : coll === 'privateFeeds' ? (feeds[eqs[1][1]] || []) : []);
+    ctx.fsCommit_ = (w) => writes.push(...w);
+    ctx.docName_ = (p) => p;
+    ctx.processOutbox_({ email, person: 'ethan', main }, { appEmail: 'e@x.com', calDocs });
+    return writes;
+  };
+  // your main account hasn't got it: handed to work@x.com, not marked done
+  let writes = run('e@x.com', true, [item], fakeCalendar([]), 'primary@x');
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].update.fields.account.stringValue, 'work@x.com');
+  assert.ok(!writes[0].update.fields.done);
+  // the work account does it
+  const work = fakeCalendar([{ id: 'w1', calId: 'w@x', tag: 'both:t1', summary: 'Tea' }]);
+  writes = run('work@x.com', false, [Object.assign({}, item, { account: 'work@x.com' })], work, 'w@x');
+  assert.equal(work.events.length, 0, 'deleted there');
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+  // but your partner can never have anything added to (or edited in) your other accounts' calendars
+  const add = { person: 'ethan', op: 'create', tag: 'both:t2', account: 'work@x.com', byEmail: 's@x.com', done: false, created: 2, event: { title: 'X', day: '2026-11-07' } };
+  const mine = { person: 'ethan', op: 'edit', account: 'work@x.com', calId: 'w@x', gid: 'w1', byEmail: 's@x.com', done: false, created: 3, changes: { title: 'Y' } };
+  const w2 = fakeCalendar([]);
+  writes = run('work@x.com', false, [add, mine], w2, 'w@x');
+  assert.equal(writes.length, 0);
+  assert.equal(w2.events.length, 0);
+  // nothing anywhere else: done, as before
+  writes = run('e@x.com', true, [Object.assign({}, item, { tag: 'both:gone' })], fakeCalendar([]), 'primary@x');
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+  assert.ok(!('none' in writes[0].update.fields.result.mapValue.fields));
+});
