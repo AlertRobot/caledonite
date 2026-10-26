@@ -201,3 +201,19 @@ test("a calendar record moved to someone else's calendar is ignored", () => {
   ];
   assert.equal(ctx.loadCalDocs_({ person: 'ethan' }).Y.share, 'none');
 });
+
+test('taking the rota link out removes its shifts', () => {
+  const store = { h_rotalink: JSON.stringify({ 'households/main/privateFeeds/sophie__rotalink__2026-11': 'a', 'households/main/sharedFeeds/sophie__rotalink__2026-11': 'b' }), rota_rotalink: '{}', h_other: '{}' };
+  ctx.PropertiesService = { getUserProperties: () => ({ getProperty: (k) => (k in store ? store[k] : null), deleteProperty: (k) => { delete store[k]; }, setProperty: (k, v) => { store[k] = v; } }) };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.dropRotaLink_({ person: 'sophie' });
+  assert.deepEqual(writes.map((w) => w.delete).sort(), ['households/main/calendars/sophie__rotalink', 'households/main/privateFeeds/sophie__rotalink__2026-11', 'households/main/sharedFeeds/sophie__rotalink__2026-11']);
+  assert.deepEqual(Object.keys(store), ['h_other']);
+  writes.length = 0;
+  ctx.dropRotaLink_({ person: 'sophie' });
+  assert.equal(writes.length, 0, 'nothing to do the next time');
+  // and the sync calls it when there's no link
+  assert.match(ctx.syncAll.toString(), /else if \(me\.main\) stage\('rota link', function \(\) \{ dropRotaLink_\(me\); \}\)/);
+});

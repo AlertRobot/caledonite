@@ -195,6 +195,7 @@ function syncAll() {
     var cal = stage('calendars', function () { return syncCalendars_(me, ctx, errors); });
     if (cal) { n = cal.count; seen = cal.seen; }
     if (me.main && ctx.settings.rotaUrl) stage('rota link', function () { syncRotaLink_(me, ctx); });
+    else if (me.main) stage('rota link', function () { dropRotaLink_(me); });
     var changed = stage('outbox', function () { return processOutbox_(me, ctx); });
     if (changed) {
       // let the feeds catch up straight away
@@ -520,6 +521,20 @@ function syncRotaLink_(me, ctx) {
   fsCommit_(writes);
   props.setProperty(fw.key, fw.value);
   rotaChanged_(me, ctx, calKey, events, props);
+}
+
+// The rota link was taken out in the app: its shifts go too, so old ones don't linger for months
+function dropRotaLink_(me) {
+  var props = PropertiesService.getUserProperties();
+  var saved = props.getProperty('h_rotalink');
+  if (saved === null) return;
+  var old = {};
+  try { old = JSON.parse(saved || '{}'); } catch (e) { old = {}; }
+  var writes = Object.keys(old).map(function (path) { return { 'delete': docName_(path) }; });
+  writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + me.person + '__rotalink') });
+  fsCommit_(writes);
+  props.deleteProperty('h_rotalink');
+  props.deleteProperty('rota_rotalink');
 }
 
 // Windows time zone names that rota systems sometimes send, as the names Google understands
