@@ -1,5 +1,5 @@
 // Caledonite service worker: works offline, and shows notifications.
-const VERSION = 'caledonite-v1';
+const VERSION = 'caledonite-v2';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
   './js/app.js', './js/config.js', './js/util.js', './js/logic.js', './js/store.js', './js/ui.js', './js/uistate.js',
