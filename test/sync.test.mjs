@@ -356,3 +356,11 @@ test("job reminders read only today's open jobs", () => {
   assert.equal(asked[0][0], 'jobs');
   assert.deepEqual(JSON.parse(JSON.stringify(asked[0][1].map((f) => f[0]))), ['done', 'day']);
 });
+
+test('a night shift put in by hand on the night the clocks change still ends at 8am', () => {
+  // the clocks go forward early on Sunday 28 March 2027
+  const p = { id: 'sophie', settings: { hasShifts: true }, items: [], mine: false };
+  const data = { overrides: { 'sophie|2027-03-27': { type: 'night' } }, jobs: [] };
+  const sh = ctx.personDay_(p, '2027-03-27', data).shift;
+  assert.equal(sh.e, ctx.localTime_('2027-03-28', '08:00'));
+});

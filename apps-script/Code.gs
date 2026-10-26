@@ -1276,7 +1276,8 @@ function personDay_(p, key, data) {
     else {
       var st = localTime_(key, hm_(ov.start) || def.start || '09:00');
       var en = localTime_(key, hm_(ov.end) || def.end || '17:00');
-      if (en <= st) en += 864e5;
+      // overnight: that time the next morning (a night when the clocks change is 23 or 25 hours long)
+      if (en <= st) en = localTime_(keyPlus_(key, 1), hm_(ov.end) || def.end || '17:00');
       out.shift = { t: def.label || 'Shift', s: st, e: en, type: ov.type };
     }
   } else if (rota.length) {
