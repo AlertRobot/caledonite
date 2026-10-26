@@ -54,8 +54,10 @@ export function parseBudgieLink(text) {
     const b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
     const j = JSON.parse(decodeURIComponent(escape(atob(b64 + '==='.slice((b64.length + 3) % 4)))));
     if (!j.u || !j.k) return null;
-    const host = new URL(j.u).hostname; // only ever a Google Apps Script web app
-    if (!/^script\.google(usercontent)?\.com$/.test(host)) return null;
+    const url = new URL(j.u); // only ever a Google Apps Script web app, over https
+    if (url.protocol !== 'https:' || !/^script\.google(usercontent)?\.com$/.test(url.hostname)) return null;
+    // only Caledonite's own limited link, never Budgie's full key
+    if (!/^app_caledonite_[0-9a-f]{64}$/.test(String(j.k))) return null;
     return { u: j.u, k: j.k };
   } catch (e) { return null; }
 }
@@ -70,7 +72,8 @@ export async function loadBudgie() {
     const res = await fetch(cfg.u, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ key: cfg.k, action: 'app.calendar' }) });
     const j = await res.json();
     if (!j.ok) {
-      if (/not allowed|key|link/i.test(j.error || '')) return { found: true, error: 'Budgie turned this link down. Make a new one in Budgie (Settings, Linked apps) and paste it here.' };
+      // a link that's been switched off: forget what it said last time, too
+      if (/not allowed|key|link/i.test(j.error || '')) { lsSet(BG_CACHE, null); return { found: true, error: 'Budgie turned this link down. Make a new one in Budgie (Settings, Linked apps) and paste it here.' }; }
       throw new Error(j.error || 'Budgie said no');
     }
     const out = { found: true, days: j.days || {}, fun: j.fun || null, synced: j.synced || Date.now(), name: j.name || '' };
