@@ -44,7 +44,10 @@ service cloud.firestore {
       }
       match /people/{pid} {
         allow read: if member();
-        allow create: if member();
+        // only the two of you: a new record is for one of the household's emails (or one still to be added)
+        allow create: if member()
+          && (request.resource.data.get('email', '') == '' || request.resource.data.email.lower() in household().emails)
+          && (request.resource.data.get('joined', false) != true || request.resource.data.email.lower() == myEmail());
         // your own record: anything but your email.
         // your partner's: only their shift times, and their email until they've joined.
         allow update: if member() && (
