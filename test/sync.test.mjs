@@ -1305,3 +1305,17 @@ test('a rota link: alarms inside a shift, shifts marked private, and a daily ent
   const hand = evs.filter((e) => e.t === 'Handover');
   assert.ok(hand.length > 100, `every day in the window (${hand.length})`);
 });
+
+test('"Stop syncing" from someone who never connected writes nothing (not even taking out a status that looks like theirs)', () => {
+  asUser('e.d@x.com');
+  fakeCache();
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.ScriptApp = { getProjectTriggers: () => [], deleteTrigger() {} };
+  const { api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.disconnectFromPage();
+  assert.equal(writes.length, 0, 'e-d@x.com has the same status address, e_d_x_com');
+});

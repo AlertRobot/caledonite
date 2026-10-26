@@ -100,6 +100,7 @@ function forgetThisAccount_(email) {
 // Stop syncing this account: it stops running, and the copies it wrote go too, so none are left behind that
 // no longer follow your sharing choices. Its calendars' settings stay, for if it's connected again.
 function stopSyncing_() {
+  var had = hasTrigger_();
   removeTriggers_();
   var lock = LockService.getUserLock();
   if (!lock.tryLock(60000)) throw new Error('This account is in the middle of syncing. Try again in a minute.');
@@ -110,6 +111,9 @@ function stopSyncing_() {
     var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
     var props = PropertiesService.getUserProperties();
     var all = props.getProperties();
+    // never connected (or already stopped): nothing written to take out, and nothing to write (anyone with a
+    // Google account can open the connect page, and their address could look like one of yours with dots for dashes)
+    if (!had && !Object.keys(all).some(function (k) { return /^(h|rota)_/.test(k); })) return;
     fsCommit_(copiesWritten_(all, email));
     Object.keys(all).forEach(function (k) { if (/^(h|rota)_/.test(k)) props.deleteProperty(k); });
   } finally {
