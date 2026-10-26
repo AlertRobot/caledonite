@@ -31,7 +31,7 @@ Try it with made-up data: open the app with `?demo=ethan` or `?demo=sophie` on t
 
 ## Tests
 
-- `node --test test/` runs the logic checks and the Playwright checks of the demo at phone size (`node test/serve.mjs` serves the folder on its own if you want to look).
+- `node --test test/logic.test.mjs test/sync.test.mjs test/ui.test.mjs` runs the logic checks, a few checks of the sync script, and Playwright checks of the demo at phone size (`node test/serve.mjs` serves the folder on its own if you want to look).
 - `test/budgie-link.test.mjs` needs Budgie's local test server (see the top of the file).
 
 ## Files
