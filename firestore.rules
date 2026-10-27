@@ -41,9 +41,10 @@ service cloud.firestore {
       match /calendars/{id} {
         allow read: if member();
         // only the owner of a calendar decides what's shared from it, and only that: whose it is and which
-        // calendar it points at are the sync's (changing them could share someone else's calendar)
+        // calendar it points at are the sync's (changing them could share someone else's calendar). shareSet and
+        // roleSet mark its sharing and its use as chosen by you, which the sync never puts right
         allow update: if member() && personEmail(resource.data.owner) == myEmail()
-          && changed().hasOnly(['show', 'share', 'role', 'layer', 'userSet'])
+          && changed().hasOnly(['show', 'share', 'role', 'layer', 'userSet', 'shareSet', 'roleSet'])
           && request.resource.data.get('share', 'busy') in ['all', 'busy', 'none', 'hours'];
         allow create, delete: if false;
       }

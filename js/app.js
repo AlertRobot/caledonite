@@ -425,7 +425,8 @@ const H = {
   setPage: (el) => { go(el.dataset.v === 'home' ? '#settings' : `#settings/${el.dataset.v}`); },
   openCal: (el) => { ui.settings.openCal = ui.settings.openCal === el.dataset.k ? null : el.dataset.k; render(); },
   calShow: (el) => { const c = store.state.calendars[el.dataset.k]; run(actions.updateCalendar(el.dataset.k, { show: c.show === false })); },
-  calShare: (el) => run(actions.updateCalendar(el.dataset.k, { share: el.dataset.v })),
+  // (shareSet, roleSet: what you chose yourself, which the sync never puts right; showing or hiding it is neither)
+  calShare: (el) => run(actions.updateCalendar(el.dataset.k, { share: el.dataset.v, shareSet: true })),
   myHasShifts: () => {
     const s = settingsOf(store.state, store.state.me);
     run(actions.updateMySettings(s.hasShifts ? { hasShifts: false, workDays: [1, 2, 3, 4, 5] } : { hasShifts: true, workDays: [] }));
@@ -524,6 +525,7 @@ const C = {
   calRole: (el) => {
     const v = el.value;
     const patch = v === 'work' ? { role: 'work', layer: 'own' } : v === 'rota' ? { role: 'rota', layer: 'own' } : v === 'own' ? { role: 'normal', layer: 'own' } : { role: 'normal', layer: v };
+    patch.roleSet = true;
     const c = store.state.calendars[el.dataset.k];
     if (v === 'work' && c.share === 'all') patch.share = 'hours';
     if (v !== 'work' && c.share === 'hours') patch.share = 'busy';

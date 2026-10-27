@@ -455,11 +455,12 @@ function syncCalendars_(me, ctx, errors) {
       if (doc && !doc.userSet && doc.layer === 'own' && isFamilyCal_(id, meta.name)) fix.layer = 'family';
       // set up before it could be told apart as your partner's (before their sync had recorded it, as when you
       // connect first, or before partners' calendars were recognised at all): put right when its details are next
-      // checked, unless you've chosen its sharing yourself
+      // checked, except what you've chosen for it yourself (its sharing, or what it's for)
       var due = !!doc && (reseed || !doc.lastSeen || Date.now() - doc.lastSeen > 6 * 3600e3);
-      if (due && !doc.userSet && (doc.share !== 'none' || doc.role !== 'normal') && partnersCal_(me, ctx, id, meta.canWrite)) {
-        fix = { share: 'none', role: 'normal', layer: isFamilyCal_(id, meta.name) ? 'family' : 'other' };
-        if (doc.role === 'rota') toForget.push('rota_' + calKey);
+      var pfix = due ? partnerFix_(doc, id, meta.name) : null;
+      if (pfix && partnersCal_(me, ctx, id, meta.canWrite)) {
+        fix = merge_(fix, pfix);
+        if (pfix.role && doc.role === 'rota') toForget.push('rota_' + calKey);
       }
       if (!doc) {
         doc = merge_(meta, defaultsFor_(cal, isPrimary, me, ctx));
@@ -606,19 +607,29 @@ function partnersCal_(me, ctx, id, owned) {
 }
 
 // Your partner's records of a calendar of yours (one you own and they don't), still with the sharing it was first
-// given there: as theirs from now on it's shared as Nothing (it's yours), unless they've chosen otherwise
+// given there: as theirs from now on it's shared as Nothing (it's yours), except what they've chosen for it
 function theirRecordsOfMine_(me, ctx, id, name) {
   if (/^family\d*@group\.calendar\.google\.com$/i.test(String(id || ''))) return [];
   var mine = accountsOf_(me, ctx || {});
   try {
-    return fsQuery_('calendars', [['calId', id]]).filter(function (d) {
+    var out = [];
+    fsQuery_('calendars', [['calId', id]]).forEach(function (d) {
       var x = d.data || {};
-      return x.owner && x.owner !== me.person && d.id === x.owner + '__' + x.calKey && x.canWrite !== true && !x.userSet &&
-        (x.share !== 'none' || x.role !== 'normal') && !mine[String(x.account || '').toLowerCase()];
-    }).map(function (d) {
-      return upd_(HOUSEHOLD + '/calendars/' + d.id, { share: 'none', role: 'normal', layer: isFamilyCal_(id, name) ? 'family' : 'other' }, ['share', 'role', 'layer']);
+      if (!x.owner || x.owner === me.person || d.id !== x.owner + '__' + x.calKey || x.canWrite === true || mine[String(x.account || '').toLowerCase()]) return;
+      var f = partnerFix_(x, id, name);
+      if (f) out.push(upd_(HOUSEHOLD + '/calendars/' + d.id, f, Object.keys(f)));
     });
+    return out;
   } catch (e) { return []; }
+}
+// What's put right on a record of a calendar found to be your partner's: shared as Nothing and not your rota or work,
+// but never what was chosen for it in the app (its sharing, or what it's for). Showing or hiding it is no such choice.
+// null when there's nothing to put right.
+function partnerFix_(x, id, name) {
+  var f = {};
+  if (!x.shareSet && x.share !== 'none') f.share = 'none';
+  if (!x.roleSet && x.role !== 'normal') { f.role = 'normal'; f.layer = isFamilyCal_(id, name) ? 'family' : 'other'; }
+  return Object.keys(f).length ? f : null;
 }
 
 // Google's family group calendar, or one called "Family"

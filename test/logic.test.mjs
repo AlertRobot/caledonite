@@ -395,7 +395,7 @@ test('the rules: on a calendar record you can change only what you see and share
   const { readFileSync } = await import('node:fs');
   const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
   const cal = rules.slice(rules.indexOf('match /calendars/{id}'), rules.indexOf('match /people/{pid}'));
-  assert.match(cal, /changed\(\)\.hasOnly\(\['show', 'share', 'role', 'layer', 'userSet'\]\)/);
+  assert.match(cal, /changed\(\)\.hasOnly\(\['show', 'share', 'role', 'layer', 'userSet', 'shareSet', 'roleSet'\]\)/);
 });
 
 test('a family calendar you both have shows its events once', () => {

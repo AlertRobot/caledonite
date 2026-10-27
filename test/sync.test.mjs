@@ -2003,8 +2003,8 @@ test("your partner's calendar, set up in your account before their sync had reco
   assert.ok(!writes.some((w) => w.update && w.update.name.includes('/sharedFeeds/ethan__' + key)), 'never copied back to her');
   assert.ok(!writes.some((w) => w.update && w.update.name.includes('/notify/')), 'never told as your rota');
   assert.equal(store.getProperty('rota_' + key), null);
-  // one you've chosen yourself stays as you chose it
-  docs[key] = Object.assign({}, docs[key], { userSet: true, lastSeen: old });
+  // one whose sharing and use you've chosen yourself stays as you chose it
+  docs[key] = Object.assign({}, docs[key], { userSet: true, shareSet: true, roleSet: true, lastSeen: old });
   const again = calHarness({ calendars: [gcal('e@gmail.com', 'Ethan', true), gcal(id, "Sophie's shifts", false)], docs, theirs, store: { ['h_' + key]: '{}' } });
   ctx.syncCalendars_(couple('e@gmail.com', 'ethan'), { appEmail: 'e@gmail.com', hh: {}, people: { ethan: {}, sophie: {} }, person: { name: 'Ethan' }, calDocs: docs }, []);
   assert.ok(!again.writes.some((w) => w.update && w.update.name.endsWith('/calendars/ethan__' + key) && w.update.fields.share));
@@ -2016,15 +2016,15 @@ test("one of your calendars your partner's sync saw first is put right in their 
   const key = ctx.shortKey_(id);
   const theirs = [
     { id: 'ethan__' + key, data: { owner: 'ethan', calKey: key, calId: id, account: 'e@gmail.com', canWrite: false, share: 'busy', role: 'normal', layer: 'other' } },
-    // one he chose himself, and one he can manage too: left alone
-    { id: 'x__' + key, data: { owner: 'x', calKey: key, calId: id, account: 'x@gmail.com', canWrite: false, share: 'busy', role: 'normal', userSet: true } }
+    // one whose sharing he chose himself: left alone
+    { id: 'x__' + key, data: { owner: 'x', calKey: key, calId: id, account: 'x@gmail.com', canWrite: false, share: 'busy', role: 'normal', userSet: true, shareSet: true } }
   ];
   const { writes } = calHarness({ calendars: [gcal('s@gmail.com', 'Sophie', true), gcal(id, 'Gym', true)], docs: {}, theirs });
   ctx.syncCalendars_(couple('s@gmail.com', 'sophie'), { appEmail: 's@gmail.com', hh: {}, people: { ethan: {}, sophie: {} }, person: { name: 'Sophie' }, calDocs: {} }, []);
   const fixed = writes.filter((w) => w.update && /\/calendars\/(ethan|x)__/.test(w.update.name));
   assert.deepEqual(fixed.map((w) => w.update.name.split('/').pop()), ['ethan__' + key]);
   assert.equal(fixed[0].update.fields.share.stringValue, 'none');
-  assert.equal(JSON.stringify(fixed[0].updateMask.fieldPaths), '["share","role","layer"]');
+  assert.equal(JSON.stringify(fixed[0].updateMask.fieldPaths), '["share"]', 'only what needs putting right');
 });
 
 test("someone who isn't one of you, calling the owner's set-up or backup from the connect page, can't use up the database reads", () => {
@@ -2060,4 +2060,50 @@ test('something put in your calendar from Gmail (a booking) is only "Busy" to yo
   assert.equal(shared(ctx.norm_(old('GMAIL', 'D'))).t, 'Busy');
   assert.equal(shared(ctx.norm_(old('GMAIL', 'PUB'))).t, 'Flight to Rome');
   assert.equal(shared(ctx.norm_(old('DEF', 'D'))).t, 'Flight to Rome');
+});
+
+test("your partner's calendar is still put right after you've only hidden it, or changed what it's for", () => {
+  withDigest();
+  const id = 'shifts1@group.calendar.google.com';
+  const key = ctx.shortKey_(id);
+  const old = Date.now() - 7 * 3600e3;
+  const theirs = [{ id: 'sophie__' + key, data: { owner: 'sophie', calKey: key, calId: id, account: 's@gmail.com', canWrite: true } }];
+  const run = (extra) => {
+    const docs = { [key]: Object.assign({ owner: 'ethan', calKey: key, calId: id, name: "Sophie's shifts", color: '', canWrite: false, primary: false, account: 'e@gmail.com', lastSeen: old, show: true, share: 'all', role: 'rota', layer: 'own' }, extra) };
+    const { writes } = calHarness({ calendars: [gcal(id, "Sophie's shifts", false)], docs, theirs, store: { ['h_' + key]: '{}' } });
+    ctx.Utilities.getUuid = () => 'u' + Math.random();
+    ctx.syncCalendars_(couple('e@gmail.com', 'ethan'), { appEmail: 'e@gmail.com', hh: {}, people: { ethan: {}, sophie: {} }, person: { name: 'Ethan' }, calDocs: docs }, []);
+    const w = writes.find((x) => x.update && x.update.name.endsWith('/calendars/ethan__' + key));
+    return { fields: (w && w.update.fields) || {}, shared: writes.some((x) => x.update && x.update.name.includes('/sharedFeeds/ethan__' + key)) };
+  };
+  // hidden from your own calendar (before Sophie had connected): never copied back to her as yours
+  let r = run({ userSet: true, show: false });
+  assert.equal(r.fields.share.stringValue, 'none');
+  assert.equal(r.fields.role.stringValue, 'normal');
+  assert.ok(!r.shared);
+  // what it's for changed to "Other" (which leaves Sophie sees: Everything): not shared back either, and its use as you chose
+  r = run({ userSet: true, roleSet: true, role: 'normal', layer: 'other' });
+  assert.equal(r.fields.share.stringValue, 'none');
+  assert.ok(!('role' in r.fields) && !('layer' in r.fields));
+  assert.ok(!r.shared);
+  // its sharing chosen yourself: kept
+  r = run({ userSet: true, shareSet: true, roleSet: true });
+  assert.ok(!('share' in r.fields));
+});
+
+test('the rules let you mark a calendar\'s sharing or use as chosen by you, on your own calendars only', async () => {
+  const { loadRules } = await import('./rules-eval.mjs');
+  const { readFileSync } = await import('node:fs');
+  const rules = loadRules(readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8'));
+  const db = {
+    'households/main': { emails: ['e@gmail.com', 's@gmail.com'], emailsLocked: true },
+    'households/main/people/ethan': { email: 'e@gmail.com' },
+    'households/main/people/sophie': { email: 's@gmail.com' },
+    'households/main/calendars/ethan__k': { owner: 'ethan', calKey: 'k', calId: 'x', share: 'all', role: 'rota', layer: 'own' }
+  };
+  const can = (email, patch) => rules.allowed({ method: 'update', path: 'households/main/calendars/ethan__k', email, db, data: Object.assign({}, db['households/main/calendars/ethan__k'], patch) });
+  assert.equal(can('e@gmail.com', { share: 'none', userSet: true, shareSet: true }), true);
+  assert.equal(can('e@gmail.com', { role: 'normal', layer: 'other', userSet: true, roleSet: true }), true);
+  assert.equal(can('s@gmail.com', { share: 'none', userSet: true, shareSet: true }), false);
+  assert.equal(can('e@gmail.com', { owner: 'sophie', shareSet: true }), false);
 });
