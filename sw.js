@@ -2,7 +2,7 @@
 // straight from a notification's buttons.
 importScripts('./js/ops.js');
 
-const VERSION = 'caledonite-v21';
+const VERSION = 'caledonite-v22';
 const SDK_VERSION = '12.6.0';
 const SDK_CACHE = `caledonite-sdk-${SDK_VERSION}`;
 // public settings, the same as js/config.js
