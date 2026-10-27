@@ -49,7 +49,7 @@ export function viewToday(state) {
   const waiting = waitingForMe(state);
   if (waiting.length && P) {
     const fromPartner = waiting.filter((r) => r.from === P).length;
-    const label = fromPartner === waiting.length ? `${nameOf(state, P)} asked you ${waiting.length === 1 ? 'something' : waiting.length + ' things'}` : `${waiting.length} request${waiting.length === 1 ? '' : 's'} need you`;
+    const label = fromPartner === waiting.length ? `${nameOf(state, P)} asked you ${waiting.length === 1 ? 'something' : waiting.length + ' things'}` : `${waiting.length} request${waiting.length === 1 ? ' needs' : 's need'} you`;
     att.push(`<a class="att-row" href="#requests">${avatar(state, P, 34)}<span class="grow b">${esc(label)}</span><span class="att-go">${icon.next(18)}</span></a>`);
   }
   for (const n of state.notes.filter((x) => x.to === me && !x.seen && (x.showAfter || 0) <= Date.now()).slice(0, 3)) {

@@ -578,3 +578,19 @@ test('a list being chosen from is never redrawn away under the picker, and the c
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
+
+test('Today counts what needs you in words that read right: "1 request needs you"', async () => {
+  const page = await open('sophie', '#today');
+  // Ethan suggested another time for something Sophie asked: that's hers to answer now, and nothing else is
+  await mods(page, (store) => {
+    const d = new Date(); d.setDate(d.getDate() + 3);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return store.store.backend.commit([
+      { type: 'update', path: 'requests/r_keep', data: { status: 'yes' } },
+      { type: 'update', path: 'requests/r_ikea', data: { status: 'other', counter: { day, start: '10:00', end: '12:00', allDay: false } } }
+    ]);
+  });
+  await page.waitForTimeout(150);
+  assert.match(await page.textContent('.att'), /1 request needs you/);
+  await page.context().close();
+});
