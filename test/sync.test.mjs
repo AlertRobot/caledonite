@@ -2170,3 +2170,33 @@ test('the connect page says how to connect a different Google account', () => {
   assert.match(html, /AccountChooser\?continue=https%3A%2F%2Fscript\.google\.com%2Fmacros%2Fs%2FABC%2Fexec/);
   assert.match(html, /Incognito/);
 });
+
+test("someone else's calendar in your account (a colleague's, say) starts shared as Nothing", () => {
+  const me = { email: 'ethan@work.example', person: 'ethan', main: false, people: [{ id: 'ethan', data: { email: 'e@gmail.com', linked: ['ethan@work.example'] } }, { id: 'sophie', data: { email: 's@gmail.com' } }] };
+  ctx.fsQuery_ = () => [];
+  const cal = (id, name, owned = false) => ({ getId: () => id, getName: () => name, isOwnedByMe: () => owned });
+  const x = ctx.defaultsFor_(cal('paul@work.example', 'Paul Smith'), false, me, { hh: {} });
+  assert.equal(x.share, 'none');
+  // family and friends calendars as before
+  assert.equal(ctx.defaultsFor_(cal('fam1@group.calendar.google.com', 'Mum and Dad'), false, me, { hh: {} }).share, 'all');
+  assert.equal(ctx.defaultsFor_(cal('m1@group.calendar.google.com', 'Friends'), false, me, { hh: {} }).share, 'all');
+});
+
+test("a calendar hidden from you, its sharing never chosen, is shared as Nothing; one whose sharing you chose is left", () => {
+  withDigest();
+  const id = 'paul@work.example';
+  const key = ctx.shortKey_(id);
+  const run = (extra) => {
+    const docs = { [key]: Object.assign({ owner: 'ethan', calKey: key, calId: id, name: 'Paul Smith', color: '', canWrite: false, primary: false, account: 'e@gmail.com', lastSeen: Date.now(), show: false, share: 'busy', role: 'normal', layer: 'other', userSet: true }, extra) };
+    const { writes } = calHarness({ calendars: [gcal(id, 'Paul Smith', false)], docs, theirs: [], store: { ['h_' + key]: '{}' } });
+    ctx.Utilities.getUuid = () => 'u' + Math.random();
+    ctx.syncCalendars_(couple('e@gmail.com', 'ethan'), { appEmail: 'e@gmail.com', hh: {}, people: { ethan: {}, sophie: {} }, person: { name: 'Ethan' }, calDocs: docs }, []);
+    const w = writes.find((x) => x.update && x.update.name.endsWith('/calendars/ethan__' + key));
+    return { fields: (w && w.update.fields) || {}, shared: writes.some((x) => x.update && x.update.name.includes('/sharedFeeds/ethan__' + key)) };
+  };
+  let r = run({});
+  assert.equal(r.fields.share.stringValue, 'none');
+  assert.ok(!r.shared);
+  r = run({ shareSet: true });
+  assert.ok(!('share' in r.fields));
+});

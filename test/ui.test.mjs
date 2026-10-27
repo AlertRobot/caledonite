@@ -677,3 +677,25 @@ test('Today counts what needs you in words that read right: "1 request needs you
   assert.match(await page.textContent('.att'), /1 request needs you/);
   await page.context().close();
 });
+
+test("hiding a calendar from yourself stops your partner seeing it too, unless you chose its sharing", async () => {
+  const page = await open('ethan', '#settings/calendars');
+  const head = page.locator('.cal-head[data-k="ethan__second"]');
+  await head.click();
+  await page.locator('[data-act="calShow"][data-k="ethan__second"]').click();
+  await page.waitForTimeout(200);
+  const st = await mods(page, (store) => store.store.state.calendars.ethan__second);
+  assert.equal(st.show, false);
+  assert.equal(st.share, 'none');
+  assert.match(await head.textContent(), /Hidden from you\. Sophie sees nothing/i);
+  // chosen by hand: hiding leaves it
+  await mods(page, (store) => store.store.backend.commit([{ type: 'update', path: 'calendars/ethan__second', data: { show: true, share: 'busy', shareSet: true } }]));
+  await page.waitForTimeout(150);
+  await page.locator('[data-act="calShow"][data-k="ethan__second"]').click();
+  await page.waitForTimeout(200);
+  const st2 = await mods(page, (store) => store.store.state.calendars.ethan__second);
+  assert.equal(st2.show, false);
+  assert.equal(st2.share, 'busy');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});

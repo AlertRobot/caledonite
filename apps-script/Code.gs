@@ -468,6 +468,8 @@ function syncCalendars_(me, ctx, errors) {
       // calendars set up before family calendars were recognised, or renamed since: shown as family, but never
       // shared more than before without you choosing it
       if (doc && !doc.userSet && doc.layer === 'own' && isFamilyCal_(id, meta.name)) fix.layer = 'family';
+      // hidden from you, and its sharing never chosen: your partner sees none of it either (as the app does on hiding)
+      if (doc && doc.show === false && !doc.shareSet && doc.share && doc.share !== 'none') fix.share = 'none';
       // set up before it could be told apart as your partner's (before their sync had recorded it, as when you
       // connect first, or before partners' calendars were recognised at all): put right when its details are next
       // checked, except what you've chosen for it yourself (its sharing, or what it's for)
@@ -593,7 +595,9 @@ function defaultsFor_(cal, isPrimary, me, ctx) {
   if (!cal.isOwnedByMe()) {
     if (/family|mum|dad|parents|home/.test(name)) return { show: true, share: 'all', role: 'normal', layer: 'family' };
     if (/friend|mates|crew|squad|book club/.test(name)) return { show: true, share: 'all', role: 'normal', layer: 'friends' };
-    return { show: true, share: 'busy', role: 'normal', layer: 'other' };
+    // someone else's calendar (a colleague's in a work account, say): their busy times aren't yours, so your partner
+    // sees none of it until you choose otherwise
+    return { show: true, share: 'none', role: 'normal', layer: 'other' };
   }
   return { show: true, share: 'busy', role: 'normal', layer: 'own' };
 }

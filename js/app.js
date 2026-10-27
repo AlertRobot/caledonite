@@ -424,7 +424,8 @@ const H = {
   addAgain: () => { resetAdd(); render(); },
   setPage: (el) => { go(el.dataset.v === 'home' ? '#settings' : `#settings/${el.dataset.v}`); },
   openCal: (el) => { ui.settings.openCal = ui.settings.openCal === el.dataset.k ? null : el.dataset.k; render(); },
-  calShow: (el) => { const c = store.state.calendars[el.dataset.k]; run(actions.updateCalendar(el.dataset.k, { show: c.show === false })); },
+  // hiding a calendar from yourself also stops your partner seeing it, unless you've chosen its sharing yourself
+  calShow: (el) => { const c = store.state.calendars[el.dataset.k]; const show = c.show === false; run(actions.updateCalendar(el.dataset.k, !show && !c.shareSet && c.share !== 'none' ? { show, share: 'none' } : { show })); },
   // (shareSet, roleSet: what you chose yourself, which the sync never puts right; showing or hiding it is neither)
   calShare: (el) => run(actions.updateCalendar(el.dataset.k, { share: el.dataset.v, shareSet: true })),
   myHasShifts: () => {
