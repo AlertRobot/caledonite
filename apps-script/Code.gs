@@ -1000,8 +1000,6 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     var e = x.e, s = x.s;
     var en = e.ad ? Utilities.parseDate(e.ed || keyPlus_(e.sd, 1), TZ, 'yyyy-MM-dd').getTime() : e.e;
     if (s < win.from || s > win.to) return;
-    // shared as working hours: your partner never sees all-day entries or very long ones, so never hears of them
-    if (share === 'hours' && (e.ad || en - s > 14 * 3600e3)) return;
     var k = evStartKey_(e);
     while (map[k]) k += '+';
     // a shift marked Private or #busy is never named, not even by a change to its name
@@ -1021,9 +1019,12 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   try { before = JSON.parse(props.getProperty(key) || 'null'); } catch (err) { before = null; }
   props.setProperty(key, JSON.stringify({ from: win.from, to: win.to, map: map }));
   if (!before || typeof before !== 'object' || !before.map || share === 'none') return;
-  // saved before working-hours sharing left out all-day and very long entries: compared the same way, so they
-  // never come up as removed (each day's entries numbered again in time order, as now)
-  before.map = rotaRekey_(before.map, function (v) { return !!v && (share !== 'hours' || (!v[3] && v[1] - v[0] <= 14 * 3600e3)); });
+  // Every entry is remembered, whatever the sharing, so changing it never makes old entries look new. Shared as
+  // working hours, your partner never sees all-day entries or very long ones, so never hears of them: both sides
+  // are compared without them (each day's entries numbered again in time order)
+  var keep = function (v) { return !!v && (share !== 'hours' || (!v[3] && v[1] - v[0] <= 14 * 3600e3)); };
+  before.map = rotaRekey_(before.map, keep);
+  map = rotaRekey_(map, keep);
   var named = share === 'all';
   var lo = Math.max(before.from, win.from), hi = Math.min(before.to, win.to);
   var inside = function (v) { return v && v[0] >= lo && v[0] <= hi && v[1] > now; };

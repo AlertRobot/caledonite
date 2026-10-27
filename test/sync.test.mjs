@@ -1718,3 +1718,26 @@ test('a travel time after nights beyond what the app allows never stops the slee
   assert.equal(ctx.sleepUntil_(p(1e9), data, L('2026-11-10', '13:00')), L('2026-11-10', '14:00'));
   assert.equal(ctx.sleepUntil_(p(-600), data, L('2026-11-10', '08:05')), L('2026-11-10', '14:00'));
 });
+
+test('a rota shared as working hours, then as everything: the leave already on it is never news', () => {
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 4 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const L = (hm) => ctx.localTime_(day, hm);
+  const { api } = smallProps({});
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  const evs = [{ t: 'Long day', s: L('07:30'), e: L('20:00') }, { ad: 1, sd: ctx.keyPlus_(day, 1), ed: ctx.keyPlus_(day, 3), t: 'Annual leave' }];
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'hours' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'hours' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'all' });
+  assert.deepEqual(writes.map((w) => w.update.fields.body.stringValue), []);
+  // a real change is still told, and under working hours never the leave
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', [evs[1]], api, { share: 'hours' });
+  assert.equal(writes.length, 1);
+  assert.match(writes[0].update.fields.body.stringValue, /long day removed/);
+  assert.doesNotMatch(writes[0].update.fields.body.stringValue, /leave|all-day/i);
+});
