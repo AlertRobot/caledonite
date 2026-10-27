@@ -281,6 +281,18 @@ test("a countdown to a contact's birthday (only in your own copy) stays on your 
   assert.equal(L.countdownShared(st2, st2.events[0]), true);
 });
 
+test('a request with times that runs over several days has passed only once its last day ends', () => {
+  const now = atTime(k(0), '12:00').getTime();
+  // Friday 6pm to Sunday 4pm, and it's the Saturday in between
+  const w = { day: k(-1), endDay: k(1), start: '18:00', end: '16:00', allDay: false };
+  assert.equal(Ops.whenPassed(w, now), false);
+  assert.equal(Ops.whenPassed(w, atTime(k(1), '16:00').getTime()), true);
+  // one day, as before: over at its end, or an hour after it starts with no end
+  assert.equal(Ops.whenPassed({ day: k(0), start: '10:00', end: '11:00', allDay: false }, now), true);
+  assert.equal(Ops.whenPassed({ day: k(0), start: '11:30', end: '', allDay: false }, now), false);
+  assert.equal(Ops.whenPassed({ day: k(0), start: '13:00', end: '12:30', allDay: false }, now), false, 'an end before the start on one day: an hour after it starts');
+});
+
 test('a countdown follows its event when the event is moved to another day', () => {
   // set on the trip when it was on the Saturday; since moved (in Google Calendar) to the Monday after
   const mon = dayKey(addDays(new Date(`${sat}T12:00`), 2));

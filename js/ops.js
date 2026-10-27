@@ -14,13 +14,16 @@
     if (w.endDay && w.endDay !== w.day) ev.endDay = w.endDay;
     return ev;
   }
-  // the time asked for has gone by (all day: once its last day is over). For one with another time suggested, that time
+  // the time asked for has gone by (once its last day is over, or its end on that day). For one with another time
+  // suggested, that time
   function whenPassed(w, now) {
     if (!w || !/^\d{4}-\d{2}-\d{2}$/.test(String(w.day || ''))) return false;
-    var p = String(w.allDay && w.endDay ? w.endDay : w.day).split('-').map(Number);
+    var several = /^\d{4}-\d{2}-\d{2}$/.test(String(w.endDay || '')) && w.endDay > w.day;
+    var p = String(several ? w.endDay : w.day).split('-').map(Number);
     var end = new Date(p[0], p[1] - 1, p[2] + 1);
     if (!w.allDay && w.start) {
-      var t = String(w.end && w.end > w.start ? w.end : plusHour(w.start)).split(':').map(Number);
+      // (over several days, the end is on the last day, whatever the time)
+      var t = String(w.end && (several || w.end > w.start) ? w.end : plusHour(w.start)).split(':').map(Number);
       end = new Date(p[0], p[1] - 1, p[2], t[0] || 0, t[1] || 0);
     }
     return end.getTime() <= (now || Date.now());
