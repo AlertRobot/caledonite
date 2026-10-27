@@ -1945,8 +1945,9 @@ test("your partner's own calendar, shared with you in Google, is never copied ba
   assert.equal(d('abc@import.calendar.google.com', 'Loop rota').role, 'rota');
   assert.equal(d('mates1@group.calendar.google.com', 'Friends').layer, 'friends');
   assert.equal(d('boss@company.example', 'Team').role, 'work');
-  // Google's family calendar is all of yours
-  assert.equal(d('family01@group.calendar.google.com', 'Family').share, 'all');
+  // Google's family calendar is all of yours (never taken for your partner's), shown to you but shared as Nothing
+  assert.equal(d('family01@group.calendar.google.com', 'Family').layer, 'family');
+  assert.equal(d('family01@group.calendar.google.com', 'Family').share, 'none');
 });
 
 test('a rota change whose notification could not be saved is told next run, not lost', () => {
@@ -2177,8 +2178,8 @@ test("someone else's calendar in your account (a colleague's, say) starts shared
   const cal = (id, name, owned = false) => ({ getId: () => id, getName: () => name, isOwnedByMe: () => owned });
   const x = ctx.defaultsFor_(cal('paul@work.example', 'Paul Smith'), false, me, { hh: {} });
   assert.equal(x.share, 'none');
-  // family and friends calendars as before
-  assert.equal(ctx.defaultsFor_(cal('fam1@group.calendar.google.com', 'Mum and Dad'), false, me, { hh: {} }).share, 'all');
+  // a family calendar: yours to see, shared as Nothing; friends calendars as before
+  assert.equal(ctx.defaultsFor_(cal('fam1@group.calendar.google.com', 'Mum and Dad'), false, me, { hh: {} }).share, 'none');
   assert.equal(ctx.defaultsFor_(cal('m1@group.calendar.google.com', 'Friends'), false, me, { hh: {} }).share, 'all');
 });
 
@@ -2199,4 +2200,27 @@ test("a calendar hidden from you, its sharing never chosen, is shared as Nothing
   assert.ok(!r.shared);
   r = run({ shareSet: true });
   assert.ok(!('share' in r.fields));
+});
+
+test('a calendar shared as Nothing loses its copies for your partner, even ones another of your accounts made before and can no longer take out', () => {
+  withDigest();
+  const { api } = fakeProps();
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'p@x', getName: () => 'Main' }], getDefaultCalendar: () => ({ getId: () => 'p@x' }) };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsQuery_ = (coll, eqs) => (coll === 'sharedFeeds' && eqs.length === 1 && eqs[0][0] === 'owner' && eqs[0][1] === 'ethan' ? [
+    { id: 'ethan__colleague__2026-11', data: { calKey: 'colleague' } },
+    { id: 'ethan__colleague__2026-12', data: { calKey: 'colleague' } },
+    { id: 'ethan__work__2026-11', data: { calKey: 'work' } },
+    { id: 'ethan__new__2026-11', data: { calKey: 'new' } }
+  ] : []);
+  const recent = Date.now() - 3600e3;
+  const me = { email: 'e@x.com', person: 'ethan', main: false, people: [{ id: 'ethan', data: { email: 'e@x.com', linked: ['work@x.com'] } }] };
+  ctx.syncCalendars_(me, { hh: {}, calDocs: {
+    colleague: { account: 'work@x.com', lastSeen: recent, share: 'none', show: false },
+    work: { account: 'work@x.com', lastSeen: recent, share: 'hours' }
+  } }, []);
+  assert.deepEqual(writes.map((w) => w.delete).filter(Boolean).sort(), ['households/main/sharedFeeds/ethan__colleague__2026-11', 'households/main/sharedFeeds/ethan__colleague__2026-12']);
 });
