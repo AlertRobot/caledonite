@@ -28,6 +28,28 @@
   function requestPassed(r, now) {
     return !!r && whenPassed(r.status === 'other' ? r.counter : r.when, now);
   }
+  // when something is, by its date ("Wednesday 28 October, 7pm to 9pm"): for notifications, which can arrive
+  // after quiet hours or sleep, or be read the next day, when a saved "Tomorrow" would be wrong
+  var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function dateText(k) {
+    var p = String(k).split('-').map(Number);
+    var d = new Date(p[0], p[1] - 1, p[2]);
+    return DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()];
+  }
+  function timeText(hm) {
+    var p = String(hm).split(':').map(Number);
+    var h = p[0] || 0, m = p[1] || 0, h12 = h % 12 === 0 ? 12 : h % 12;
+    return h12 + (m ? ':' + (m < 10 ? '0' : '') + m : '') + (h < 12 ? 'am' : 'pm');
+  }
+  function fixedWhen(w) {
+    if (!w || !/^\d{4}-\d{2}-\d{2}$/.test(String(w.day || ''))) return (w && w.label) || '';
+    var base = dateText(w.day);
+    if (w.endDay && w.endDay !== w.day) return base + ' to ' + dateText(w.endDay);
+    if (w.allDay) return base + ', all day';
+    var s = w.start || '19:00';
+    return base + ', ' + timeText(s) + (w.end ? ' to ' + timeText(w.end) : '');
+  }
   function eventTitle(r) {
     if (r.type === 'free') return 'Kept free: ' + r.title;
     if (r.type === 'leave') return r.title ? 'Holiday: ' + r.title : 'Holiday';
@@ -78,7 +100,7 @@
     } else if (answer === 'other') {
       patch.status = 'other';
       patch.counter = o.when;
-      tell(r.from, meName + ' suggested another time', (r.title || eventTitle(r)) + ': ' + o.when.label);
+      tell(r.from, meName + ' suggested another time', (r.title || eventTitle(r)) + ': ' + fixedWhen(o.when));
     } else if (answer === 'accept-counter') {
       patch.status = 'yes';
       patch.when = r.counter;
@@ -89,7 +111,7 @@
       if (r.type === 'favour') add(r.to, 'create', { event: evFromWhen(r.title + ' (for ' + ((o.names && o.names[r.from]) || 'your partner') + ')', r.counter, '19:00') });
       else if (r.type === 'add') add(r.to, 'create', { event: evFromWhen(r.title, r.counter) });
       else both.forEach(function (p) { add(p, 'create', { both: true, event: evFromWhen(t2, r.counter) }); });
-      tell(r.to, meName + ' said yes to your time', (r.title || t2) + ': ' + r.counter.label);
+      tell(r.to, meName + ' said yes to your time', (r.title || t2) + ': ' + fixedWhen(r.counter));
     } else if (answer === 'cancel') {
       patch.status = 'cancelled';
       // whatever it put in either calendar: pencilled in, or added after a yes this phone hadn't heard about yet
@@ -103,5 +125,5 @@
     return { patch: patch, outbox: out, notify: notify };
   }
 
-  root.CaledoniteOps = { buildAnswer: buildAnswer, evFromWhen: evFromWhen, eventTitle: eventTitle, plusHour: plusHour, whenPassed: whenPassed, requestPassed: requestPassed };
+  root.CaledoniteOps = { buildAnswer: buildAnswer, fixedWhen: fixedWhen, evFromWhen: evFromWhen, eventTitle: eventTitle, plusHour: plusHour, whenPassed: whenPassed, requestPassed: requestPassed };
 })(typeof self !== 'undefined' ? self : this);

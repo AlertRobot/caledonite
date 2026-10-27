@@ -226,7 +226,7 @@ export const actions = {
       plan: `${me} wants to plan something`, favour: `${me} asked a favour`, free: `${me} asked you to keep some time free`,
       heads: `Heads up from ${me}`, add: `${me} added something for you`, leave: `${me} would like to book a holiday together`
     };
-    const body = (req.title || 'Holiday') + (when ? ` (${when.label})` : '');
+    const body = (req.title || 'Holiday') + (when ? ` (${Ops.fixedWhen(when)})` : '');
     ops.push(notifyOp(st.partner, titles[type] || `${me} asked you something`, body, '#requests', 'requests', type === 'heads' ? { reqId: id } : { reqId: id, ask: '1' }));
     await commit(ops);
     return id;
@@ -239,7 +239,7 @@ export const actions = {
     const req = { from: st.me, to: st.partner, type: 'leave', title: (title || '').trim(), when, hold: false, status: 'yes', own: true, days: days || {}, people: [st.me], note: '', created: now(), answeredAt: now() };
     const ops = [{ type: 'set', path: `requests/${id}`, data: req }];
     ops.push(outboxOp({ person: st.me, op: 'create', tag: `req:${id}`, event: Ops.evFromWhen(Ops.eventTitle(req), when) }));
-    ops.push(notifyOp(st.partner, `${nameOf(st, st.me)} booked a holiday`, `${req.title || 'Holiday'} (${when.label})`, '#requests'));
+    ops.push(notifyOp(st.partner, `${nameOf(st, st.me)} booked a holiday`, `${req.title || 'Holiday'} (${Ops.fixedWhen(when)})`, '#requests'));
     await commit(ops);
   },
 
@@ -271,7 +271,7 @@ export const actions = {
     const account = accountOf(st, st.me, ev.calKey);
     if (who === 'both') {
       for (const pid of [st.me, st.partner]) ops.push(outboxOp({ person: pid, op: 'create', tag, both: true, account: pid === st.me ? account : null, event: Object.assign({}, ev, { calKey: pid === st.me ? ev.calKey : null }) }));
-      ops.push(notifyOp(st.partner, `${nameOf(st, st.me)} added something for you both`, `${ev.title} (${whenLabel(when)})`, '#calendar'));
+      ops.push(notifyOp(st.partner, `${nameOf(st, st.me)} added something for you both`, `${ev.title} (${Ops.fixedWhen(when)})`, '#calendar'));
     } else {
       ops.push(outboxOp({ person: st.me, op: 'create', tag, account, event: ev }));
     }
@@ -459,7 +459,7 @@ export const actions = {
     const job = { title: title.trim(), who, day, time: time || null, repeat: repeat || null, remind: true, done: false, created: now(), by: st.me };
     const ops = [{ type: 'add', path: 'jobs', data: job }];
     const other = who === 'both' ? st.partner : (who !== st.me ? who : null);
-    if (other) ops.push(notifyOp(other, who === 'both' ? `${nameOf(st, st.me)} added a job for you both` : `${nameOf(st, st.me)} added a job for you`, `${job.title} (${whenLabel({ day, allDay: true }).replace(', all day', '')})`, '#jobs', 'jobs'));
+    if (other) ops.push(notifyOp(other, who === 'both' ? `${nameOf(st, st.me)} added a job for you both` : `${nameOf(st, st.me)} added a job for you`, `${job.title} (${Ops.fixedWhen({ day, allDay: true }).replace(', all day', '')})`, '#jobs', 'jobs'));
     await commit(ops, false);
   },
   async updateJob(id, patch) {

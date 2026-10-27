@@ -802,3 +802,28 @@ test('the app icon reaches phones: every icon the page, the manifest and notific
   const uncommitted = execFileSync('git', ['diff', 'HEAD', '--', 'sw.js'], { cwd: new URL('..', import.meta.url) }).toString().includes('const VERSION');
   assert.ok(uncommitted || versionChanged >= icons, 'sw.js VERSION was not changed after the icons were');
 });
+
+test('notifications name the date, not "Tomorrow": they can arrive after quiet hours, or be read the next day', async () => {
+  const tomorrow = k(1);
+  const w = { day: tomorrow, start: '19:00', end: '21:00', allDay: false, label: whenLabel({ day: tomorrow, start: '19:00', end: '21:00' }) };
+  assert.match(w.label, /^Tomorrow/);
+  const d = new Date(tomorrow + 'T12:00');
+  const date = `${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getDay()]} ${d.getDate()} `;
+  load();
+  const seen = [];
+  store.backend = { commit: async (ops) => { seen.push(...ops.filter(Boolean)); }, ping() {} };
+  await actions.createRequest({ type: 'plan', title: 'Cinema', when: w, hold: false });
+  await actions.addEvent({ who: 'both', title: 'Swim', day: tomorrow, start: '10:00', end: '11:00', allDay: false });
+  await actions.addJob({ title: 'Bins', who: 'sophie', day: tomorrow });
+  const bodies = seen.filter((o) => o.path === 'notify').map((o) => o.data.body);
+  assert.equal(bodies.length, 3);
+  for (const b of bodies) { assert.doesNotMatch(b, /Today|Tomorrow/, b); assert.ok(b.includes(date), b); }
+  assert.match(bodies[0], /7pm to 9pm/);
+  // and the answers: another time suggested, and yes to it
+  const req = { from: 'ethan', to: 'sophie', type: 'plan', title: 'Cinema', when: w, counter: w };
+  for (const a of ['other', 'accept-counter']) {
+    const n = Ops.buildAnswer({ req: Object.assign({}, req, { status: a === 'other' ? 'waiting' : 'other' }), id: 'r1', answer: a, me: a === 'other' ? 'sophie' : 'ethan', names: {}, when: w }).notify;
+    assert.doesNotMatch(n.body, /Tomorrow/, a);
+    assert.ok(n.body.includes(date), a);
+  }
+});
