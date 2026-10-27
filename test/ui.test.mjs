@@ -600,6 +600,26 @@ test('a list left focused with nothing chosen holds the screen back only until t
   await page.context().close();
 });
 
+test('a message shows, and goes again, even while a box is still focused', async () => {
+  const page = await open('ethan', '#add');
+  // saved with no name: the name box is focused (keyboard up) with the message
+  await page.click('[data-act="addSave"]');
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'add-title');
+  assert.match(await page.textContent('.toast'), /Add what it is first/);
+  await page.waitForTimeout(2900);
+  assert.equal(await page.locator('.toast').count(), 0, 'not left over the screen while typing');
+  // a date picked with the box still focused: "Saved." still shows
+  await go(page, '#settings/routine');
+  await page.focus('#bd-ethan');
+  await page.evaluate(() => { const el = document.getElementById('bd-ethan'); el.value = '2000-03-14'; el.dispatchEvent(new Event('change', { bubbles: true })); });
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'bd-ethan');
+  assert.match(await page.textContent('.toast'), /Saved/);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
 test('Today counts what needs you in words that read right: "1 request needs you"', async () => {
   const page = await open('sophie', '#today');
   // Ethan suggested another time for something Sophie asked: that's hers to answer now, and nothing else is

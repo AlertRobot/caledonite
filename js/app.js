@@ -76,8 +76,17 @@ export function render() {
 function toast(text) {
   ui.toast = text;
   render();
+  // a box still focused holds the redraw back: the message still shows, and still goes, by itself
+  let el = root.querySelector('.toast');
+  if (!el) { el = document.createElement('div'); el.className = 'toast'; el.setAttribute('role', 'status'); root.appendChild(el); }
+  el.textContent = text;
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => { ui.toast = null; render(); }, 2600);
+  toast.t = setTimeout(() => {
+    ui.toast = null;
+    const t = root.querySelector('.toast');
+    if (t) t.remove();
+    render();
+  }, 2600);
 }
 function go(hash) {
   if (location.hash === hash) render();
