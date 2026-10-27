@@ -451,9 +451,22 @@ function syncCalendars_(me, ctx, errors) {
         writes.push(upd_(docPath, { layer: 'family' }, ['layer']));
         doc = merge_(doc, { layer: 'family' });
       }
+      // set up before it could be told apart as your partner's (before their sync had recorded it, as when you
+      // connect first, or before partners' calendars were recognised at all): put right when its details are next
+      // checked, unless you've chosen its sharing yourself
+      var due = !!doc && (reseed || !doc.lastSeen || Date.now() - doc.lastSeen > 6 * 3600e3);
+      if (due && !doc.userSet && (doc.share !== 'none' || doc.role !== 'normal') && partnersCal_(me, ctx, id, meta.canWrite)) {
+        var fix = { share: 'none', role: 'normal', layer: isFamilyCal_(id, meta.name) ? 'family' : 'other' };
+        writes.push(upd_(docPath, fix, Object.keys(fix)));
+        if (doc.role === 'rota') toForget.push('rota_' + calKey);
+        doc = merge_(doc, fix);
+      }
       if (!doc) {
         doc = merge_(meta, defaultsFor_(cal, isPrimary, me, ctx));
         writes.push(upd_(docPath, doc));
+        // one of yours that your partner's sync saw first (you shared it with them in Google): their record of it
+        // is put right now, so it's never shown back to you as theirs
+        if (meta.canWrite) writes = writes.concat(theirRecordsOfMine_(me, ctx, id, meta.name));
       } else if (doc.name !== meta.name || doc.color !== meta.color || doc.canWrite !== meta.canWrite || doc.primary !== meta.primary || !doc.lastSeen || Date.now() - doc.lastSeen > 6 * 3600e3) {
         writes.push(upd_(docPath, meta, Object.keys(meta)));
         doc = merge_(doc, meta);
@@ -586,6 +599,22 @@ function partnersCal_(me, ctx, id, owned) {
       return d.data && d.data.owner && d.data.owner !== me.person && d.data.canWrite === true && d.id === d.data.owner + '__' + d.data.calKey && !mine[String(d.data.account || '').toLowerCase()];
     });
   } catch (e) { return false; }
+}
+
+// Your partner's records of a calendar of yours (one you own and they don't), still with the sharing it was first
+// given there: as theirs from now on it's shared as Nothing (it's yours), unless they've chosen otherwise
+function theirRecordsOfMine_(me, ctx, id, name) {
+  if (/^family\d*@group\.calendar\.google\.com$/i.test(String(id || ''))) return [];
+  var mine = accountsOf_(me, ctx || {});
+  try {
+    return fsQuery_('calendars', [['calId', id]]).filter(function (d) {
+      var x = d.data || {};
+      return x.owner && x.owner !== me.person && d.id === x.owner + '__' + x.calKey && x.canWrite !== true && !x.userSet &&
+        (x.share !== 'none' || x.role !== 'normal') && !mine[String(x.account || '').toLowerCase()];
+    }).map(function (d) {
+      return upd_(HOUSEHOLD + '/calendars/' + d.id, { share: 'none', role: 'normal', layer: isFamilyCal_(id, name) ? 'family' : 'other' }, ['share', 'role', 'layer']);
+    });
+  } catch (e) { return []; }
 }
 
 // Google's family group calendar, or one called "Family"

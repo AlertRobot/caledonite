@@ -1960,3 +1960,67 @@ test('read the slow way, where you are working from (Home, Office) is never an e
   assert.equal(ctx.normApi_({ id: 'w', eventType: 'workingLocation', summary: 'Home', start: { date: '2026-11-06' }, end: { date: '2026-11-07' } }), null);
   assert.equal(ctx.norm_(ev('D')).t, 'Home');
 });
+
+// ---------- round 12 checks ----------
+function calHarness({ calendars, docs, theirs = [], store = {} }) {
+  withDigest();
+  const { api } = fakeProps(store);
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.CalendarApp = { getAllCalendars: () => calendars, getDefaultCalendar: () => ({ getId: () => calendars[0].getId() }) };
+  ctx.Calendar = { Events: { list: () => ({ items: [{ id: 'g1', iCalUID: 'g1@google.com', summary: 'Ward', start: { dateTime: new Date(Date.now() + 2 * 864e5).toISOString() }, end: { dateTime: new Date(Date.now() + 2 * 864e5 + 3600e3).toISOString() } }] }) } };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsQuery_ = (coll, f) => (coll === 'calendars' && f[0][0] === 'calId' ? theirs.filter((d) => d.data.calId === f[0][1]) : []);
+  return { writes, store: api };
+}
+const gcal = (id, name, owned) => ({ getId: () => id, getName: () => name, getColor: () => '', isOwnedByMe: () => owned });
+const couple = (email, person) => ({ email, person, main: true, people: [
+  { id: 'ethan', data: { email: 'e@gmail.com', linked: [] } },
+  { id: 'sophie', data: { email: 's@gmail.com', linked: [] } }
+] });
+
+test("your partner's calendar, set up in your account before their sync had recorded it, is put right (you connected first)", () => {
+  withDigest();
+  const id = 'shifts1@group.calendar.google.com';
+  const key = ctx.shortKey_(id);
+  const old = Date.now() - 7 * 3600e3;
+  // set up when you connected, before Sophie had: taken for your rota, shared in full
+  const docs = {
+    [ctx.shortKey_('e@gmail.com')]: { owner: 'ethan', calKey: ctx.shortKey_('e@gmail.com'), calId: 'e@gmail.com', name: 'Ethan', color: '', canWrite: true, primary: true, account: 'e@gmail.com', lastSeen: Date.now(), show: true, share: 'all', role: 'normal', layer: 'own' },
+    [key]: { owner: 'ethan', calKey: key, calId: id, name: "Sophie's shifts", color: '', canWrite: false, primary: false, account: 'e@gmail.com', lastSeen: old, show: true, share: 'all', role: 'rota', layer: 'own' }
+  };
+  const theirs = [{ id: 'sophie__' + key, data: { owner: 'sophie', calKey: key, calId: id, account: 's@gmail.com', canWrite: true } }];
+  const { writes, store } = calHarness({ calendars: [gcal('e@gmail.com', 'Ethan', true), gcal(id, "Sophie's shifts", false)], docs, theirs, store: { ['h_' + key]: '{}', ['h_' + ctx.shortKey_('e@gmail.com')]: '{}', ['rota_' + key]: '{"from":1,"to":2,"map":{}}' } });
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  ctx.syncCalendars_(couple('e@gmail.com', 'ethan'), { appEmail: 'e@gmail.com', hh: {}, people: { ethan: {}, sophie: {} }, person: { name: 'Ethan' }, calDocs: docs }, []);
+  const fix = writes.find((w) => w.update && w.update.name.endsWith('/calendars/ethan__' + key) && w.update.fields.share);
+  assert.ok(fix, 'the record is put right');
+  assert.equal(fix.update.fields.share.stringValue, 'none');
+  assert.equal(fix.update.fields.role.stringValue, 'normal');
+  assert.ok(!writes.some((w) => w.update && w.update.name.includes('/sharedFeeds/ethan__' + key)), 'never copied back to her');
+  assert.ok(!writes.some((w) => w.update && w.update.name.includes('/notify/')), 'never told as your rota');
+  assert.equal(store.getProperty('rota_' + key), null);
+  // one you've chosen yourself stays as you chose it
+  docs[key] = Object.assign({}, docs[key], { userSet: true, lastSeen: old });
+  const again = calHarness({ calendars: [gcal('e@gmail.com', 'Ethan', true), gcal(id, "Sophie's shifts", false)], docs, theirs, store: { ['h_' + key]: '{}' } });
+  ctx.syncCalendars_(couple('e@gmail.com', 'ethan'), { appEmail: 'e@gmail.com', hh: {}, people: { ethan: {}, sophie: {} }, person: { name: 'Ethan' }, calDocs: docs }, []);
+  assert.ok(!again.writes.some((w) => w.update && w.update.name.endsWith('/calendars/ethan__' + key) && w.update.fields.share));
+});
+
+test("one of your calendars your partner's sync saw first is put right in their records when yours first sees it", () => {
+  withDigest();
+  const id = 'gym1@group.calendar.google.com';
+  const key = ctx.shortKey_(id);
+  const theirs = [
+    { id: 'ethan__' + key, data: { owner: 'ethan', calKey: key, calId: id, account: 'e@gmail.com', canWrite: false, share: 'busy', role: 'normal', layer: 'other' } },
+    // one he chose himself, and one he can manage too: left alone
+    { id: 'x__' + key, data: { owner: 'x', calKey: key, calId: id, account: 'x@gmail.com', canWrite: false, share: 'busy', role: 'normal', userSet: true } }
+  ];
+  const { writes } = calHarness({ calendars: [gcal('s@gmail.com', 'Sophie', true), gcal(id, 'Gym', true)], docs: {}, theirs });
+  ctx.syncCalendars_(couple('s@gmail.com', 'sophie'), { appEmail: 's@gmail.com', hh: {}, people: { ethan: {}, sophie: {} }, person: { name: 'Sophie' }, calDocs: {} }, []);
+  const fixed = writes.filter((w) => w.update && /\/calendars\/(ethan|x)__/.test(w.update.name));
+  assert.deepEqual(fixed.map((w) => w.update.name.split('/').pop()), ['ethan__' + key]);
+  assert.equal(fixed[0].update.fields.share.stringValue, 'none');
+  assert.equal(JSON.stringify(fixed[0].updateMask.fieldPaths), '["share","role","layer"]');
+});
