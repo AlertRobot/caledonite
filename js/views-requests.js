@@ -33,7 +33,7 @@ function isOpen(r) { return (r.status === 'waiting' || r.status === 'maybe' || r
 function reqCard(state, r) {
   const mine = r.from === state.me;
   const other = mine ? r.to : r.from;
-  const on = nameOf(state, other);
+  const on = shortName(state, other);
   // (something you added for your partner is added for them, not for you)
   const kind = r.type === 'add' && mine ? `Added for ${on}` : (TYPE_LABEL[r.type] || 'Request');
   const head = `<div class="row">${mine ? '' : avatar(state, r.from, 32)}<span class="grow b small muted">${mine ? 'You asked' : esc(nameOf(state, r.from))}, ${esc(agoText(r.created))}</span><span class="pill">${esc(kind)}</span></div>`;
