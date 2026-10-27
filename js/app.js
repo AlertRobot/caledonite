@@ -1,5 +1,5 @@
 // Caledonite: start-up, screens, taps and typing.
-import { store, actions, setPhase, setLinked } from './store.js';
+import { store, actions, setPhase, setLinked, requestPassed } from './store.js';
 import { ui, resetAsk, resetAdd } from './uistate.js';
 import { viewToday, viewCalendar, waitingForMe, rotateCountdown } from './views-main.js';
 import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey } from './views-requests.js';
@@ -350,6 +350,8 @@ const H = {
     const ownTime = a.type !== 'heads' && a.type !== 'leave' && (a.custom || !(a.shown || []).length);
     if (ownTime && a.cend && a.cend <= (a.cstart || '19:00')) { ui.focus = 'ask-end'; return toast('The end needs to be after the start.'); }
     const when = askWhen(st);
+    // a time that has already gone could only ever be turned down
+    if (when && requestPassed({ when })) { ui.focus = a.type === 'leave' ? 'lv-to' : 'ask-day'; if (a.type !== 'leave') { ui.ask.custom = true; ui.ask.pick = null; ui.ask.cday = when.day; ui.ask.cstart = when.start || ui.ask.cstart; ui.ask.cend = when.end || ui.ask.cend; } return toast('That time has already gone. Pick a later one.'); }
     const def = st.household.pencilDefault !== false;
     const hold = (a.type === 'plan' || a.type === 'free') && (a.hold === null ? def : a.hold);
     const extra = a.type === 'leave' ? { days: { [st.me]: leaveDaysFor(st, st.me, when.day, when.endDay), [st.partner]: leaveDaysFor(st, st.partner, when.day, when.endDay) }, people: [st.me, st.partner] } : {};
@@ -394,6 +396,8 @@ const H = {
     let end = a.end;
     if (!a.allDay && end && end <= a.start) { ui.focus = 'add-end'; return toast('The end needs to be after the start.'); }
     if (!a.allDay && !end) end = plusMins(a.start, 60);
+    // for your partner it's a request: one for a time already gone could only ever be turned down
+    if (a.who === 'partner' && requestPassed({ when: { day, start: a.allDay ? null : a.start, end: a.allDay ? null : end, allDay: a.allDay } })) { ui.focus = a.allDay ? 'add-title' : 'add-start'; return toast('That time has already gone. Pick a later one.'); }
     const cals = Object.values(st.calendars).filter((c) => c.owner === st.me && c.canWrite && c.role !== 'rota');
     const calKey = a.cal || (cals.find((c) => c.primary) || cals[0] || {}).calKey || null;
     try {

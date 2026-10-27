@@ -169,6 +169,32 @@ test('Ask: an end before the start is questioned, not quietly dropped', async ()
   await page.context().close();
 });
 
+test('Ask, or Add for your partner: a time that has already gone is questioned, not sent to be turned down', async () => {
+  const page = await open('ethan', '#ask');
+  const y = await page.evaluate(() => { const d = new Date(); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; });
+  await page.fill('#ask-title', 'Walk');
+  await page.click('[data-act="askCustom"]');
+  await page.fill('#ask-day', y);
+  await page.click('[data-act="askSend"]');
+  assert.match(await page.textContent('.toast'), /already gone/);
+  assert.equal(await page.locator('.done-card').count(), 0);
+  await page.click('.back-link');
+  await go(page, '#add');
+  await page.click('[data-act="addWho"][data-v="partner"]');
+  await page.fill('#add-title', 'Dentist');
+  await page.click('[data-act="addDay"][data-v="pick"]');
+  await page.fill('#add-date', y);
+  await page.fill('#add-start', '10:00');
+  await page.click('[data-act="addSave"]');
+  assert.match(await page.textContent('.toast'), /already gone/);
+  assert.equal(await page.locator('.done-card').count(), 0);
+  // for yourself it's fine: it's your own calendar
+  await page.click('[data-act="addWho"][data-v="me"]');
+  await page.click('[data-act="addSave"]');
+  assert.equal(await page.locator('.done-card').count(), 1);
+  await page.context().close();
+});
+
 test("a partner's shift times can't break the Shifts page", async () => {
   const page = await open('ethan', '#settings/shifts');
   const p = await page.getAttribute('[data-act="cycleShift"]', 'data-p');
