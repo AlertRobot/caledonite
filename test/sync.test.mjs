@@ -1590,3 +1590,38 @@ test('a change to something still waiting to be added by another of your account
   assert.equal(writes.length, 1);
   assert.equal(writes[0].update.fields.done.booleanValue, true);
 });
+
+test('the morning summary says "Together" only for things you both do, as the app does', () => {
+  const day = '2026-11-10';
+  const L = (hm) => ctx.localTime_(day, hm);
+  const reqs = {
+    'households/main/requests/leave1': { type: 'leave', own: true, people: ['ethan'], status: 'yes' },
+    'households/main/requests/fav1': { type: 'favour', from: 'sophie', to: 'ethan', status: 'yes' },
+    'households/main/requests/plan1': { type: 'plan', from: 'ethan', to: 'sophie', status: 'yes' },
+    'households/main/requests/off1': { type: 'plan', from: 'sophie', to: 'ethan', status: 'cancelled' }
+  };
+  ctx.fsGet_ = (p) => reqs[p] || null;
+  const cal = { role: 'normal', layer: 'own' };
+  ctx.fsList_ = () => [{ id: 'ethan__p', data: cal }, { id: 'sophie__p', data: cal }];
+  const feeds = {
+    privateFeeds: [{ id: 'ethan__p__2026-11', data: { calKey: 'p', events: [
+      { id: '1', tag: 'req:leave1', t: 'Holiday: Spain', ad: 1, sd: day, ed: ctx.keyPlus_(day, 1) },
+      { id: '2', tag: 'req:fav1', t: 'Pick up the parcel (for Sophie)', s: L('12:00'), e: L('13:00') },
+      { id: '3', tag: 'req:plan1', t: 'Cinema', s: L('19:00'), e: L('21:00') },
+      { id: '4', tag: 'req:off1', t: 'Pencilled in: Bowling', s: L('15:00'), e: L('16:00') },
+      { id: '5', tag: 'both:tea', t: 'Tea at Mum\'s', s: L('17:00'), e: L('18:00') }
+    ] } }],
+    sharedFeeds: [{ id: 'sophie__p__2026-11', data: { calKey: 'p', events: [{ id: '6', tag: 'both:tea', t: 'Tea at Mum\'s', s: L('17:00'), e: L('18:00') }] } }]
+  };
+  ctx.fsQuery_ = (coll) => feeds[coll] || [];
+  const data = ctx.digestData_({ person: 'ethan' }, { settings: {}, people: { ethan: { name: 'Ethan' }, sophie: { name: 'Sophie' } } });
+  const text = ctx.morningText_(data, day);
+  const together = (text.match(/Together: ([^.]*)/) || [])[1] || '';
+  assert.match(together, /Cinema at 7pm/);
+  assert.match(together, /Tea at Mum's at 5pm/);
+  assert.doesNotMatch(together, /Holiday|parcel|Bowling/, text);
+  // your own holiday is a day off; the favour is one of your things today; the called-off one isn't there at all
+  assert.match(text, /You: on holiday/);
+  assert.match(text, /Pick up the parcel \(for Sophie\) at 12pm/);
+  assert.doesNotMatch(text, /Bowling/);
+});

@@ -1634,11 +1634,33 @@ function digestData_(me, ctx) {
   fsQuery_('shifts', [['day', since, '>=']]).forEach(function (d) { if (d.data.person && d.data.day) overrides[d.data.person + '|' + d.data.day] = d.data; });
   // only the ones still to do (done ones are kept, and there are more of them every week)
   var jobs = fsQuery_('jobs', [['done', false]]).map(function (j) { return j.data; });
-  return {
-    me: { id: me.person, name: 'You', settings: ctx.settings || {}, items: feedsFor('privateFeeds', me.person), mine: true },
-    partner: partner ? { id: partner.id, name: partner.name || 'Your partner', settings: partner.settings || {}, items: feedsFor('sharedFeeds', partner.id), mine: false } : null,
-    overrides: overrides, jobs: jobs
+  var mine = { id: me.person, name: 'You', settings: ctx.settings || {}, items: feedsFor('privateFeeds', me.person), mine: true };
+  var theirs = partner ? { id: partner.id, name: partner.name || 'Your partner', settings: partner.settings || {}, items: feedsFor('sharedFeeds', partner.id), mine: false } : null;
+  // whose calendars each thing made in the app is in, and the requests they came from (read only when needed)
+  var tagOwners = {};
+  [mine, theirs].forEach(function (p) {
+    if (p) p.items.forEach(function (x) { if (x.ev && x.ev.tag) (tagOwners[x.ev.tag] = tagOwners[x.ev.tag] || {})[p.id] = true; });
+  });
+  var reqs = {};
+  var reqOf = function (id) {
+    if (!(id in reqs)) reqs[id] = /^[A-Za-z0-9_-]+$/.test(id) ? fsGet_(HOUSEHOLD + '/requests/' + id) : null;
+    return reqs[id];
   };
+  return { me: mine, partner: theirs, overrides: overrides, jobs: jobs, tagOwners: tagOwners, reqOf: reqOf };
+}
+
+// Something made in the app, the way the app sees it: 'both' (added for you both, or a request between you),
+// 'own' (a favour, something added for one of you, a holiday booked just for yourself), or 'skip' (said no to or
+// called off)
+function togetherOf_(tag, data) {
+  tag = String(tag || '');
+  if (/^both:/.test(tag)) return 'both';
+  if (!/^req:/.test(tag)) return 'own';
+  var r = data.reqOf ? data.reqOf(tag.slice(4)) : null;
+  if (r && (r.status === 'no' || r.status === 'cancelled')) return 'skip';
+  if (Object.keys((data.tagOwners || {})[tag] || {}).length > 1) return 'both';
+  var justOne = r && (r.own === true || (Array.isArray(r.people) && r.people.length === 1));
+  return r && r.type !== 'favour' && r.type !== 'add' && !justOne ? 'both' : 'own';
 }
 
 // One person's day: shift, work, day off, their own events, and things together.
@@ -1655,7 +1677,11 @@ function personDay_(p, key, data) {
     var e0 = e.ad ? localTime_(e.ed || keyPlus_(e.sd, 1), '00:00') : e.e;
     if (!(s0 < dayEnd && e0 > dayStart)) return;
     if (c.role === 'rota') { if (e.ad ? e.sd <= key && key < (e.ed || keyPlus_(e.sd, 1)) : evStartKey_(e) === key) rota.push(e); return; }
-    if (e.tag && /^(both:|req:)/.test(e.tag)) { out.together.push(e); return; }
+    if (e.tag && /^(both:|req:)/.test(e.tag)) {
+      var tk = togetherOf_(e.tag, data);
+      if (tk === 'skip') return;
+      if (tk === 'both') { out.together.push(e); return; }
+    }
     if (c.role === 'work') return;
     if (c.layer && c.layer !== 'own') return;
     if (e.ad && HOLIDAY_RE_.test(e.t || '')) { if (e.sd === key || s0 <= dayStart) out.off = 'holiday'; return; }
