@@ -853,3 +853,15 @@ test('ticking off a job (or using an idea) your partner has just removed never b
   const { readFileSync } = await import('node:fs');
   assert.match(readFileSync(new URL('../js/firebase.js', import.meta.url), 'utf8'), /o\.type === 'patch'\) b\.update\(ref\(o\.path\), o\.data\)/);
 });
+
+test("the rules: before you've both joined, the partner can't take the one who set it up off the list", () => {
+  const db = rulesDb(); db[HH] = { emails: [EM.ethan, EM.sophie], emailsLocked: false };
+  db[`${HH}/people/sophie`] = { email: EM.sophie, name: 'Sophie', settings: {} };
+  const upd = (who, emails) => RULES.allowed({ method: 'update', path: HH, email: EM[who], db, data: Object.assign({}, db[HH], { emails }) });
+  // Ethan set it up and can still correct Sophie's email
+  assert.equal(upd('ethan', [EM.ethan, 'sophie2@gmail.com']), true);
+  // Sophie (with the browser's developer tools) can't swap Ethan out for someone else
+  assert.equal(upd('sophie', [EM.sophie, 'someone@gmail.com']), false);
+  assert.equal(upd('sophie', ['someone@gmail.com', EM.sophie]), false);
+  assert.equal(upd('sophie', [EM.sophie]), false);
+});

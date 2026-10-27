@@ -14,11 +14,13 @@ service cloud.firestore {
     match /households/main {
       allow read: if signedIn() && (resource == null || myEmail() in resource.data.emails);
       allow create: if signedIn() && myEmail() in request.resource.data.emails && request.resource.data.emails.size() <= 2;
-      // the sync's addresses and secret are set by the script; the two emails are fixed once you've both joined
+      // the sync's addresses and secret are set by the script; the two emails are fixed once you've both joined,
+      // and until then the one who set it up stays first (only their partner's email can change, never theirs)
       allow update: if member()
         && request.resource.data.emails.size() <= 2 && myEmail() in request.resource.data.emails
         && !changed().hasAny(['pingSecret', 'pingUrl', 'scriptUrl', 'connectUrl', 'linked'])
-        && (!changed().hasAny(['emails']) || resource.data.get('emailsLocked', false) != true)
+        && (!changed().hasAny(['emails']) || (resource.data.get('emailsLocked', false) != true
+            && request.resource.data.emails[0] == resource.data.emails[0]))
         && (!changed().hasAny(['emailsLocked']) || request.resource.data.emailsLocked == true);
       allow delete: if false;
 
