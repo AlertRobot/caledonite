@@ -308,7 +308,7 @@ function syncAll(opts) {
     var seen = [];
     var cal = stage('calendars', function () { return syncCalendars_(me, ctx, errors); });
     if (cal) { n = cal.count; seen = cal.seen; }
-    if (me.main) stage('rota link', function () { var url = rotaUrlOf_(me, ctx); if (url) syncRotaLink_(me, ctx, url); else dropRotaLink_(me); });
+    if (me.main) stage('rota link', function () { var url = rotaUrlOf_(me, ctx); if (url) syncRotaLink_(me, ctx, url); else dropRotaLink_(me, ctx); });
     var changed = stage('outbox', function () { return processOutbox_(me, ctx); });
     // let the feeds catch up straight away, unless reading every calendar again could run into Google stopping this
     // run (and the reminders and notifications after it): the next run catches up
@@ -867,12 +867,16 @@ function syncRotaLink_(me, ctx, rotaUrl) {
 }
 
 // The rota link was taken out in the app: its shifts go too, so old ones don't linger for months
-function dropRotaLink_(me) {
+function dropRotaLink_(me, ctx) {
   var props = PropertiesService.getUserProperties();
   var saved = props.getProperty('h_rotalink');
-  if (saved === null) return;
+  // (its record still there with nothing remembered here: this account was stopped and connected again since, or
+  // stopped part way through its first copy. Whatever copies there are go with it, never left showing old shifts)
+  var rec = !!(ctx && ctx.calDocs && ctx.calDocs.rotalink);
+  if (saved === null && !rec) return;
   var old = {};
   try { old = JSON.parse(saved || '{}'); } catch (e) { old = {}; }
+  if (saved === null) old = copiesOf_(me.person, 'rotalink');
   var writes = Object.keys(old).map(function (path) { return { 'delete': docName_(path) }; });
   writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + me.person + '__rotalink') });
   fsCommit_(writes);

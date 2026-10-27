@@ -217,7 +217,24 @@ test('taking the rota link out removes its shifts', () => {
   ctx.dropRotaLink_({ person: 'sophie' });
   assert.equal(writes.length, 0, 'nothing to do the next time');
   // and the sync calls it when there's no link
-  assert.match(ctx.syncAll.toString(), /if \(me\.main\) stage\('rota link', function \(\) \{ var url = rotaUrlOf_\(me, ctx\); if \(url\) syncRotaLink_\(me, ctx, url\); else dropRotaLink_\(me\); \}\)/);
+  assert.match(ctx.syncAll.toString(), /if \(me\.main\) stage\('rota link', function \(\) \{ var url = rotaUrlOf_\(me, ctx\); if \(url\) syncRotaLink_\(me, ctx, url\); else dropRotaLink_\(me, ctx\); \}\)/);
+});
+
+test('taking the rota link out after this account was stopped and connected again still removes its record and shifts', () => {
+  // "Stop syncing" took the copies it remembered and forgot them; the record (and a copy it never got to remember) stayed
+  const store = { h_other: '{}' };
+  ctx.PropertiesService = { getUserProperties: () => ({ getProperty: (k) => (k in store ? store[k] : null), deleteProperty: (k) => { delete store[k]; }, setProperty: (k, v) => { store[k] = v; } }) };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  ctx.fsQuery_ = (coll) => (coll === 'sharedFeeds' ? [{ id: 'sophie__rotalink__2026-11', data: {} }, { id: 'sophie__rotalinkx__2026-11', data: {} }] : []);
+  ctx.dropRotaLink_({ person: 'sophie' }, { calDocs: { rotalink: { account: 'Rota link', role: 'rota' } } });
+  assert.deepEqual(writes.map((w) => w.delete).sort(), ['households/main/calendars/sophie__rotalink', 'households/main/sharedFeeds/sophie__rotalink__2026-11']);
+  // no record and nothing remembered: nothing read or written
+  writes.length = 0;
+  ctx.fsQuery_ = () => { throw new Error('no reads'); };
+  ctx.dropRotaLink_({ person: 'sophie' }, { calDocs: {} });
+  assert.equal(writes.length, 0);
 });
 
 test('the rota link is read from where only its owner can read it, and from their record until it has moved', () => {
