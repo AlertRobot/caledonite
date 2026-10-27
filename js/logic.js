@@ -231,7 +231,7 @@ function dinnerFor(state, key, persons) {
       if (ow && ow.end > early) return null;
       return {
         kind: 'together', who: 'both', auto: true, title: 'Early dinner together', start: early, end: addMinutes(early, 40),
-        sub: `Moved from your usual ${fmtTime(dinner)}, as ${nameOf(state, pid)} leaves for work at ${fmtTime(leave)}.`
+        sub: `Moved from your usual ${fmtTime(dinner)}, as ${pid === state.me ? 'you leave' : `${nameOf(state, pid)} leaves`} for work at ${fmtTime(leave)}.`
       };
     }
     if (sh.end > dinner && sh.start < dinner) {
@@ -240,8 +240,8 @@ function dinnerFor(state, key, persons) {
       const hs = [home.getTime(), addMinutes(home, 45).getTime()];
       if (persons[other].busy.some((b) => b[0] < hs[1] && b[1] > hs[0])) return null;
       return {
-        kind: 'together', who: 'both', auto: true, title: `Dinner when ${nameOf(state, pid)} is home`, start: home, end: addMinutes(home, 45),
-        sub: `${nameOf(state, pid)} finishes at ${fmtTime(sh.end)}.`
+        kind: 'together', who: 'both', auto: true, title: pid === state.me ? 'Dinner when you’re home' : `Dinner when ${nameOf(state, pid)} is home`, start: home, end: addMinutes(home, 45),
+        sub: `${pid === state.me ? 'You finish' : `${nameOf(state, pid)} finishes`} at ${fmtTime(sh.end)}.`
       };
     }
   }

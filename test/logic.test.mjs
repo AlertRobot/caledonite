@@ -865,3 +865,19 @@ test("the rules: before you've both joined, the partner can't take the one who s
   assert.equal(upd('sophie', ['someone@gmail.com', EM.sophie]), false);
   assert.equal(upd('sophie', [EM.sophie]), false);
 });
+
+test('dinner moved for your own shift says "you", not your own name', () => {
+  const night = timed('sophie', 'rota', sat, '19:30', '08:00', { t: 'Night', e: atTime(dayKey(addDays(new Date(sat + 'T12:00'), 1)), '08:00').getTime() });
+  const st = load({ events: [night] });
+  const asSophie = (s) => Object.assign({}, s, { me: 'sophie', partner: 'ethan', rev: s.rev + 100000 });
+  assert.match(L.buildDay(st, sat).together.find((t) => t.auto).sub, /as Sophie leaves for work/);
+  assert.match(L.buildDay(asSophie(st), sat).together.find((t) => t.auto).sub, /as you leave for work/);
+  // a late shift: dinner when they're home
+  const late = timed('sophie', 'rota', sat, '12:30', '20:00', { t: 'Late' });
+  const st2 = load({ events: [late] });
+  const d1 = L.buildDay(st2, sat).together.find((t) => t.auto);
+  assert.equal(d1.title, 'Dinner when Sophie is home');
+  const d2 = L.buildDay(asSophie(st2), sat).together.find((t) => t.auto);
+  assert.equal(d2.title, 'Dinner when you’re home');
+  assert.match(d2.sub, /^You finish at 8pm/);
+});
