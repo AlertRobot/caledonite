@@ -1,6 +1,6 @@
 // Settings (with its own menu), plus the sign-in and first-time screens.
 import { esc, dayKey, addDays, mondayOf, fmtDate, agoText, WEEKDAY_NAMES, fmtTime, atTime, MONTH_NAMES, fromDayKey } from './util.js';
-import { isLowCal, nameOf, settingsOf, shiftFor, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours, quietNight } from './logic.js';
+import { isLowCal, nameOf, shortName, settingsOf, shiftFor, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours, quietNight } from './logic.js';
 import { icon, avatar, seg, toggleRow } from './ui.js';
 import { ui } from './uistate.js';
 import { APP, FIREBASE } from './config.js';
@@ -83,8 +83,8 @@ function roleValue(c) {
   return 'own';
 }
 function shareOptions(c) {
-  if (c.role === 'work') return [['hours', 'Working hours'], ['busy', 'Just “Busy”'], ['none', 'Nothing']];
-  return [['all', 'Everything'], ['busy', 'Just “Busy”'], ['none', 'Nothing']];
+  if (c.role === 'work') return [['hours', 'Working hours'], ['busy', '“Busy”'], ['none', 'Nothing']];
+  return [['all', 'Everything'], ['busy', '“Busy”'], ['none', 'Nothing']];
 }
 function shareHelp(state, c) {
   const P = state.partner ? nameOf(state, state.partner) : 'Your partner';
@@ -114,17 +114,17 @@ function secCalendars(state) {
       out.push(`<div class="card flush"><div class="acc-head"><span class="grow col"><span class="b">${esc(acc)}</span><span class="small muted">${esc(lastRunFor(state, me, acc))}</span></span><span class="pill ok">Linked</span></div>
         ${cals.map((c) => calRow(state, c)).join('')}</div>`);
     }
-    out.push(`<button type="button" class="btn dashed-btn" data-act="setPage" data-v="account">${icon.plus(20)}Link another account or calendar</button>`);
+    out.push(`<button type="button" class="btn dashed-btn" data-act="setPage" data-v="account">${icon.plus(20)}Link another account</button>`);
   }
   if (P) {
     const theirs = Object.values(state.calendars).filter((c) => c.owner === P);
     const visible = theirs.filter((c) => c.share !== 'none' && c.role !== 'rota');
     out.push(`<h2 class="h4">${esc(nameOf(state, P))}'s calendars</h2>
-      <div class="card flush">${visible.length ? visible.map((c) => `<div class="list-row wrap"><span class="dot" style="background:${esc(c.color || 'var(--orange)')}"></span><span class="grow col"><span class="b">${esc(c.name)}</span><span class="small muted">You see ${esc(SHORT[c.share] || 'nothing')}. ${esc(nameOf(state, P))} chooses this.</span></span>
+      <div class="card flush">${visible.length ? visible.map((c) => `<div class="list-row wrap"><span class="dot" style="background:${esc(c.color || 'var(--orange)')}"></span><span class="grow col"><span class="b">${esc(c.name)}</span><span class="small muted">You see ${esc(SHORT[c.share] || 'nothing')}.</span></span>
         ${priorityToggle(state, c)}</div>`).join('') : `<p class="pad muted">${esc(nameOf(state, P))} hasn't shared a calendar yet.</p>`}</div>
-      <p class="small muted pad-x">Low priority keeps a calendar off Today and the week. Tap a day in the month to see everything, including those.</p>`);
+      <p class="small muted pad-x">${esc(nameOf(state, P))} chooses what you see of these. Low priority keeps one off Today and the week; tap a day in the month to see everything.</p>`);
   }
-  out.push(`<div class="card stack-s"><span class="b">Moving from TimeTree?</span><p class="small muted">TimeTree no longer lets other apps link to it, so it can't sync. Put upcoming TimeTree events into Google Calendar (or add them here) once, then Caledonite takes over.</p></div>`);
+  out.push(`<details class="older"><summary>Moving from TimeTree?</summary><p class="small muted pad-x">TimeTree no longer lets other apps link to it, so it can't sync. Put upcoming TimeTree events into Google Calendar (or add them here) once, then Caledonite takes over.</p></details>`);
   return out.join('');
 }
 function lastRunFor(state, pid, acc) {
@@ -184,7 +184,7 @@ function secShifts(state) {
   }
   const who = people.includes(ui.settings.shiftPerson) ? ui.settings.shiftPerson : people[0];
   const s = settingsOf(state, who);
-  if (people.length > 1) out.push(seg(people.map((p) => ({ v: p, label: p === me ? 'My shifts' : `${nameOf(state, p)}'s shifts`, on: p === who })), { act: 'shiftPerson', label: 'Whose shifts', cls: 'seg-full' }));
+  if (people.length > 1) out.push(seg(people.map((p) => ({ v: p, label: p === me ? 'My shifts' : `${shortName(state, p)}'s shifts`, on: p === who })), { act: 'shiftPerson', label: 'Whose shifts', cls: 'seg-full' }));
   // rota source
   const rotaCals = Object.values(state.calendars).filter((c) => c.owner === who && c.role === 'rota');
   out.push(`<div class="card stack-s">
@@ -361,7 +361,7 @@ function secNotifications(state) {
 function secTheme(state) {
   const look = getLook();
   return `<p class="muted">Just for this phone. Each of you picks your own.</p>
-    <div class="grid2">${Object.entries(THEMES).map(([k, t]) => `<button type="button" class="theme-tile ${look.theme === k ? 'on' : ''}" aria-pressed="${look.theme === k}" data-act="setTheme" data-v="${k}" style="background:${t.preview.bg};color:${t.preview.ink}">
+    <div class="grid2 theme-grid">${Object.entries(THEMES).map(([k, t]) => `<button type="button" class="theme-tile ${look.theme === k ? 'on' : ''}" aria-pressed="${look.theme === k}" data-act="setTheme" data-v="${k}" style="background:${t.preview.bg};color:${t.preview.ink}">
       <span class="tt-top"><span class="tt-name" style="font-family:${t.preview.font}">${esc(t.label)}</span><span class="tt-dots">${t.preview.dots.map((c) => `<span style="background:${c}"></span>`).join('')}</span></span>
       <span class="tt-mood" style="background:${t.preview.card};border-top:1px solid ${t.preview.line}">${esc(t.mood)}</span></button>`).join('')}</div>
     ${look.theme === 'classic' ? `<span class="b">Classic colours</span>
@@ -374,17 +374,16 @@ function secTheme(state) {
 function secApps(state) {
   const L = state.linked || {};
   const pk = L.peckish || {}; const bg = L.budgie || {};
-  return `<p class="muted">Peckish is on the same website as Caledonite, so on a phone where you use it, Caledonite reads what it has saved there. Budgie has a website of its own and gives Caledonite a limited link.</p>
-    <div class="card stack pad"><div class="row"><span class="grow h3">Peckish</span><span class="pill ${pk.found ? 'ok' : ''}">${pk.found ? 'Found on this phone' : 'Not on this phone'}</span></div>
+  return `<div class="card stack pad"><div class="row"><span class="grow h3">Peckish</span><span class="pill ${pk.found ? 'ok' : ''}">${pk.found ? 'Found on this phone' : 'Not on this phone'}</span></div>
       <p class="small muted">${pk.found ? 'Tonight\u2019s dinner shows on Today. Before a long shift, it reminds you to make extra for a packed lunch.' : 'Open Peckish on this phone once, and tonight\u2019s dinner shows on Today.'}</p>
-      <a class="b small" href="../es-kitchen/" target="_blank" rel="noopener">Open Peckish</a></div>
+      <a class="small-link b" href="../es-kitchen/" target="_blank" rel="noopener">Open Peckish</a></div>
     <div class="card stack pad"><div class="row"><span class="grow h3">Budgie</span><span class="pill ${bg.found && !bg.error ? 'ok' : ''}">${bg.found ? (bg.error ? 'Problem' : 'Linked') : 'Not linked'}</span></div>
       ${bg.found ? `<p class="small muted">${bg.error ? esc(bg.error) : 'Your paydays and bills show in your calendar, only on this phone. The ideas jar knows what\u2019s left for fun until payday.' + (bg.stale ? ' (From the last time Budgie could be reached.)' : '')}</p>
       ${bg.fun ? `<p class="small">Left for fun: <b>£${esc(String(Math.floor(bg.fun.left)))}</b> (${esc(bg.fun.names.join(', '))}).</p>` : ''}
-      <div class="row wrap"><a class="b small" href="https://budgie-money.github.io/" target="_blank" rel="noopener">Open Budgie</a><button type="button" class="b small" data-act="budgieUnlink">Unlink</button></div>` :
+      <div class="row-wrap"><a class="btn sec sm" href="https://budgie-money.github.io/" target="_blank" rel="noopener">Open Budgie</a><button type="button" class="btn sec sm" data-act="budgieUnlink">Unlink</button></div>` :
       `<p class="small muted">In Budgie, go to Settings, then Linked apps, and tap Link Caledonite. Copy the link it makes and paste it here. It only lets Caledonite see your paydays, bills and what's left for fun.</p>
       <div class="row"><label class="sr" for="bg-link">Your Caledonite link from Budgie</label><input id="bg-link" class="grow" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://budgie-money.github.io/#connect=..." data-bind="settings.budgieDraft" value="${esc(ui.settings.budgieDraft || '')}"><button type="button" class="btn" data-act="budgieLink">Link</button></div>
-      <a class="b small" href="https://budgie-money.github.io/" target="_blank" rel="noopener">Open Budgie</a>`}</div>
+      <a class="small-link b" href="https://budgie-money.github.io/" target="_blank" rel="noopener">Open Budgie</a>`}</div>
     <button type="button" class="btn sec self-start" data-act="linkedReload">Check again</button>`;
 }
 
@@ -465,7 +464,7 @@ export function viewSetup(state) {
   return `<div class="welcome left">
     <h1 class="h1">Set up ${esc(APP.name)}</h1>
     <p class="muted">Signed in as ${esc(state.user && state.user.email)}. This only happens once.</p>
-    ${state.setupCheck ? `<p class="small muted">Already set up on another phone? This account&rsquo;s household was ${esc(state.setupCheck)}. If that&rsquo;s wrong, check the email above is the one you use for ${esc(APP.name)}, then <button type="button" class="link-btn" data-act="setupRecheck">Check again</button>.</p>` : ''}
+    ${state.setupCheck ? `<div class="stack-s"><p class="small muted">Already set up on another phone? This account&rsquo;s household was ${esc(state.setupCheck)}. If that&rsquo;s wrong, check the email above is the one you use for ${esc(APP.name)}, then check again.</p><button type="button" class="btn sec sm self-start" data-act="setupRecheck">Check again</button></div>` : ''}
     <div class="card stack pad">
       <div class="field"><label for="su-me">Your first name</label><input id="su-me" type="text" data-bind="setup.myName" value="${esc(s.myName || (state.user && state.user.name || '').split(' ')[0])}"></div>
       <label class="check"><input type="checkbox" data-act="setupFlag" data-f="myShifts" ${s.myShifts ? 'checked' : ''}> I work shifts</label>
@@ -481,7 +480,7 @@ export function viewSetup(state) {
 export function viewNotMember(state) {
   return `<div class="welcome"><h1 class="h1">Not on the list yet</h1>
     <p class="lead">${esc(state.user && state.user.email)} isn't part of this ${esc(APP.name)}. Ask your partner to add this email in Settings, Account.</p>
-    <button type="button" class="btn sec" data-act="signOut">Sign in with a different account</button></div>`;
+    <button type="button" class="btn sec" data-act="signOut">Use a different account</button></div>`;
 }
 export function viewLoading() {
   return `<div class="welcome"><span class="logo spin">${icon.gem(48)}</span><p class="muted">Loading your calendars...</p></div>`;
