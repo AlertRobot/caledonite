@@ -756,14 +756,14 @@ test('a sync of an account never runs twice at once, even when a ping and the 10
   ctx.fsList_ = () => { ran++; return [{ id: 'ethan', data: { email: 'e@x.com' } }]; };
   ctx.fsGet_ = () => { throw new Error('stop here'); };
   // another run of this account is part way through
-  cache.run_e_x_com = String(Date.now());
+  cache['run_e@x.com'] = String(Date.now());
   assert.equal(ctx.syncAll(), 'already running');
   assert.equal(ran, 0);
   // once it has finished, the next one runs, and lets the one after it run too
-  delete cache.run_e_x_com;
+  delete cache['run_e@x.com'];
   assert.throws(() => ctx.syncAll(), /stop here/);
   assert.equal(ran, 1);
-  assert.equal(cache.run_e_x_com, undefined);
+  assert.equal(cache['run_e@x.com'], undefined);
 });
 
 test('connect, stop and the owner-only jobs only ever run as the person themselves', () => {
@@ -2106,4 +2106,19 @@ test('the rules let you mark a calendar\'s sharing or use as chosen by you, on y
   assert.equal(can('e@gmail.com', { role: 'normal', layer: 'other', userSet: true, roleSet: true }), true);
   assert.equal(can('s@gmail.com', { share: 'none', userSet: true, shareSet: true }), false);
   assert.equal(can('e@gmail.com', { owner: 'sophie', shareSet: true }), false);
+});
+
+test('someone whose address differs from one of yours only by a dot or a dash never holds back your sync', () => {
+  fakeCache();
+  ctx.LockService = { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+  ctx.fsList_ = () => [{ id: 'sophie', data: { email: 's.smith@nhs.example' } }];
+  ctx.fsGet_ = () => ({});
+  // a stranger at s-smith@nhs.example opens the connect page
+  asUser('s-smith@nhs.example');
+  assert.throws(() => ctx.whoAmI_(), /not part of Caledonite/);
+  assert.ok(ctx.claimRun_(), 'the stranger has a run of their own');
+  // Sophie is still herself, and her own run can start
+  asUser('s.smith@nhs.example');
+  assert.equal(ctx.whoAmI_().person, 'sophie');
+  assert.ok(ctx.claimRun_());
 });

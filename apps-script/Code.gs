@@ -333,7 +333,8 @@ function syncAll(opts) {
 // It runs out after 400 seconds, longer than a run can last, in case a run is stopped part way.
 function claimRun_() {
   var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
-  var key = 'run_' + email.replace(/[^a-z0-9]+/g, '_');
+  // (the address as it is: one with dashes for dots is someone else, whose runs must never hold this one back)
+  var key = 'run_' + email;
   var cache = CacheService.getScriptCache();
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return '';
@@ -361,7 +362,8 @@ function whoAmI_() {
   };
   // found not to be one of you a moment ago: no reading the household again (someone who isn't one of you,
   // opening the connect page over and over, can't use up the day's free database reads)
-  var nmKey = 'nm_' + email.replace(/[^a-z0-9]+/g, '_');
+  // (by the address as it is: someone whose address differs only by a dash or a dot never holds back one of you)
+  var nmKey = 'nm_' + email;
   var cache = null;
   try { cache = CacheService.getScriptCache(); } catch (err) { cache = null; }
   if (cache && cache.get(nmKey)) throw notOne(false);
