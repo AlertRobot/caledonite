@@ -543,6 +543,17 @@ function syncCalendars_(me, ctx, errors) {
     Object.keys(copiesOf_(me.person, ck)).forEach(function (path) { writes.push({ 'delete': docName_(path) }); });
     writes.push({ 'delete': docName_(HOUSEHOLD + '/calendars/' + me.person + '__' + ck) });
   });
+  // a calendar shared as Nothing has no copy for your partner, whichever of your accounts wrote it: an account that has
+  // stopped syncing (its access taken away, say) can't take out what it copied before you chose Nothing, so every one
+  // of your accounts checks, each run (only calendars known to be set to Nothing: one just added elsewhere is left be)
+  try {
+    var gone = {};
+    writes.forEach(function (w) { if (w['delete']) gone[w['delete']] = true; });
+    fsQuery_('sharedFeeds', [['owner', me.person]]).forEach(function (d) {
+      var c = (ctx.calDocs || {})[(d.data || {}).calKey], path = docName_(HOUSEHOLD + '/sharedFeeds/' + d.id);
+      if (c && c.share === 'none' && String(d.id).indexOf(me.person + '__') === 0 && !gone[path]) { writes.push({ 'delete': path }); gone[path] = true; }
+    });
+  } catch (e) { Logger.log('shared as Nothing: ' + String(e && e.message || e)); }
   fsCommit_(writes);
   // only now that the writes went through, remember what was written
   if (Object.keys(pending).length) props.setProperties(pending);
@@ -583,7 +594,8 @@ function defaultsFor_(cal, isPrimary, me, ctx) {
   // one of your partner's own calendars, shared with this account in Google: you see it, but it's never copied back
   // to them (it would show their own things as yours, as "Busy"), nor taken for your rota or your work
   if (partnersCal_(me, ctx, id, cal.isOwnedByMe())) return { show: true, share: 'none', role: 'normal', layer: isFamilyCal_(id, name) ? 'family' : 'other' };
-  if (isFamilyCal_(id, name)) return { show: true, share: 'all', role: 'normal', layer: 'family' };
+  // your family's calendar: on your screen, but your partner doesn't need it on theirs, unless you choose so
+  if (isFamilyCal_(id, name)) return { show: true, share: 'none', role: 'normal', layer: 'family' };
   if (/#holiday@|holidays in/.test(id + ' ' + name)) return { show: true, share: 'none', role: 'normal', layer: 'own' };
   if (/rota|roster|shift|loop|healthroster/.test(name)) return { show: true, share: 'all', role: 'rota', layer: 'own' };
   if (/work|office/.test(name) || (!personal && isPrimary)) return { show: true, share: 'hours', role: 'work', layer: 'own' };
@@ -593,7 +605,7 @@ function defaultsFor_(cal, isPrimary, me, ctx) {
     return { show: true, share: 'hours', role: 'work', layer: 'own' };
   }
   if (!cal.isOwnedByMe()) {
-    if (/family|mum|dad|parents|home/.test(name)) return { show: true, share: 'all', role: 'normal', layer: 'family' };
+    if (/family|mum|dad|parents|home/.test(name)) return { show: true, share: 'none', role: 'normal', layer: 'family' };
     if (/friend|mates|crew|squad|book club/.test(name)) return { show: true, share: 'all', role: 'normal', layer: 'friends' };
     // someone else's calendar (a colleague's in a work account, say): their busy times aren't yours, so your partner
     // sees none of it until you choose otherwise
