@@ -252,7 +252,7 @@ function secRoutine(state) {
       ${toggleRow({ act: 'myToggle', on: s.christmas !== false, label: 'Christmas, Easter and other big days', sub: 'Also New Year, Valentine’s, Mother’s Day and Father’s Day. They take turns at the top of Today.', data: 'data-f="christmas"' })}
       ${[state.me, state.partner].filter(Boolean).map((pid) => { const b = (h.birthdays || {})[pid] || ''; return `<div class="list-row"><label for="bd-${esc(pid)}" class="grow col"><span class="b">${pid === state.me ? 'Your birthday' : `${esc(nameOf(state, pid))}'s birthday`}</span><span class="small muted">${b ? 'Counts down every year.' : 'Or put it in Google Calendar as an all-day “' + esc(nameOf(state, pid)) + '’s birthday”.'}</span></label><input id="bd-${esc(pid)}" type="date" class="time-sm" value="${b ? `2000-${esc(b)}` : ''}" data-act="hhBday" data-p="${esc(pid)}"></div>`; }).join('')}
       <div class="list-row"><label for="anniv" class="grow col"><span class="b">Your anniversary</span><span class="small muted">The date you got together. Or an all-day event with “anniversary” in the name.</span></label><input id="anniv" type="date" class="time-sm" value="${esc(h.anniversary || '')}" data-act="hhField" data-f="anniversary"></div>
-      <p class="pad small muted">To count down to anything else, like a holiday, tap it in the calendar and choose “Count down to this”. Holidays you book together count down by themselves.</p>
+      <p class="pad small muted">To count down to anything else, tap it in the calendar and turn on “Count down to it on Today”. Holidays you book together count down by themselves.</p>
     </div></section>
     <section class="stack-s"><h2 class="h4">Dinner</h2>
     <div class="card flush">
@@ -319,7 +319,7 @@ function secNotifications(state) {
           ${s.quiet.skip && s.quiet.skip === quietNight(s) ? `<p class="pad small note-box">Quiet hours are off for one night (${esc(fmtDate(new Date(s.quiet.skip + 'T12:00')))}).</p>` : ''}` : ''}
         ${s.hasShifts ? toggleRow({ act: 'notifToggle', on: s.notif.quiet, label: 'Also quiet while I sleep after nights', sub: 'Messages to you wait until you wake.', data: 'data-f="quiet"' }) : ''}
       </div>
-      <p class="small muted">${inQuietHours(s) ? 'Quiet hours are on now.' : ''} Today shows a “Not tonight” button in the evening too.</p>
+      ${inQuietHours(s) ? '<p class="small muted">Quiet hours are on now.</p>' : ''}
     </section>
     <section class="stack-s"><h2 class="h4">Summaries</h2>
       <div class="card flush">
@@ -366,8 +366,7 @@ function secTheme(state) {
       <span class="tt-mood" style="background:${t.preview.card};border-top:1px solid ${t.preview.line}">${esc(t.mood)}</span></button>`).join('')}</div>
     ${look.theme === 'classic' ? `<span class="b">Classic colours</span>
       <div class="grid5">${Object.entries(PALETTES).map(([k, p]) => `<button type="button" class="swatch ${look.palette === k ? 'on' : ''}" aria-pressed="${look.palette === k}" data-act="setPalette" data-v="${k}"><span style="background:${p.swatch}"></span>${esc(p.name)}</button>`).join('')}</div>
-      ${seg([{ v: 'auto', label: 'Match phone', on: look.mode === 'auto' }, { v: 'light', label: 'Light', on: look.mode === 'light' }, { v: 'dark', label: 'Dark', on: look.mode === 'dark' }], { act: 'setMode', label: 'Light or dark', cls: 'seg-full' })}` : ''}
-    <p class="small muted">Body text stays in the easy-to-read font in every theme.</p>`;
+      ${seg([{ v: 'auto', label: 'Match phone', on: look.mode === 'auto' }, { v: 'light', label: 'Light', on: look.mode === 'light' }, { v: 'dark', label: 'Dark', on: look.mode === 'dark' }], { act: 'setMode', label: 'Light or dark', cls: 'seg-full' })}` : ''}`;
 }
 
 // ---------- linked apps ----------

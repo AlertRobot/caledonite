@@ -4,7 +4,7 @@ import {
   dayList, itemTime, itemTitle, itemSub, nameOf, settingsOf, reminderFor, fireTimes, evRef, calOf, reminderId,
   REMIND_OPTIONS, REMIND_NOTES, isBirthday, isLowCal
 } from './logic.js';
-import { icon, whoChip, seg } from './ui.js';
+import { icon, whoChip, seg, toggleRow } from './ui.js';
 import { ui } from './uistate.js';
 
 // The thing that was tapped, as shown on that day, plus the calendar event behind it.
@@ -69,8 +69,7 @@ export function viewEvent(state) {
   const pri = priorityLink(state, src);
   if (!canRemind) {
     out.push(`<p class="small note-box">${esc(nameOf(state, owner))} shares this as “Busy”, so you can't set a reminder on it.</p>`);
-    out.push(countdownBlock(state, ref, item, date));
-    out.push(pri);
+    out.push(extrasCard(countdownBlock(state, ref, item, date), pri));
     return `<div class="stack-l">${out.join('')}</div>`;
   }
   out.push(`<section class="stack-s"><h2 class="h4">Remind me</h2>
@@ -87,8 +86,7 @@ export function viewEvent(state) {
     </section>`);
     if (!(rem && rem.auto)) out.push(`<button type="button" class="btn sec self-start" data-act="evRemOff">No reminder for this</button>`);
   }
-  out.push(countdownBlock(state, ref, item, date));
-  out.push(pri);
+  out.push(extrasCard(countdownBlock(state, ref, item, date), pri));
   if (!hasPush()) out.push(`<p class="small note-box">Notifications are off on this phone. <a href="#settings/notifications">Turn them on</a> to get reminders on your phone. They always show on Today.</p>`);
   if (isBirthday(base) && !(s.autoRemind.birthdays || []).length) out.push(`<p class="small muted">Tip: you can have a reminder for every birthday, in <a href="#settings/notifications">Settings, Notifications</a>.</p>`);
   return `<div class="stack-l">${out.join('')}</div>`;
@@ -105,7 +103,7 @@ function priorityLink(state, src) {
   const c = state.calendars[cid];
   if (!c || (c.primary && c.owner === state.me)) return '';
   const low = isLowCal(state, cid);
-  return `<button type="button" class="btn link-btn self-start" data-act="calPriority" data-k="${esc(cid)}" data-v="${low ? 'normal' : 'low'}">${low ? `Make “${esc(c.name)}” normal priority` : `Make “${esc(c.name)}” low priority`}</button>`;
+  return toggleRow({ act: 'calPriority', on: low, label: 'Low priority', sub: `Keeps “${c.name}” off Today and the week`, data: `data-k="${esc(cid)}" data-v="${low ? 'normal' : 'low'}"` });
 }
 // Things made in this app, or your own events in a calendar you can edit
 export function canChange(state, src, cal) {
@@ -152,6 +150,11 @@ function countdownBlock(state, ref, item, date) {
   if (date < new Date(new Date().toDateString())) return '';
   const id = reminderId(ref);
   const has = !!(((state.people[state.me] || {}).countdowns || {})[id]);
-  return `<button type="button" class="btn ${has ? 'sec' : 'link-btn'} self-start" data-act="evCountdown" data-v="${has ? 'off' : 'on'}">${has ? 'Stop the countdown' : 'Count down to this on Today'}</button>`;
+  return toggleRow({ act: 'evCountdown', on: has, label: 'Count down to it on Today', data: `data-v="${has ? 'off' : 'on'}"` });
+}
+// the countdown and the calendar's priority: switches in one card, like Settings
+function extrasCard(...rows) {
+  const r = rows.filter(Boolean);
+  return r.length ? `<div class="card flush">${r.join('')}</div>` : '';
 }
 function hasPush() { try { return localStorage.getItem('caledonite.push') === '1' && Notification.permission === 'granted'; } catch (e) { return false; } }
