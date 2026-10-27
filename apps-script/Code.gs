@@ -168,6 +168,9 @@ function requireSelf_() {
 }
 function requireCreator_() {
   var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  // one of you first (remembered for a moment when not): anyone with a Google account can call this from the connect
+  // page, and must never be able to use up the day's free database reads by calling it over and over
+  whoAmI_();
   var hh = fsGet_(HOUSEHOLD);
   if (!hh) throw new Error('Open Caledonite and finish the first-time setup first.');
   if (String((hh.emails || [])[0] || '').toLowerCase() !== email) throw new Error('Only the person who set up Caledonite can run this.');

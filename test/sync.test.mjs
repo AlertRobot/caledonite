@@ -2024,3 +2024,18 @@ test("one of your calendars your partner's sync saw first is put right in their 
   assert.equal(fixed[0].update.fields.share.stringValue, 'none');
   assert.equal(JSON.stringify(fixed[0].updateMask.fieldPaths), '["share","role","layer"]');
 });
+
+test("someone who isn't one of you, calling the owner's set-up or backup from the connect page, can't use up the database reads", () => {
+  asUser('stranger@gmail.com');
+  fakeCache();
+  let reads = 0;
+  ctx.fsList_ = () => { reads++; return [{ id: 'ethan', data: { email: 'e@x.com' } }]; };
+  ctx.fsGet_ = () => { reads++; return { emails: ['e@x.com'] }; };
+  assert.throws(() => ctx.setupProject(), /not part of Caledonite/);
+  const first = reads;
+  for (let i = 0; i < 5; i++) { assert.throws(() => ctx.setupProject()); assert.throws(() => ctx.backupNow()); }
+  assert.equal(reads, first, 'no more reads once known not to be one of you');
+  // the owner still can
+  asUser('e@x.com');
+  assert.doesNotThrow(() => ctx.requireCreator_());
+});
