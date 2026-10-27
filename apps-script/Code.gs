@@ -1610,9 +1610,14 @@ function digests_(me, ctx) {
   var writes = [];
   if (wantMorning) writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: me.person, kind: 'summary', title: "Good morning. Here's " + WEEKDAYS_[isoWd_(today) - 1], body: morningText_(data, today), link: '#today', sendAfter: now, sent: false, created: now }));
   if (wantWeek) writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: me.person, kind: 'summary', title: 'Your week ahead', body: weekText_(data, nextMonday_(today)), link: '#calendar', sendAfter: now, sent: false, created: now }));
-  fsCommit_(writes);
+  // remembered before it's sent (as for reminders), so a run stopped just after sending never sends it again
+  var before = { digest_morning: props.getProperty('digest_morning'), digest_week: props.getProperty('digest_week') };
   if (wantMorning) props.setProperty('digest_morning', today);
   if (wantWeek) props.setProperty('digest_week', today);
+  try { fsCommit_(writes); } catch (err) {
+    Object.keys(before).forEach(function (k) { if (before[k] === null) props.deleteProperty(k); else props.setProperty(k, before[k]); });
+    throw err;
+  }
 }
 
 // Everything the summaries need: both people's settings, events, calendars, shifts and jobs.

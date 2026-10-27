@@ -1625,3 +1625,33 @@ test('the morning summary says "Together" only for things you both do, as the ap
   assert.match(text, /Pick up the parcel \(for Sophie\) at 12pm/);
   assert.doesNotMatch(text, /Bowling/);
 });
+
+test('the morning summary is remembered as sent before it goes, so a run stopped just after never sends it twice', () => {
+  const realNow = vm.runInContext('Date.now', ctx);
+  const at = ctx.localTime_('2026-11-10', '07:40');
+  ctx.__fakeNow = at;
+  vm.runInContext('Date.now = function () { return __fakeNow; }', ctx);
+  const realData = ctx.digestData_, realText = ctx.morningText_;
+  ctx.digestData_ = () => ({});
+  ctx.morningText_ = () => 'You: nothing planned.';
+  try {
+    const { store, api } = smallProps({});
+    ctx.PropertiesService = { getUserProperties: () => api };
+    ctx.docName_ = (p) => p;
+    let seenAtCommit = null;
+    ctx.fsCommit_ = () => { seenAtCommit = store.digest_morning || null; };
+    const me = { person: 'ethan', main: true };
+    const c = { settings: { morning: { on: true, at: '07:30' }, weekAhead: { on: false } }, people: { ethan: {} } };
+    ctx.digests_(me, c);
+    assert.equal(seenAtCommit, '2026-11-10', 'already remembered when it was sent');
+    // and when it couldn't be saved, it's tried again next run
+    delete store.digest_morning;
+    ctx.fsCommit_ = () => { throw new Error('Firestore 503: unavailable'); };
+    assert.throws(() => ctx.digests_(me, c), /503/);
+    assert.equal(store.digest_morning, undefined);
+  } finally {
+    ctx.realNow = realNow;
+    vm.runInContext('Date.now = realNow', ctx);
+    ctx.digestData_ = realData; ctx.morningText_ = realText;
+  }
+});
