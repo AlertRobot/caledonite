@@ -1922,6 +1922,8 @@ test("your partner's own calendar, shared with you in Google, is never copied ba
     assert.equal(x.role, 'normal', id);
     assert.notEqual(x.layer, 'own', id);
   }
+  // her main calendar, even when she's let you manage it
+  assert.equal(d('s@gmail.com', 'Sophie', true).share, 'none');
   // your own rota from a link, a friends calendar, and someone's work calendar: as before
   assert.equal(d('abc@import.calendar.google.com', 'Loop rota').role, 'rota');
   assert.equal(d('mates1@group.calendar.google.com', 'Friends').layer, 'friends');

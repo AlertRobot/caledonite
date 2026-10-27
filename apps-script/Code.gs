@@ -547,7 +547,7 @@ function defaultsFor_(cal, isPrimary, me, ctx) {
   if (/#contacts@|birthday/.test(id + ' ' + name)) return { show: false, share: 'none', role: 'normal', layer: 'own' };
   // one of your partner's own calendars, shared with this account in Google: you see it, but it's never copied back
   // to them (it would show their own things as yours, as "Busy"), nor taken for your rota or your work
-  if (!cal.isOwnedByMe() && partnersCal_(me, ctx, id)) return { show: true, share: 'none', role: 'normal', layer: isFamilyCal_(id, name) ? 'family' : 'other' };
+  if (partnersCal_(me, ctx, id, cal.isOwnedByMe())) return { show: true, share: 'none', role: 'normal', layer: isFamilyCal_(id, name) ? 'family' : 'other' };
   if (isFamilyCal_(id, name)) return { show: true, share: 'all', role: 'normal', layer: 'family' };
   if (/#holiday@|holidays in/.test(id + ' ' + name)) return { show: true, share: 'none', role: 'normal', layer: 'own' };
   if (/rota|roster|shift|loop|healthroster/.test(name)) return { show: true, share: 'all', role: 'rota', layer: 'own' };
@@ -566,9 +566,9 @@ function defaultsFor_(cal, isPrimary, me, ctx) {
 }
 
 // A calendar that's your partner's: their main one (at one of their addresses in Caledonite), or one their sync
-// has recorded as theirs (one they own). Asked once, when a calendar is first seen. Never Google's family group
-// calendar, which is all of yours.
-function partnersCal_(me, ctx, id) {
+// has recorded as theirs (one they own and you don't). Asked once, when a calendar is first seen. Never Google's
+// family group calendar, which is all of yours.
+function partnersCal_(me, ctx, id, owned) {
   var lid = String(id || '').toLowerCase();
   if (/^family\d*@group\.calendar\.google\.com$/.test(lid)) return false;
   var mine = accountsOf_(me, ctx || {});
@@ -580,6 +580,7 @@ function partnersCal_(me, ctx, id) {
   });
   (((ctx || {}).hh || {}).linked || []).forEach(function (x) { if (x && x.person && x.person !== me.person && x.email) theirs[String(x.email).toLowerCase()] = true; });
   if (theirs[lid] && !mine[lid]) return true;
+  if (owned) return false;
   try {
     return fsQuery_('calendars', [['calId', id]]).some(function (d) {
       return d.data && d.data.owner && d.data.owner !== me.person && d.data.canWrite === true && d.id === d.data.owner + '__' + d.data.calKey && !mine[String(d.data.account || '').toLowerCase()];
