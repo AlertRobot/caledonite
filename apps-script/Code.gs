@@ -689,6 +689,9 @@ function normApi_(it) {
   if (m) o.tag = m[1];
   // "#busy", or marked Private in Google Calendar: your partner only ever sees "Busy"
   if (/#busy\b/i.test(desc) || it.visibility === 'private' || it.visibility === 'confidential') o.pb = 1;
+  // put in from Gmail (flights, hotels, restaurant bookings): Google keeps these to you alone, even on a calendar you
+  // share, unless you've made one public. Your partner sees only "Busy" (a booking for a surprise stays one)
+  if (it.eventType === 'fromGmail' && it.visibility !== 'public') o.pb = 1;
   // your contacts' birthdays and anniversaries, which Google now puts in your own calendar: never in your
   // partner's copy (they're other people's dates, as the old Birthdays calendar was). Your own birthday is.
   if (it.eventType === 'birthday' && !(it.birthdayProperties && it.birthdayProperties.type === 'self')) o.np = 1;
@@ -720,10 +723,13 @@ function norm_(ev) {
   var m = desc.match(/\[caledonite:([^\]\s]+)\]/);
   if (m) o.tag = m[1];
   if (/#busy\b/i.test(desc)) o.pb = 1;
+  var vis = null;
   try {
-    var vis = ev.getVisibility();
+    vis = ev.getVisibility();
     if (vis === CalendarApp.Visibility.PRIVATE || vis === CalendarApp.Visibility.CONFIDENTIAL) o.pb = 1;
   } catch (e) { /* ignore */ }
+  // from Gmail, as with the Calendar API: yours alone unless made public
+  try { if (CalendarApp.EventType && CalendarApp.EventType.FROM_GMAIL && ev.getEventType() === CalendarApp.EventType.FROM_GMAIL && vis !== CalendarApp.Visibility.PUBLIC) o.pb = 1; } catch (e) { /* older events */ }
   try { if (CalendarApp.EventType && ev.getEventType() === CalendarApp.EventType.BIRTHDAY) o.np = 1; } catch (e) { /* older events */ }
   return o;
 }

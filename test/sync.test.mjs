@@ -2041,3 +2041,23 @@ test("someone who isn't one of you, calling the owner's set-up or backup from th
   asUser('e@x.com');
   assert.doesNotThrow(() => ctx.requireCreator_());
 });
+
+// ---------- round 13 checks ----------
+test('something put in your calendar from Gmail (a booking) is only "Busy" to your partner, as Google keeps it to you', () => {
+  withDigest();
+  const api = (extra) => ctx.normApi_(Object.assign({ id: 'g1', iCalUID: 'g1@google.com', summary: 'Table for two at Rosa', location: '1 High St', start: { dateTime: '2026-11-06T19:00:00Z' }, end: { dateTime: '2026-11-06T21:00:00Z' } }, extra));
+  const shared = (ev) => ctx.shareFilter_({ share: 'all' }, [ev])[0];
+  assert.equal(shared(api({ eventType: 'fromGmail' })).t, 'Busy');
+  assert.ok(!('l' in shared(api({ eventType: 'fromGmail', visibility: 'default' }))));
+  // one you've made public, and an ordinary event: as before
+  assert.equal(shared(api({ eventType: 'fromGmail', visibility: 'public' })).t, 'Table for two at Rosa');
+  assert.equal(shared(api({})).t, 'Table for two at Rosa');
+  // still named in your own copy
+  assert.equal(api({ eventType: 'fromGmail' }).t, 'Table for two at Rosa');
+  // and the slow way (CalendarApp) too
+  ctx.CalendarApp = { Visibility: { PRIVATE: 'P', CONFIDENTIAL: 'C', PUBLIC: 'PUB', DEFAULT: 'D' }, GuestStatus: { NO: 'NO' }, EventType: { DEFAULT: 'DEF', FROM_GMAIL: 'GMAIL' } };
+  const old = (type, vis) => ({ getMyStatus: () => null, getDescription: () => '', getStartTime: () => new Date('2026-11-06T19:00:00Z'), getEndTime: () => new Date('2026-11-06T21:00:00Z'), getId: () => 'g@google.com', getTitle: () => 'Flight to Rome', isRecurringEvent: () => false, isAllDayEvent: () => false, getLocation: () => '', getVisibility: () => vis, getEventType: () => type });
+  assert.equal(shared(ctx.norm_(old('GMAIL', 'D'))).t, 'Busy');
+  assert.equal(shared(ctx.norm_(old('GMAIL', 'PUB'))).t, 'Flight to Rome');
+  assert.equal(shared(ctx.norm_(old('DEF', 'D'))).t, 'Flight to Rome');
+});
