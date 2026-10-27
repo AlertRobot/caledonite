@@ -784,3 +784,57 @@ test("the server says this account can't open the household: Not on the list, ne
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
+
+// every button, tab and chip on a screen: its text stays inside it, it stays inside its row or card, a one-line label stays
+// on one line (a card button with parts is several), and nothing makes the page scroll sideways
+function labelProblems() {
+  const out = [];
+  if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) out.push('the page scrolls sideways');
+  const lines = (el) => {
+    const rs = []; const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); let n;
+    while ((n = tw.nextNode())) { if (!n.textContent.trim()) continue; const r = document.createRange(); r.selectNodeContents(n); for (const q of r.getClientRects()) if (q.width > 0.5) rs.push(q); }
+    rs.sort((a, b) => a.top - b.top); let k = 0; let bottom = -1e9;
+    for (const q of rs) { if ((q.top + q.bottom) / 2 > bottom) { k++; bottom = q.bottom; } else bottom = Math.max(bottom, q.bottom); }
+    return k;
+  };
+  for (const x of document.querySelectorAll('main button, main a.btn, main .chip, main .pill, main .seg, main .tab-chip, main .layer-chip')) {
+    if (!x.getClientRects().length) continue;
+    const s = getComputedStyle(x); const say = `"${x.textContent.trim().replace(/\s+/g, ' ') || x.getAttribute('aria-label')}"`;
+    if (s.textOverflow !== 'ellipsis' && x.clientWidth && x.scrollWidth > x.clientWidth + 1 && !/auto|scroll/.test(s.overflowX)) out.push(`${say} runs past its edge`);
+    const p = x.parentElement; const r = x.getBoundingClientRect(); const pr = p.getBoundingClientRect();
+    if (!/auto|scroll/.test(getComputedStyle(p).overflowX) && (r.right > pr.right + 1 || r.left < pr.left - 1)) out.push(`${say} sticks out of its row`);
+    const card = [...x.querySelectorAll('*')].some((d) => !d.closest('svg') && /^(block|grid|flex)$/.test(getComputedStyle(d).display) && d.textContent.trim());
+    if (!card && !x.matches('.seg') && lines(x) > 1) out.push(`${say} wraps onto ${lines(x)} lines`);
+  }
+  return out;
+}
+
+test('buttons, tabs and chips fit their labels on one line, with your full names, at 360 and 412 wide and at 130% text zoom', async () => {
+  // (Chrome's 130% text zoom lays a 412px phone out as if it were 317px wide)
+  for (const [w, h] of [[360, 780], [412, 915], [317, 704]]) {
+    for (const who of ['ethan', 'sophie']) {
+      const ctx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: w, height: h }, locale: 'en-GB', timezoneId: 'Europe/London', bypassCSP: true });
+      const page = await ctx.newPage();
+      await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+      await page.goto(`${URL}?demo=${who}#today`);
+      await page.waitForSelector('.bottom-nav');
+      await mods(page, async (store) => {
+        await store.store.backend.update('people/ethan', { name: 'Ethan Dunning' });
+        await store.store.backend.update('people/sophie', { name: 'Sophie Magill' });
+      });
+      const bad = [];
+      const look = async (name) => { for (const p of await page.evaluate(labelProblems)) bad.push(`${w}px ${who} ${name}: ${p}`); };
+      const tap = async (sel) => { await page.evaluate((s) => { const b = document.querySelector(s); if (b) b.click(); }, sel); await page.waitForTimeout(150); };
+      for (const hsh of ['#today', '#calendar', '#requests', '#ask', '#add', '#jobs', '#jar', '#settings', '#settings/calendars', '#settings/shifts', '#settings/routine', '#settings/requests', '#settings/notifications', '#settings/holidays', '#settings/theme', '#settings/apps', '#settings/account']) {
+        await go(page, hsh); await look(hsh);
+      }
+      await go(page, '#calendar'); await tap('[data-act="calView"][data-v="week"]'); await look('calendar week');
+      for (const k of ['event', 'job', 'leave', 'shift']) { await go(page, '#add'); await tap(`[data-act="addKind"][data-v="${k}"]`); await tap('[data-act="addMore"]'); await look(`add ${k}`); }
+      await go(page, '#ask'); await tap('[data-act="askType"][data-v="favour"]'); await look('ask a favour');
+      await go(page, '#settings/calendars'); await tap('[data-act="openCal"]'); await look('a calendar opened');
+      await go(page, '#today'); await tap('[data-act="openEv"]'); await look('an event');
+      assert.deepEqual(bad, []);
+      await ctx.close();
+    }
+  }
+});
