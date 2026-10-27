@@ -327,6 +327,17 @@ test('opening the app offline for the first time shows it loading, not the first
   await page.context().close();
 });
 
+test('opening the app offline with a change from last time still waiting to be sent: it opens, not stuck loading', async () => {
+  const page = await openReal();
+  // the phone's saved copy, with a settings change made offline before the app was closed
+  await fb(page, (f, h, house) => f.emitDoc(h, Object.assign({}, house, { settingsRev: 5 }), { pending: true, fromCache: true }), H, HOUSE);
+  await page.waitForFunction((p) => window.__fb.listening(`${p}/people`), H, { timeout: 2000 });
+  await fb(page, (f, h, people) => f.emitColl(`${h}/people`, people), H, PEOPLE);
+  await page.waitForSelector('.bottom-nav', { timeout: 2000 });
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
 test('a change to the shared settings shows straight away, even before it reaches the server (offline)', async () => {
   const page = await openReal('#settings/requests');
   await fb(page, (f, h, house, people) => { f.emitDoc(h, house); f.emitColl(`${h}/people`, people); }, H, HOUSE, PEOPLE);

@@ -26,6 +26,7 @@ export async function createFirebaseBackend() {
   let user = null;
   let timer = null;
   let lastPing = 0;
+  let creating = false;
   function fresh() {
     return { household: {}, people: {}, calendars: {}, feeds: [], shifts: {}, requests: {}, notes: {}, outbox: {}, status: {}, jobs: {}, ideas: {}, tokens: undefined, private: undefined, _priv: {}, _shared: {} };
   }
@@ -67,7 +68,9 @@ export async function createFirebaseBackend() {
       }
       raw.household = snap.data();
       if (!listening) {
-        if (snap.metadata.hasPendingWrites) return; // just made: wait until the server has it
+        // just made on this phone: wait until the server has it. (Not a change saved offline earlier and still
+        // waiting to be sent: offline, that would keep the app loading until it's back online.)
+        if (creating && snap.metadata.hasPendingWrites) return;
         listening = true; listenAll();
       }
       // a change you've just made (offline too) shows straight away
@@ -217,7 +220,8 @@ export async function createFirebaseBackend() {
     async createHousehold(info) {
       const b = fs.writeBatch(db);
       for (const o of setupOps(user.email, info)) b.set(ref(o.path), o.data);
-      await b.commit();
+      creating = true;
+      try { await b.commit(); } finally { creating = false; }
     }
   };
   return backend;
