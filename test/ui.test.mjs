@@ -537,3 +537,27 @@ test('the times along the top of the week never run into each other on a small p
   for (let i = 1; i < boxes.length; i++) assert.ok(boxes[i][0] >= boxes[i - 1][1], `label ${i} overlaps the one before`);
   await ctx.close();
 });
+
+test('an opened list of older requests or done jobs stays open when the screen redraws', async () => {
+  const page = await open('ethan', '#requests');
+  await mods(page, (store) => store.store.backend.commit([
+    { type: 'set', path: 'requests/r_old', data: { from: 'sophie', to: 'ethan', type: 'plan', title: 'Long ago', when: null, status: 'no', created: Date.now() - 20 * 86400000, answeredAt: Date.now() - 20 * 86400000 } },
+    { type: 'set', path: 'jobs/j_done', data: { title: 'Done one', who: 'ethan', day: '2026-01-01', done: true, doneAt: Date.now() } }
+  ]));
+  await page.waitForTimeout(150);
+  await page.click('details.older summary');
+  await page.waitForTimeout(100);
+  // a redraw: something changed on the other phone
+  await mods(page, (store) => store.store.backend.commit([{ type: 'update', path: '', data: { settingsRev: Date.now() } }]));
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator('details.older').evaluate((d) => d.open), true);
+  assert.ok(await page.locator('details.older', { hasText: 'Long ago' }).isVisible());
+  await go(page, '#jobs');
+  await page.click('details.older summary');
+  await page.waitForTimeout(100);
+  await mods(page, (store) => store.store.backend.commit([{ type: 'update', path: '', data: { settingsRev: Date.now() } }]));
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator('details.older').evaluate((d) => d.open), true);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});

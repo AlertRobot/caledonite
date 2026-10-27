@@ -23,7 +23,7 @@ export function viewRequests(state) {
     ${P ? `<a href="#ask" class="btn big-btn" data-act="askNew">${icon.plus(20)} Ask ${esc(nameOf(state, P))} something</a>` : ''}
     ${seg([{ v: 'for', label: `For you (${openForMe})`, on: ui.reqTab === 'for' }, { v: 'sent', label: `You sent (${openSent})`, on: ui.reqTab === 'sent' }], { act: 'reqTab', label: 'Which requests', cls: 'seg-full' })}
     <div class="stack">${recent.length ? recent.map((r) => reqCard(state, r)).join('') : empty(ui.reqTab === 'for' ? 'Nothing waiting for you.' : 'You haven’t asked anything lately.')}</div>
-    ${older.length ? `<details class="older"><summary class="b">Older (${older.length})</summary><div class="stack">${older.slice(0, 20).map((r) => reqCard(state, r)).join('')}</div></details>` : ''}`;
+    ${older.length ? `<details class="older" data-keep="older-${ui.reqTab}" ${ui.opened[`older-${ui.reqTab}`] ? 'open' : ''}><summary class="b">Older (${older.length})</summary><div class="stack">${older.slice(0, 20).map((r) => reqCard(state, r)).join('')}</div></details>` : ''}`;
 }
 // worked out afresh each time: a saved "Tomorrow, 7pm" would be wrong by the next day
 function whenText(w) { return w ? whenLabel(w) || w.label || '' : ''; }

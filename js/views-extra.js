@@ -20,7 +20,7 @@ export function viewJobs(state) {
     ${section('Today', due, 'Nothing to do today.')}
     ${section('This week', week, 'Nothing else this week.')}
     ${later.length ? section('Later', later, '') : ''}
-    ${done.length ? `<details class="older"><summary class="b">Done (${done.length})</summary><div class="card flush">${done.map((j) => jobRow(state, j, todayK)).join('')}</div></details>` : ''}`;
+    ${done.length ? `<details class="older" data-keep="jobs-done" ${ui.opened['jobs-done'] ? 'open' : ''}><summary class="b">Done (${done.length})</summary><div class="card flush">${done.map((j) => jobRow(state, j, todayK)).join('')}</div></details>` : ''}`;
 }
 export function jobRow(state, j, todayK, compact = false) {
   const late = !j.done && j.day < todayK;

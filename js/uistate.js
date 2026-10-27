@@ -20,6 +20,8 @@ export const ui = {
   ev: { ref: null, day: null, back: '#today', noteDraft: null, editing: false, confirmDelete: false, scope: 'one', draft: null },
   jar: { pick: null, adding: false, draft: { title: '', cost: '', where: 'out' }, filter: 'all' },
   jobs: { showDone: false },
+  // folded lists opened (Older requests, Done jobs), so a redraw doesn't fold them again
+  opened: {},
   settings: { page: 'home', openCal: null, shiftWeek: 0, shiftPerson: null, editType: null, favDraft: '', partnerEmailDraft: '', linkDraft: '' },
   setup: { myName: '', myShifts: false, partnerName: '', partnerEmail: '', partnerShifts: false },
   toast: null

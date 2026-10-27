@@ -582,6 +582,11 @@ root.addEventListener('input', (e) => {
   for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]];
   o[parts[parts.length - 1]] = el.value;
 });
+// a folded list opened or closed: remembered, so the next redraw (a minute on, or a change from the other phone) keeps it
+root.addEventListener('toggle', (e) => {
+  const el = e.target;
+  if (el && el.tagName === 'DETAILS' && el.dataset.keep) ui.opened[el.dataset.keep] = el.open;
+}, true);
 root.addEventListener('focusout', () => {
   setTimeout(() => { if (pendingRender && !isEditing()) render(); }, 0);
 });
