@@ -187,11 +187,15 @@ function doGet(e) {
   var email = active.toLowerCase();
   var status;
   try {
-    var me = whoAmI_();
+    var me = whoAmI_(true);
     status = { ok: true, text: 'This account is part of Caledonite' + (me.main ? '.' : ', as one of ' + esc_(nameOf_(me)) + "'s extra accounts.") };
   } catch (err) {
     status = { ok: false, text: 'This account is not part of Caledonite yet. Ask Ethan to add ' + esc_(email) + ' in Caledonite: Settings, then Account. Then open this page again.' };
   }
+  var pageUrl = '';
+  try { pageUrl = String(prop_('CONNECT_URL', true) || ''); } catch (err) { pageUrl = ''; }
+  if (!/^https:\/\/script\.google\.com\/[^\s"'<>]+$/.test(pageUrl)) pageUrl = '';
+  var switchUrl = pageUrl ? 'https://accounts.google.com/AccountChooser?continue=' + encodeURIComponent(pageUrl) : '';
   var html = '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
     '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">' +
     '<style>body{font-family:"Atkinson Hyperlegible",Verdana,Arial,sans-serif;font-size:20px;line-height:1.5;margin:0;padding:24px;background:#F7F5F0;color:#1B1B1F}' +
@@ -201,9 +205,15 @@ function doGet(e) {
     'button{font:inherit;font-weight:700;border-radius:14px;border:none;cursor:pointer;display:block;width:100%}' +
     '#c{background:#2456C7;color:#fff;font-size:22px;padding:18px;margin:0 0 14px}#c:disabled{opacity:.5}' +
     '#d{background:transparent;color:#2456C7;font-size:18px;padding:12px;border:2px solid #2456C7}' +
-    '#out{font-weight:700;min-height:1.5em}</style></head><body><main>' +
+    '#out{font-weight:700;min-height:1.5em}summary{cursor:pointer}a{color:#2456C7}</style></head><body><main>' +
     '<h1>Connect to Caledonite</h1>' +
     '<div class="box"><p>Signed in as <b>' + esc_(email) + '</b>.</p><p>' + status.text + '</p></div>' +
+    // the page always opens as the Google account signed in on this browser: say how to use another one
+    '<details class="box"><summary><b>Not the account you want?</b></summary>' +
+    '<p>This page opens as the Google account this browser is signed in with. To connect a different one:</p>' +
+    (switchUrl ? '<p><a target="_top" href="' + esc_(switchUrl) + '">Choose another account</a>, then open this page again from Caledonite.</p>' : '') +
+    '<p>If it still shows this account, copy the link below, open a new Incognito tab (Chrome menu, then New Incognito tab), paste it there and sign in with the account you want.</p>' +
+    (pageUrl ? '<p style="word-break:break-all;font-size:16px">' + esc_(pageUrl) + '</p>' : '') + '</details>' +
     (status.ok ? '<p>Tap the button once. Caledonite then reads this account\'s calendars by itself every 10 minutes.</p>' +
       '<button id="c" onclick="go(\'connectFromPage\')">Connect my calendar</button>' +
       '<button id="d" onclick="go(\'disconnectFromPage\')">Stop syncing this account</button>' : '') +
@@ -217,7 +227,7 @@ function doGet(e) {
 function connectFromPage() {
   requireSelf_();
   var me;
-  try { me = whoAmI_(); } catch (err) {
+  try { me = whoAmI_(true); } catch (err) {
     throw new Error('This Google account is not part of Caledonite yet. Ask Ethan to add it in Caledonite: Settings, then Account.');
   }
   installTrigger_();
@@ -351,7 +361,9 @@ function isCreator_(me, ctx) {
   return String(((ctx.hh || {}).emails || [])[0] || '').toLowerCase() === me.email;
 }
 
-function whoAmI_() {
+// fresh: look again even if this address was found not to be one of you a moment ago (the connect page and its
+// button, so an account added in the app a minute ago connects straight away)
+function whoAmI_(fresh) {
   var email = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
   if (!email) throw new Error('Could not tell which Google account this is.');
   var notOne = function (taken) {
@@ -366,7 +378,7 @@ function whoAmI_() {
   var nmKey = 'nm_' + email;
   var cache = null;
   try { cache = CacheService.getScriptCache(); } catch (err) { cache = null; }
-  if (cache && cache.get(nmKey)) throw notOne(false);
+  if (cache && !fresh && cache.get(nmKey)) throw notOne(false);
   var people = fsList_(HOUSEHOLD + '/people');
   // Each account belongs to exactly one of you. If two records claim it, sync nothing: syncing it as the wrong
   // person would copy that account's whole calendar into the other person's private copy.
@@ -375,7 +387,8 @@ function whoAmI_() {
     if (uniq.length > 1) throw new Error(email + ' is listed for more than one person in Caledonite, so it is not synced. Remove it from the wrong person in Settings, Account.');
     return uniq.length ? { email: email, person: uniq[0], main: main, people: people } : null;
   };
-  var found = one(people.filter(function (p) { return String(p.data.email || '').toLowerCase() === email; }).map(function (p) { return p.id; }), true);
+  var forget = function (f) { if (f && cache) { try { cache.remove(nmKey); } catch (err) { /* only a saving */ } } return f; };
+  var found = forget(one(people.filter(function (p) { return String(p.data.email || '').toLowerCase() === email; }).map(function (p) { return p.id; }), true));
   if (found) return found;
   // extra accounts each person added to their own record, and the older list on the household
   var claims = people.filter(function (p) {
@@ -383,7 +396,7 @@ function whoAmI_() {
   }).map(function (p) { return p.id; });
   var hh = fsGet_(HOUSEHOLD) || {};
   (hh.linked || []).forEach(function (x) { if (String(x.email || '').toLowerCase() === email && x.person) claims.push(x.person); });
-  found = one(claims, false);
+  found = forget(one(claims, false));
   if (found) return found;
   // only when the household could be read: a passing problem must never look like being taken out
   var e = notOne(people.length > 0);

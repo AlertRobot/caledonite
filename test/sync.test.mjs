@@ -2139,3 +2139,34 @@ test('someone whose address differs from one of yours only by a dot or a dash ne
   assert.equal(ctx.whoAmI_().person, 'sophie');
   assert.ok(ctx.claimRun_());
 });
+
+// ---------- after release: the connect page ----------
+test('an account added in the app a moment after the connect page turned it away connects straight away', () => {
+  fakeCache();
+  const people = [{ id: 'ethan', data: { email: 'e@x.com' } }];
+  ctx.fsList_ = () => people;
+  ctx.fsGet_ = () => ({});
+  asUser('second@x.com');
+  // opened before it was added: turned away, and remembered for a couple of minutes
+  assert.throws(() => ctx.whoAmI_(), /not part of Caledonite/);
+  // then added as one of Ethan's other accounts
+  people[0].data.linked = ['second@x.com'];
+  // the connect page and its button look again, at once
+  assert.equal(ctx.whoAmI_(true).person, 'ethan');
+  // and from then on it isn't held back anywhere else either
+  assert.equal(ctx.whoAmI_().person, 'ethan');
+});
+
+test('the connect page says how to connect a different Google account', () => {
+  fakeCache();
+  ctx.fsList_ = () => [{ id: 'ethan', data: { email: 'e@x.com' } }];
+  ctx.fsGet_ = () => ({});
+  asUser('e@x.com');
+  ctx.PropertiesService = { getScriptProperties: () => ({ getProperty: (k) => (k === 'CONNECT_URL' ? 'https://script.google.com/macros/s/ABC/exec' : null) }), getUserProperties: () => ({ getProperty: () => null }) };
+  let html = '';
+  ctx.HtmlService = { createHtmlOutput: (h) => { html = h; const o = { setTitle: () => o, addMetaTag: () => o }; return o; } };
+  ctx.doGet({});
+  assert.match(html, /Not the account you want\?/);
+  assert.match(html, /AccountChooser\?continue=https%3A%2F%2Fscript\.google\.com%2Fmacros%2Fs%2FABC%2Fexec/);
+  assert.match(html, /Incognito/);
+});
