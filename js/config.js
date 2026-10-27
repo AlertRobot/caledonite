@@ -1,7 +1,7 @@
 // Caledonite settings. The Firebase part is filled in during setup.
 export const APP = {
   name: 'Caledonite',
-  version: '1.4.13'
+  version: '1.4.14'
 };
 
 // Firebase web app settings (these are public, not secrets; access is controlled by firestore.rules)
