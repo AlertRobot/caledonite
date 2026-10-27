@@ -1523,7 +1523,7 @@ test('a change Google keeps turning away for a moment is tried for a day, not dr
     return writes[0].update.fields;
   };
   const recent = new Date(Date.now() - 3600e3).toISOString();
-  for (const m of ['API call to calendar.events.insert failed with error: Backend Error', 'Rate Limit Exceeded', 'Service invoked too many times for one day: calendar.', 'Address unavailable: https://www.googleapis.com']) {
+  for (const m of ['API call to calendar.events.insert failed with error: Backend Error', 'Rate Limit Exceeded', 'Service invoked too many times for one day: calendar.', 'Address unavailable: https://www.googleapis.com', 'API call to calendar.events.insert failed with error: Calendar usage limits exceeded.']) {
     const f = run(m, recent);
     assert.ok(!f.done, m);
     assert.equal(f.tries.integerValue, '5');

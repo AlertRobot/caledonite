@@ -1353,7 +1353,7 @@ function editOwn_(o, rs) {
 
 // An error that's Google or the network having a moment, not something wrong with the change itself
 function transient_(err) {
-  return /rate limit|backend error|internal error|service unavailable|unavailable|timed out|timeout|try again|too many|quota|limit exceeded|\b(429|500|502|503|504)\b|address unavailable|dns error|unexpected error/i.test(String(err && err.message || err));
+  return /rate limit|backend error|internal error|service unavailable|unavailable|timed out|timeout|try again|too many|quota|limits? exceeded|\b(429|500|502|503|504)\b|address unavailable|dns error|unexpected error/i.test(String(err && err.message || err));
 }
 
 // The Calendar API saying an event isn't there (any more)
