@@ -1827,3 +1827,22 @@ test("a day off on one of your contacts' birthdays is told once, never again eve
   ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [off, bday], a2, { share: 'all' });
   assert.deepEqual(writes, []);
 });
+
+test("the summaries never say your partner's working hours when every work calendar of theirs is shared as Nothing", () => {
+  const day = '2026-11-10'; // a Tuesday
+  ctx.fsGet_ = () => null;
+  const feeds = { privateFeeds: [], sharedFeeds: [] };
+  ctx.fsQuery_ = (coll) => feeds[coll] || [];
+  const people = { ethan: { name: 'Ethan' }, sophie: { name: 'Sophie', settings: { workStart: '08:00', workEnd: '16:30' } } };
+  const run = (share) => {
+    ctx.fsList_ = () => [{ id: 'sophie__w', data: { owner: 'sophie', calKey: 'w', role: 'work', share } }, { id: 'sophie__p', data: { owner: 'sophie', calKey: 'p', role: 'normal', share: 'all' } }];
+    const data = ctx.digestData_({ person: 'ethan' }, { settings: {}, people });
+    return ctx.morningText_(data, day);
+  };
+  assert.match(run('hours'), /Sophie: working 8am to 4:30pm/);
+  const hidden = run('none');
+  assert.doesNotMatch(hidden, /8am|4:30pm/, hidden);
+  assert.match(hidden, /Sophie: nothing planned/);
+  // your own are always said
+  assert.match(hidden, /You: working 9am to 6pm/);
+});

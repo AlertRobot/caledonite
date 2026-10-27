@@ -1651,7 +1651,10 @@ function digestData_(me, ctx) {
   // only the ones still to do (done ones are kept, and there are more of them every week)
   var jobs = fsQuery_('jobs', [['done', false]]).map(function (j) { return j.data; });
   var mine = { id: me.person, name: 'You', settings: ctx.settings || {}, items: feedsFor('privateFeeds', me.person), mine: true };
-  var theirs = partner ? { id: partner.id, name: partner.name || 'Your partner', settings: partner.settings || {}, items: feedsFor('sharedFeeds', partner.id), mine: false } : null;
+  // (their working hours aren't said when every work calendar of theirs is shared as Nothing, as in the app)
+  var workCals = partner ? Object.keys(cals).map(function (k) { return cals[k]; }).filter(function (c) { return c && c.owner === partner.id && c.role === 'work'; }) : [];
+  var hideWork = workCals.length > 0 && workCals.every(function (c) { return c.share === 'none'; });
+  var theirs = partner ? { id: partner.id, name: partner.name || 'Your partner', settings: partner.settings || {}, items: feedsFor('sharedFeeds', partner.id), mine: false, hideWork: hideWork } : null;
   // whose calendars each thing made in the app is in, and the requests they came from (read only when needed)
   var tagOwners = {};
   [mine, theirs].forEach(function (p) {
@@ -1725,7 +1728,7 @@ function personDay_(p, key, data) {
     var days = s.workDays || [1, 2, 3, 4, 5];
     if (days.indexOf(wd) >= 0) {
       if (altOff_(s, key)) out.off = out.off || 'day off';
-      else if (!out.off) out.work = { s: localTime_(key, hm_(s.workStart) || '09:00'), e: localTime_(key, hm_(s.workEnd) || '18:00') };
+      else if (!out.off && !p.hideWork) out.work = { s: localTime_(key, hm_(s.workStart) || '09:00'), e: localTime_(key, hm_(s.workEnd) || '18:00') };
     }
   }
   out.events.sort(function (a, b) { return (a.ad ? 0 : a.s) - (b.ad ? 0 : b.s); });
