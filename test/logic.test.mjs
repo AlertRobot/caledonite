@@ -270,6 +270,17 @@ test("a contact's birthday in a rota kept in your main calendar is never taken a
   assert.equal(st2.events[0].np, false);
 });
 
+test("a countdown to a contact's birthday (only in your own copy) stays on your own Today", () => {
+  const bday = { owner: 'ethan', calKey: 'primary', id: 'b1', t: "Jo's birthday", ad: 1, sd: sat, ed: dayKey(addDays(new Date(`${sat}T12:00`), 1)), np: 1 };
+  const st = load({ events: [bday] });
+  assert.equal(L.countdownShared(st, st.events[0]), false);
+  // what the event's page hands over: the row from that day, with its event
+  assert.equal(L.countdownShared(st, L.dayList(st, sat).find((it) => it.title === "Jo's birthday").src), false);
+  // a birthday you put in yourself, in a calendar shared as Everything, is shared as before
+  const st2 = load({ events: [Object.assign({}, bday, { np: undefined })] });
+  assert.equal(L.countdownShared(st2, st2.events[0]), true);
+});
+
 test('a countdown follows its event when the event is moved to another day', () => {
   // set on the trip when it was on the Saturday; since moved (in Google Calendar) to the Monday after
   const mon = dayKey(addDays(new Date(`${sat}T12:00`), 2));

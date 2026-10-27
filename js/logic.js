@@ -979,11 +979,12 @@ export function leaveSummary(state, pid, now = new Date()) {
 // ---------- countdowns ----------
 // A countdown shows on both your Todays only when your partner can already see the event's name
 // (not when your partner sees it only as "Busy": added that way, marked Private in Google Calendar, or in a calendar
-// that isn't shared as Everything, including one not known yet)
+// that isn't shared as Everything, including one not known yet; nor a contact's birthday, never in your partner's copy)
 export function countdownShared(state, ev) {
   if (!ev || !ev.owner || ev.owner !== state.me) return true;
   if (ev.tag && (ev.tag.startsWith('both:') || ev.tag.startsWith('req:'))) return true;
-  if (ev.busy || ev.busyOnly || ev.pb) return false;
+  // (np: a contact's birthday, only ever in your own copy)
+  if (ev.busy || ev.busyOnly || ev.pb || ev.np) return false;
   const c = state.calendars[`${ev.owner}__${ev.calKey}`]
     || (!ev.calKey ? Object.values(state.calendars).find((x) => x.owner === ev.owner && x.primary) : null);
   return !!c && c.share === 'all' && c.role !== 'work';
