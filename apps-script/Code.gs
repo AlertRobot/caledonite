@@ -701,7 +701,11 @@ function feedWrites_(me, ctx, calKey, doc, events, props, known) {
   });
   function put_(path, base, evs) {
     // whose it is too (an email corrected before joining, or another of your accounts taking over)
-    var h = hash_(JSON.stringify([base, evs]));
+    var json = JSON.stringify([base, evs]);
+    // a month too full for one database record (at most 1 MB): this calendar keeps what it had, and says so,
+    // rather than every calendar's copies failing to save with it, every run
+    if (json.length > 800e3) throw new Error('It has too many events in ' + base.month + ' to copy into Caledonite.');
+    var h = hash_(json);
     next[path] = h;
     if (old[path] !== h) writes.push(upd_(path, merge_(base, { events: evs, updated: Date.now() })));
   }
@@ -2156,10 +2160,20 @@ function fsQuery_(collId, eqs) {
   });
   return out;
 }
+// In parts of at most 400 writes and about 4 MB (Firestore takes 500 writes and 10 MB at once): the first sync of a
+// few busy calendars is never one request too big to go through, every run
 function fsCommit_(writes) {
-  for (var i = 0; i < writes.length; i += 400) {
-    call_('post', base_().replace(/\/documents$/, '/documents:commit'), { writes: writes.slice(i, i + 400) });
-  }
+  var batch = [], size = 0;
+  var send = function () {
+    if (batch.length) call_('post', base_().replace(/\/documents$/, '/documents:commit'), { writes: batch });
+    batch = []; size = 0;
+  };
+  writes.forEach(function (w) {
+    var n = JSON.stringify(w).length;
+    if (batch.length && (batch.length >= 400 || size + n > 4e6)) send();
+    batch.push(w); size += n;
+  });
+  send();
 }
 function upd_(path, obj, mask) {
   var w = { update: { name: docName_(path), fields: toFields_(obj) } };

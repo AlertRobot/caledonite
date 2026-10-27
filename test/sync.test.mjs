@@ -1741,3 +1741,43 @@ test('a rota shared as working hours, then as everything: the leave already on i
   assert.match(writes[0].update.fields.body.stringValue, /long day removed/);
   assert.doesNotMatch(writes[0].update.fields.body.stringValue, /leave|all-day/i);
 });
+
+test('a very full calendar never stops the others saving: big saves go in parts, and a month too full is left as it was', () => {
+  withDigest();
+  // the saves are split well under what Firestore takes in one request (10 MB, 500 writes)
+  const sent = [];
+  const realCall = ctx.call_, realProp = ctx.prop_;
+  ctx.call_ = (m, url, body) => { sent.push(body.writes.length); return {}; };
+  ctx.prop_ = () => 'proj';
+  const realCommit = ctx.fsCommit_;
+  vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8').match(/function fsCommit_[\s\S]*?\n}\n/)[0], ctx);
+  const big = (i) => ({ update: { name: `d${i}`, fields: { x: { stringValue: 'x'.repeat(300e3) } } } });
+  ctx.fsCommit_(Array.from({ length: 40 }, (_, i) => big(i)));
+  assert.ok(sent.length >= 3, 'in parts');
+  assert.equal(sent.reduce((a, b) => a + b, 0), 40);
+  sent.length = 0;
+  ctx.fsCommit_(Array.from({ length: 900 }, (_, i) => ({ delete: `d${i}` })));
+  assert.deepEqual(sent, [400, 400, 100]);
+  ctx.fsCommit_ = realCommit; ctx.call_ = realCall; ctx.prop_ = realProp;
+  // one month with thousands of long events: that calendar says so, the others are saved
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const store = {};
+  ctx.PropertiesService = { getUserProperties: () => ({ getProperty: (k) => (k in store ? store[k] : null), getProperties: () => Object.assign({}, store), setProperties: (o) => Object.assign(store, o), setProperty: (k, v) => { store[k] = v; }, deleteProperty: (k) => { delete store[k]; } }) };
+  const s0 = ctx.localTime_(ctx.Utilities.formatDate(new Date(Date.now() + 5 * 864e5), 'Europe/London', 'yyyy-MM-dd'), '09:00');
+  const mk = (n, title) => Array.from({ length: n }, (_, i) => ({ id: `e${i}`, iCalUID: `e${i}@x`, summary: title, start: { dateTime: new Date(s0 + i * 60e3).toISOString() }, end: { dateTime: new Date(s0 + i * 60e3 + 30e3).toISOString() } }));
+  const items = { 'team@x': mk(4000, 'Ward cover '.repeat(20)), 'p@x': mk(3, 'Dentist') };
+  ctx.Calendar = { Events: { list: (id) => ({ items: items[id] }) } };
+  const cal = (id, name) => ({ getId: () => id, getName: () => name, getColor: () => '', isOwnedByMe: () => true });
+  ctx.CalendarApp = { getAllCalendars: () => [cal('team@x', 'Team'), cal('p@x', 'Main')], getDefaultCalendar: () => ({ getId: () => 'p@x' }) };
+  const errors = [];
+  const keyOf = (id) => ctx.shortKey_(id);
+  const docs = { [keyOf('team@x')]: { account: 'e@x.com', lastSeen: Date.now(), name: 'Team', color: '', canWrite: true, primary: false, show: true, share: 'busy' }, [keyOf('p@x')]: { account: 'e@x.com', lastSeen: Date.now(), name: 'Main', color: '', canWrite: true, primary: true, show: true, share: 'all' } };
+  store['h_' + keyOf('team@x')] = '{}'; store['h_' + keyOf('p@x')] = '{}';
+  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true, people: [] }, { appEmail: 'e@x.com', calDocs: docs, hh: {} }, errors);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /calendar Team: It has too many events in \d{4}-\d{2}/);
+  assert.ok(writes.some((w) => w.update && /ethan__.*__\d{4}-\d{2}$/.test(w.update.name) && w.update.name.includes(keyOf('p@x'))), 'the main calendar is saved');
+  assert.ok(!writes.some((w) => w.update && w.update.name.includes(keyOf('team@x'))), 'the full one is left as it was');
+});
