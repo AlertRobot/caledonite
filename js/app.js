@@ -635,6 +635,10 @@ async function boot() {
   window.addEventListener('hashchange', () => { if (isEditing()) document.activeElement.blur(); window.scrollTo(0, 0); render(); });
   setInterval(() => { newDay(); if (!document.hidden && !isEditing()) { store.state = Object.assign({}, store.state, { rev: store.state.rev + 1 }); render(); } }, 60000);
   document.addEventListener('visibilitychange', () => {
+    // a list left focused (its picker closed without a choice) can't still be open once the app is put away: let go
+    // of it, so the screen isn't held back until the next tap
+    const a = document.activeElement;
+    if (a && a.tagName === 'SELECT' && root.contains(a)) a.blur();
     if (document.hidden) return;
     newDay();
     if (store.backend && store.state.phase === 'ready') store.backend.ping();

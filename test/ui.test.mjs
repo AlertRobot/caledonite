@@ -579,6 +579,27 @@ test('a list being chosen from is never redrawn away under the picker, and the c
   await page.context().close();
 });
 
+test('a list left focused with nothing chosen holds the screen back only until the app is put away', async () => {
+  const page = await open('ethan', '#add');
+  await page.click('[data-act="addMore"]');
+  await page.focus('#add-repeat');
+  await page.evaluate(() => { window.__sel = document.getElementById('add-repeat'); });
+  // the picker closed without a choice (no change), then something changes on the other phone
+  await mods(page, (store) => store.store.backend.commit([{ type: 'update', path: '', data: { settingsRev: Date.now() } }]));
+  await page.waitForTimeout(100);
+  // the phone is put away, then the app opened again
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => document.getElementById('add-repeat') !== window.__sel), true, 'the screen has been redrawn');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
 test('Today counts what needs you in words that read right: "1 request needs you"', async () => {
   const page = await open('sophie', '#today');
   // Ethan suggested another time for something Sophie asked: that's hers to answer now, and nothing else is
