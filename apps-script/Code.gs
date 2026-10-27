@@ -662,6 +662,8 @@ function normApi_(it) {
 }
 
 function norm_(ev) {
+  // where you're working from (Home, Office) is never an event, as with the Calendar API
+  try { if (CalendarApp.EventType && CalendarApp.EventType.WORKING_LOCATION && ev.getEventType() === CalendarApp.EventType.WORKING_LOCATION) return null; } catch (e) { /* older events */ }
   try {
     var st = ev.getMyStatus();
     if (st === CalendarApp.GuestStatus.NO) return null;

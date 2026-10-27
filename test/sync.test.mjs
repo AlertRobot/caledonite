@@ -1949,3 +1949,12 @@ test('a rota change whose notification could not be saved is told next run, not 
   assert.equal(writes.length, 1);
   assert.match(writes[0].update.fields.body.stringValue, /long day added/);
 });
+
+test('read the slow way, where you are working from (Home, Office) is never an event, as with the Calendar API', () => {
+  withDigest();
+  ctx.CalendarApp = { Visibility: { PRIVATE: 'P', CONFIDENTIAL: 'C' }, GuestStatus: { NO: 'NO' }, EventType: { DEFAULT: 'D', BIRTHDAY: 'B', WORKING_LOCATION: 'W' } };
+  const ev = (type) => ({ getEventType: () => type, getMyStatus: () => null, getDescription: () => '', getStartTime: () => new Date('2026-11-06T00:00:00Z'), getEndTime: () => new Date('2026-11-07T00:00:00Z'), getAllDayStartDate: () => new Date('2026-11-06T00:00:00Z'), getAllDayEndDate: () => new Date('2026-11-07T00:00:00Z'), getId: () => 'x@google.com', getTitle: () => 'Home', isRecurringEvent: () => false, isAllDayEvent: () => true, getLocation: () => '', getVisibility: () => 'D' });
+  assert.equal(ctx.norm_(ev('W')), null);
+  assert.equal(ctx.normApi_({ id: 'w', eventType: 'workingLocation', summary: 'Home', start: { date: '2026-11-06' }, end: { date: '2026-11-07' } }), null);
+  assert.equal(ctx.norm_(ev('D')).t, 'Home');
+});
