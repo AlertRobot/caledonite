@@ -9,7 +9,7 @@ import { viewJobs, viewJar, STARTER_IDEAS, pickIdea, jarBudget } from './views-e
 import { loadLinked, parseBudgieLink, setBudgieLink, unlinkBudgie } from './linked.js';
 import { applyLook, setLook } from './theme.js';
 import { FIREBASE, APP } from './config.js';
-import { icon } from './ui.js';
+import { icon, fitButtonRows } from './ui.js';
 import { dayKey, addDays, fromDayKey, mondayOf, esc, minutesOf, pad } from './util.js';
 import { freeSlots, settingsOf, nameOf, reminderFor, reminderId, quietNight, repeatOf, leaveDaysFor, nextBothFree, countdownShared, editTimes } from './logic.js';
 import { whenLabel } from './store.js';
@@ -69,6 +69,7 @@ export function render() {
   const keepScroll = key === lastRoute;
   const y = window.scrollY;
   root.innerHTML = `<main class="page ${nav ? 'has-nav' : ''} ${st.demo ? 'is-demo' : ''}">${st.demo ? '<div class="demo-bar">Demo with made-up data. <a href="./">Leave</a></div>' : ''}${html}</main>${nav ? navBar(st, r) : ''}${ui.toast ? `<div class="toast" role="status">${esc(ui.toast)}</div>` : ''}`;
+  fitButtonRows(root);
   if (keepScroll) window.scrollTo(0, y);
   lastRoute = key;
   if (ui.focus) { const el = document.getElementById(ui.focus); if (el) el.focus(); ui.focus = null; }
@@ -649,6 +650,7 @@ async function boot() {
   setInterval(rotateCountdown, 5000);
   // a new screen (Back, a link): a box still focused after the keyboard was closed mustn't keep the old one up
   window.addEventListener('hashchange', () => { if (isEditing()) document.activeElement.blur(); window.scrollTo(0, 0); render(); });
+  window.addEventListener('resize', () => fitButtonRows(root));
   setInterval(() => { newDay(); if (!document.hidden && !isEditing()) { store.state = Object.assign({}, store.state, { rev: store.state.rev + 1 }); render(); } }, 60000);
   document.addEventListener('visibilitychange', () => {
     // a list left focused (its picker closed without a choice) can't still be open once the app is put away: let go

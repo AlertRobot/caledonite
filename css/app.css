@@ -120,6 +120,9 @@ p { margin: 0; }
 .row.between, .between { justify-content: space-between; }
 .row-wrap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .row-wrap.center { justify-content: center; }
+/* a row of buttons that doesn't fit on one line stacks, each button the full width (fitButtonRows in ui.js) */
+.row-wrap.stacked { flex-direction: column; align-items: stretch; }
+.row-wrap.stacked > .btn { width: 100%; }
 .small-gap { gap: 8px; }
 .col { display: flex; flex-direction: column; min-width: 0; }
 .grow { flex: 1; min-width: 0; }

@@ -52,6 +52,17 @@ export function whoChip(state, who) {
   const col = personColour(state, who);
   return `<span class="chip chip-${col}">${who === state.me ? 'You' : esc(shortName(state, who))}</span>`;
 }
+// A row of buttons either fits on one line or stacks as full-width buttons, one under another: never two with one left
+// over underneath. Run after each redraw and when the screen changes size.
+export function fitButtonRows(root) {
+  for (const row of root.querySelectorAll('.row-wrap')) {
+    const kids = [...row.children].filter((k) => k.getClientRects().length);
+    if (kids.length < 2 || !kids.every((k) => k.classList.contains('btn'))) continue;
+    row.classList.remove('stacked');
+    const top = kids[0].getBoundingClientRect().top;
+    if (kids.some((k) => Math.abs(k.getBoundingClientRect().top - top) > 1)) row.classList.add('stacked');
+  }
+}
 export function seg(items, { act, label, cls = '' } = {}) {
   return `<div class="seg ${cls}" role="group" aria-label="${esc(label || '')}">${items.map((it) =>
     `<button type="button" class="${it.on ? 'on' : ''}" aria-pressed="${it.on ? 'true' : 'false'}" data-act="${act}" data-v="${esc(it.v)}"${it.extra || ''}>${esc(it.label)}</button>`).join('')}</div>`;

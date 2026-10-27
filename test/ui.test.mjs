@@ -786,7 +786,8 @@ test("the server says this account can't open the household: Not on the list, ne
 });
 
 // every button, tab and chip on a screen: its text stays inside it, it stays inside its row or card, a one-line label stays
-// on one line (a card button with parts is several), and nothing makes the page scroll sideways
+// on one line (a card button with parts is several), a row of buttons is never left ragged (two on a line and one under
+// them), and nothing makes the page scroll sideways
 function labelProblems() {
   const out = [];
   if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) out.push('the page scrolls sideways');
@@ -806,10 +807,18 @@ function labelProblems() {
     const card = [...x.querySelectorAll('*')].some((d) => !d.closest('svg') && /^(block|grid|flex)$/.test(getComputedStyle(d).display) && d.textContent.trim());
     if (!card && !x.matches('.seg') && lines(x) > 1) out.push(`${say} wraps onto ${lines(x)} lines`);
   }
+  // a row of buttons is all on one line, or stacked one a line at the full width: never two with one left over
+  for (const row of document.querySelectorAll('main *')) {
+    const kids = [...row.children].filter((k) => k.getClientRects().length);
+    if (kids.length < 2 || !kids.every((k) => k.classList.contains('btn'))) continue;
+    const at = kids.map((k) => Math.round(k.getBoundingClientRect().top)); const ws = kids.map((k) => Math.round(k.getBoundingClientRect().width));
+    const lineN = new Set(at).size;
+    if (lineN > 1 && (lineN < kids.length || Math.max(...ws) - Math.min(...ws) > 1)) out.push(`buttons "${kids.map((k) => k.textContent.trim()).join('", "')}" sit ${lineN} lines for ${kids.length}`);
+  }
   return out;
 }
 
-test('buttons, tabs and chips fit their labels on one line, with your full names, at 360 and 412 wide and at 130% text zoom', async () => {
+test('buttons, tabs and chips fit their labels on one line and button rows are never ragged, with your full names, at 360 and 412 wide and at 130% text zoom', async () => {
   // (Chrome's 130% text zoom lays a 412px phone out as if it were 317px wide)
   for (const [w, h] of [[360, 780], [412, 915], [317, 704]]) {
     for (const who of ['ethan', 'sophie']) {
@@ -833,6 +842,10 @@ test('buttons, tabs and chips fit their labels on one line, with your full names
       await go(page, '#ask'); await tap('[data-act="askType"][data-v="favour"]'); await look('ask a favour');
       await go(page, '#settings/calendars'); await tap('[data-act="openCal"]'); await look('a calendar opened');
       await go(page, '#today'); await tap('[data-act="openEv"]'); await look('an event');
+      await tap('[data-act="evEdit"]'); await look('changing an event'); await tap('[data-act="evEditCancel"]');
+      await tap('[data-act="evDeleteAsk"]'); await look('deleting an event');
+      await go(page, '#today'); await tap('[data-act="noteOpen"]'); await look('a note');
+      await go(page, '#jar'); await tap('[data-act="jarPick"]'); await look('an idea picked');
       assert.deepEqual(bad, []);
       await ctx.close();
     }
