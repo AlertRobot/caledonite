@@ -1051,7 +1051,8 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   }
   var key = 'rota_' + calKey;
   var before = null;
-  try { before = JSON.parse(props.getProperty(key) || 'null'); } catch (err) { before = null; }
+  var saved = props.getProperty(key);
+  try { before = JSON.parse(saved || 'null'); } catch (err) { before = null; }
   props.setProperty(key, JSON.stringify({ from: win.from, to: win.to, map: map }));
   if (!before || typeof before !== 'object' || !before.map || share === 'none') return;
   // Every entry is remembered, whatever the sharing, so changing it never makes old entries look new. Shared as
@@ -1092,7 +1093,13 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     if (pid === me.person) return;
     writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: pid, kind: 'rota', title: name + "'s rota has changed", body: parts.join(' '), link: '#calendar', sendAfter: now, sent: false, created: now }));
   });
-  if (writes.length) fsCommit_(writes);
+  // not saved after all: compared with the rota as it was again next run, so the change is still told
+  if (writes.length) {
+    try { fsCommit_(writes); } catch (err) {
+      if (saved === null) props.deleteProperty(key); else props.setProperty(key, saved);
+      throw err;
+    }
+  }
 }
 
 // A saved rota with only the entries keep() allows, each day's numbered again in time order ("day", "day+", ...)

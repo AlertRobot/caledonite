@@ -1929,3 +1929,23 @@ test("your partner's own calendar, shared with you in Google, is never copied ba
   // Google's family calendar is all of yours
   assert.equal(d('family01@group.calendar.google.com', 'Family').share, 'all');
 });
+
+test('a rota change whose notification could not be saved is told next run, not lost', () => {
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 3 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const L = (hm) => ctx.localTime_(day, hm);
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  ctx.docName_ = (p) => p;
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  const { api } = smallProps({});
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [], api, { share: 'all' });
+  const shift = { t: 'Long day', s: L('07:30'), e: L('20:00') };
+  ctx.fsCommit_ = () => { throw new Error('Firestore 503: unavailable'); };
+  assert.throws(() => ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift], api, { share: 'all' }), /503/);
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift], api, { share: 'all' });
+  assert.equal(writes.length, 1);
+  assert.match(writes[0].update.fields.body.stringValue, /long day added/);
+});
