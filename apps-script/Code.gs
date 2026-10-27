@@ -1975,9 +1975,32 @@ function asleepUntil_(pid, who, ctx, now) {
   return ctx.asleep[pid];
 }
 
+// The notifications waiting to go now. Only those whose time has come are read (Peckish queues a week of meal
+// reminders, and every run of every account would otherwise read them all, which adds up against the free
+// database reads), using the index in the README. Once an hour, for everyone's runs, everything not yet sent is
+// read instead, so one saved without a proper time is never stuck; and if the index isn't there yet, always that.
+function dueNotify_(now) {
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+  var everything = function () { return fsQuery_('notify', [['sent', false]]).filter(function (n) { return (n.data.sendAfter || 0) <= now; }); };
+  if (!cache || !cache.get('notify_swept')) {
+    var all = everything();
+    if (cache) { try { cache.put('notify_swept', '1', 3600); } catch (e) { /* it's only a saving */ } }
+    return all;
+  }
+  if (!cache.get('notify_noindex')) {
+    try { return fsQuery_('notify', [['sent', false], ['sendAfter', now, '<=']]); } catch (err) {
+      if (!/index/i.test(String(err && err.message))) throw err;
+      Logger.log('notify: the index for waiting notifications is not set up yet (see the README)');
+      try { cache.put('notify_noindex', '1', 21600); } catch (e) { /* tried again next run */ }
+    }
+  }
+  return everything();
+}
+
 function processNotify_(ctx) {
   var now = Date.now();
-  var due = fsQuery_('notify', [['sent', false]]).filter(function (n) { return (n.data.sendAfter || 0) <= now; });
+  var due = dueNotify_(now);
   if (!due.length) return;
   var tokensFor = {};
   var outOfTime = false;
@@ -2119,9 +2142,9 @@ function fsList_(coll) {
   } while (token);
   return out;
 }
-// eqs: [field, value] (equal), or [field, value, '>='] for from that value on
+// eqs: [field, value] (equal), or [field, value, '>='] for from that value on ('<=' up to it)
 function fsQuery_(collId, eqs) {
-  var ops = { '>=': 'GREATER_THAN_OR_EQUAL' };
+  var ops = { '>=': 'GREATER_THAN_OR_EQUAL', '<=': 'LESS_THAN_OR_EQUAL' };
   var filters = eqs.map(function (f) { return { fieldFilter: { field: { fieldPath: f[0] }, op: ops[f[2]] || 'EQUAL', value: toValue_(f[1]) } }; });
   var where = filters.length === 1 ? filters[0] : { compositeFilter: { op: 'AND', filters: filters } };
   var r = call_('post', base_() + '/' + HOUSEHOLD + ':runQuery', { structuredQuery: { from: [{ collectionId: collId }], where: where, limit: 500 } });

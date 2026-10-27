@@ -1655,3 +1655,57 @@ test('the morning summary is remembered as sent before it goes, so a run stopped
     ctx.digestData_ = realData; ctx.morningText_ = realText;
   }
 });
+
+test('each run reads only the notifications that are due, not every one waiting (with a sweep an hour, and without the index)', () => {
+  const now = Date.now();
+  const cache = {};
+  ctx.CacheService = { getScriptCache: () => ({ get: (k) => (k in cache ? cache[k] : null), put: (k, v) => { cache[k] = String(v); }, remove: (k) => { delete cache[k]; } }) };
+  const queries = [];
+  const waiting = [
+    { id: 'pk-later', data: { to: 'sophie', kind: 'reminders', title: 'Dinner Friday', sendAfter: now + 3 * 864e5, sent: false }, updateTime: 't' },
+    { id: 'odd', data: { to: 'sophie', kind: 'notes', title: 'No time saved', sent: false }, updateTime: 't' }
+  ];
+  let indexed = true;
+  ctx.fsQuery_ = (coll, eqs) => {
+    queries.push(JSON.stringify(eqs));
+    if (coll !== 'notify') return [];
+    if (eqs.length > 1) {
+      if (!indexed) throw new Error('Firestore 400: FAILED_PRECONDITION: The query requires an index. You can create it here: ...');
+      return [];
+    }
+    return waiting;
+  };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.fsList_ = () => [];
+  ctx.docName_ = (p) => p;
+  const c = () => ({ people: { sophie: { settings: { quiet: { on: false } } } } });
+  // the first run in an hour reads everything waiting, and so finds one saved without a time
+  ctx.processNotify_(c());
+  assert.deepEqual(queries, ['[["sent",false]]']);
+  assert.equal(writes.length, 1, 'the one with no time is sent');
+  assert.match(JSON.stringify(writes[0]), /odd/);
+  // the runs after it ask only for what's due: none of the week of meal reminders is read
+  queries.length = 0; writes.length = 0;
+  ctx.processNotify_(c());
+  assert.equal(queries.length, 1);
+  assert.deepEqual(JSON.parse(queries[0]), [['sent', false], ['sendAfter', JSON.parse(queries[0])[1][1], '<=']]);
+  assert.ok(Math.abs(JSON.parse(queries[0])[1][1] - now) < 60e3);
+  assert.equal(writes.length, 0);
+  // without the index: everything, as before, and it isn't asked for again for a while
+  indexed = false; queries.length = 0;
+  ctx.processNotify_(c());
+  ctx.processNotify_(c());
+  assert.deepEqual(queries.filter((q) => q.includes('sendAfter')).length, 1);
+  assert.equal(queries.filter((q) => q === '[["sent",false]]').length, 2);
+  // and the database's own query for it
+  const realCall = ctx.call_, realProp = ctx.prop_;
+  ctx.call_ = (m, url, body) => { queries.push(JSON.stringify(body)); return []; };
+  const realQuery = ctx.fsQuery_;
+  delete ctx.fsQuery_;
+  vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8').match(/function fsQuery_[\s\S]*?\n}\n/)[0], ctx);
+  ctx.prop_ = () => 'proj';
+  ctx.fsQuery_('notify', [['sent', false], ['sendAfter', 5, '<=']]);
+  assert.match(queries.pop(), /"op":"LESS_THAN_OR_EQUAL","value":\{"integerValue":"5"\}/);
+  ctx.fsQuery_ = realQuery; ctx.call_ = realCall; ctx.prop_ = realProp;
+});
