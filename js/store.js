@@ -127,7 +127,8 @@ export function setRaw(raw, extra = {}) {
       evs.push({
         owner: f.owner, calKey: f.calKey, id: e.id, title: e.t || '', start, end, allDay: !!e.ad, startKey: e.ad ? e.sd : null,
         // pb: in your own copy, something your partner sees only as "Busy" (added that way, or Private in Google)
-        busy: !!e.b, pb: !!(f.private && e.pb), tag: e.tag || null, location: e.l || '', sid: e.sid || null, uid: e.uid || null, gid: e.gid || null, rid: e.rid || null
+        // np: in your own copy, a contact's birthday (Google's, not something you made): never a shift
+        busy: !!e.b, pb: !!(f.private && e.pb), np: !!(f.private && e.np), tag: e.tag || null, location: e.l || '', sid: e.sid || null, uid: e.uid || null, gid: e.gid || null, rid: e.rid || null
       });
     }
   }

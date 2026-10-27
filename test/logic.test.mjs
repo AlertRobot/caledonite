@@ -252,6 +252,24 @@ test('a countdown to something private shows only on your own Today', () => {
   assert.ok(titles.includes('Party') && !titles.includes('Job interview'));
 });
 
+test("a contact's birthday in a rota kept in your main calendar is never taken as that day's shift", () => {
+  // the sync marks a contact's birthday (np) in your own copy; it's listed before the night shift that day
+  const bday = { owner: 'ethan', calKey: 'rota', id: 'b1', t: "Jo's birthday", ad: 1, sd: sat, ed: dayKey(addDays(new Date(`${sat}T12:00`), 1)), np: 1 };
+  const night = timed('ethan', 'rota', sat, '19:30', '23:59', { t: 'Night' });
+  night.e = atTime(dayKey(addDays(new Date(`${sat}T12:00`), 1)), '08:00').getTime();
+  const st = load({ events: [bday, night], ethan: { hasShifts: true, workDays: [] } });
+  st.calendars.ethan__rota = { owner: 'ethan', calKey: 'rota', name: 'Main', share: 'all', role: 'rota', layer: 'own', key: 'ethan__rota' };
+  L.clearDayCache();
+  assert.equal(st.events.find((e) => e.id === 'b1').np, true);
+  assert.equal(L.shiftFor(st, 'ethan', sat).type, 'night');
+  // and the morning after, the sleep after nights is there
+  const sun = dayKey(addDays(new Date(`${sat}T12:00`), 1));
+  assert.ok(L.buildDay(st, sun).persons.ethan.sleep, 'asleep after the night shift');
+  // without the mark (an older sync), nothing changes: the entry is read as before
+  const st2 = load({ events: [Object.assign({}, bday, { np: undefined })] });
+  assert.equal(st2.events[0].np, false);
+});
+
 test('a countdown follows its event when the event is moved to another day', () => {
   // set on the trip when it was on the Saturday; since moved (in Google Calendar) to the Monday after
   const mon = dayKey(addDays(new Date(`${sat}T12:00`), 2));

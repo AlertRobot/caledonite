@@ -146,7 +146,8 @@ export function shiftFor(state, pid, key) {
   } else {
     const dayStart = atTime(key, '00:00');
     // all-day rota entries count on every day they cover (a week of leave is often one entry)
-    const rota = state.events.filter((ev) => ev.owner === pid && calOf(state, ev).role === 'rota' && (ev.allDay ? ev.startKey <= key && key < dayKey(ev.end) : dayKey(ev.start) === key));
+    // (a contact's birthday in a rota kept in your main calendar is never that day's shift)
+    const rota = state.events.filter((ev) => ev.owner === pid && !ev.np && calOf(state, ev).role === 'rota' && (ev.allDay ? ev.startKey <= key && key < dayKey(ev.end) : dayKey(ev.start) === key));
     if (!rota.length) return null;
     const ev = rota[0];
     type = inferShift(ev) || 'other'; source = 'rota'; title = ev.title;
