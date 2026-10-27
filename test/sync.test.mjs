@@ -1904,3 +1904,28 @@ test('notifications held until the morning arrive in the order they were made', 
   assert.deepEqual(sent.map((p) => JSON.parse(p).message.data.title), ['Ethan wants to plan something', 'Ethan changed something', 'Ethan called it off']);
   ctx.saToken_ = realToken; ctx.prop_ = realProp;
 });
+
+// ---------- round 11 checks ----------
+test("your partner's own calendar, shared with you in Google, is never copied back to them, nor taken for your rota or work", () => {
+  const me = { email: 'e@gmail.com', person: 'ethan', main: true, people: [
+    { id: 'ethan', data: { email: 'e@gmail.com', linked: [] } },
+    { id: 'sophie', data: { email: 's@gmail.com', linked: ['sophie@nhs.example'] } }
+  ] };
+  const theirs = [{ id: 'sophie__k1', data: { owner: 'sophie', calKey: 'k1', calId: 'shifts1@group.calendar.google.com', account: 's@gmail.com', canWrite: true } }];
+  ctx.fsQuery_ = (coll, f) => (coll === 'calendars' ? theirs.filter((d) => d.data.calId === f[0][1]) : []);
+  const cal = (id, name, owned = false) => ({ getId: () => id, getName: () => name, isOwnedByMe: () => owned });
+  const d = (id, name, owned) => ctx.defaultsFor_(cal(id, name, owned), false, me, { hh: {} });
+  // her main calendar, her work account's, and a rota calendar she made and shared with you
+  for (const [id, name] of [['s@gmail.com', 'Sophie'], ['sophie@nhs.example', 'Sophie (work)'], ['shifts1@group.calendar.google.com', "Sophie's shifts"]]) {
+    const x = d(id, name);
+    assert.equal(x.share, 'none', id);
+    assert.equal(x.role, 'normal', id);
+    assert.notEqual(x.layer, 'own', id);
+  }
+  // your own rota from a link, a friends calendar, and someone's work calendar: as before
+  assert.equal(d('abc@import.calendar.google.com', 'Loop rota').role, 'rota');
+  assert.equal(d('mates1@group.calendar.google.com', 'Friends').layer, 'friends');
+  assert.equal(d('boss@company.example', 'Team').role, 'work');
+  // Google's family calendar is all of yours
+  assert.equal(d('family01@group.calendar.google.com', 'Family').share, 'all');
+});
