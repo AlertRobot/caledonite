@@ -477,6 +477,14 @@ export function viewSetup(state) {
     <button type="button" class="btn big-btn" data-act="setupSave">Create ${esc(APP.name)}</button>
   </div>`;
 }
+// the household is there, but this phone's saved copy says it isn't (it already tried clearing it once by itself)
+export function viewStuck(state) {
+  return `<div class="welcome"><h1 class="h1">Nearly there</h1>
+    <p class="lead">${esc(APP.name)} is set up for ${esc(state.user && state.user.email)}, but this phone&rsquo;s saved copy is stuck.</p>
+    <button type="button" class="btn big-btn" data-act="healCache">Fix this phone</button>
+    <p class="small muted">That fetches everything again. Still stuck? Close ${esc(APP.name)} and any tabs it&rsquo;s open in, or restart the phone.</p>
+    <button type="button" class="btn sec" data-act="setupRecheck">Check again</button></div>`;
+}
 export function viewNotMember(state) {
   return `<div class="welcome"><h1 class="h1">Not on the list yet</h1>
     <p class="lead">${esc(state.user && state.user.email)} isn't part of this ${esc(APP.name)}. Ask your partner to add this email in Settings, Account.</p>
