@@ -620,6 +620,34 @@ test('a message shows, and goes again, even while a box is still focused', async
   await page.context().close();
 });
 
+test('something added for your partner says it went in their calendar, not both', async () => {
+  const page = await open('ethan', '#requests');
+  await mods(page, (store) => {
+    const d = new Date(); d.setDate(d.getDate() + 3);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return store.store.backend.commit([
+      { type: 'set', path: 'requests/r_add', data: { from: 'ethan', to: 'sophie', type: 'add', title: 'Dentist for Sophie', when: { day, start: '10:00', end: '11:00', allDay: false }, status: 'yes', created: Date.now(), answeredAt: Date.now() } },
+      { type: 'set', path: 'requests/r_add2', data: { from: 'sophie', to: 'ethan', type: 'add', title: 'Optician for Ethan', when: { day, start: '12:00', end: '13:00', allDay: false }, status: 'waiting', created: Date.now() } }
+    ]);
+  });
+  await page.click('[data-act="reqTab"][data-v="sent"]');
+  await page.waitForTimeout(100);
+  const sent = await page.locator('article', { hasText: 'Dentist for Sophie' }).textContent();
+  assert.match(sent, /Added for Sophie/);
+  assert.match(sent, /in Sophie’s calendar/);
+  assert.doesNotMatch(sent, /both your calendars/);
+  // Ethan says yes to the one Sophie added for him: it's saving to his calendar
+  await page.click('[data-act="reqTab"][data-v="for"]');
+  await page.waitForTimeout(100);
+  await page.locator('article', { hasText: 'Optician for Ethan' }).locator('[data-a="yes"]').click();
+  await page.waitForTimeout(100);
+  assert.match(await page.textContent('.toast'), /Saving it to your calendar\./);
+  await page.waitForTimeout(100);
+  assert.match(await page.locator('article', { hasText: 'Optician for Ethan' }).textContent(), /It’s in your calendar\./);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
 test('Today counts what needs you in words that read right: "1 request needs you"', async () => {
   const page = await open('sophie', '#today');
   // Ethan suggested another time for something Sophie asked: that's hers to answer now, and nothing else is

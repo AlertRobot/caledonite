@@ -339,7 +339,8 @@ const H = {
   altOffFrom: (el) => { const s = settingsOf(store.state, store.state.me); run(actions.updateMySettings({ altOff: { day: s.altOff.day, from: el.dataset.v } })); },
   askNew: () => { resetAsk(); },
   answer: (el) => run(actions.answerRequest(el.dataset.id, el.dataset.a), {
-    yes: 'Done. Saving it to your calendars.', no: 'Answer sent.', maybe: 'Answer sent.', seen: null, cancel: 'Request cancelled.', remind: 'Reminder sent.', 'accept-counter': 'Done. Saving it to your calendars.'
+    // (a favour, or something added just for you, goes in your calendar only)
+    yes: ['favour', 'add'].includes((store.state.requests.find((r) => r.id === el.dataset.id) || {}).type) ? 'Done. Saving it to your calendar.' : 'Done. Saving it to your calendars.', no: 'Answer sent.', maybe: 'Answer sent.', seen: null, cancel: 'Request cancelled.', remind: 'Reminder sent.', 'accept-counter': 'Done. Saving it to your calendars.'
   }[el.dataset.a]),
   suggestOpen: (el) => { ui.suggestFor = el.dataset.id; render(); },
   suggestCancel: () => { ui.suggestFor = null; render(); },

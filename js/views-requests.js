@@ -34,7 +34,9 @@ function reqCard(state, r) {
   const mine = r.from === state.me;
   const other = mine ? r.to : r.from;
   const on = nameOf(state, other);
-  const head = `<div class="row">${mine ? '' : avatar(state, r.from, 32)}<span class="grow b small muted">${mine ? 'You asked' : esc(nameOf(state, r.from))}, ${esc(agoText(r.created))}</span><span class="pill">${esc(TYPE_LABEL[r.type] || 'Request')}</span></div>`;
+  // (something you added for your partner is added for them, not for you)
+  const kind = r.type === 'add' && mine ? `Added for ${on}` : (TYPE_LABEL[r.type] || 'Request');
+  const head = `<div class="row">${mine ? '' : avatar(state, r.from, 32)}<span class="grow b small muted">${mine ? 'You asked' : esc(nameOf(state, r.from))}, ${esc(agoText(r.created))}</span><span class="pill">${esc(kind)}</span></div>`;
   const when = r.when ? `<p class="row small-gap b">${icon.clock(18)}${esc(whenText(r.when))}</p>` : '';
   let body = '';
   const id = esc(r.id);
@@ -107,7 +109,10 @@ function resultLine(state, r, mine) {
     return `<p class="ok-box">${mine ? 'Booked. It’s in your calendar.' : `${esc(on)} booked it. It’s in ${esc(on)}’s calendar.`}</p>`;
   }
   if (r.status === 'yes') {
-    const where = r.type === 'favour' ? (mine ? `${on} will do it.` : 'Done. It’s in your calendar as a reminder.') : r.when ? 'It’s in both your calendars.' : '';
+    // a favour, or something added for one of you, goes in that one calendar only
+    const where = r.type === 'favour' ? (mine ? `${on} will do it.` : 'Done. It’s in your calendar as a reminder.')
+      : r.type === 'add' ? (!r.when ? '' : mine ? `It’s in ${on}’s calendar.` : 'It’s in your calendar.')
+      : r.when ? 'It’s in both your calendars.' : '';
     return `<p class="ok-box">${esc(who)} said yes. ${esc(where)}</p>`;
   }
   if (r.status === 'no') return `<p class="note-box">${esc(who)} ${mine ? 'can’t' : 'said not'} this time.</p>`;
