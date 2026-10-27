@@ -699,3 +699,31 @@ test("hiding a calendar from yourself stops your partner seeing it too, unless y
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
+
+test("a phone whose saved copy was just cleared is told the household isn't there: it asks the server again and opens it", async () => {
+  const page = await openReal();
+  await fb(page, (f, h, house) => { f.server[h] = house; f.emitDoc(h, null); }, H, HOUSE);
+  await page.waitForFunction((p) => window.__fb.listening(`${p}/people`), H, { timeout: 2000 });
+  await fb(page, (f, h, people) => f.emitColl(`${h}/people`, people), H, PEOPLE);
+  await page.waitForSelector('.bottom-nav', { timeout: 2000 });
+  assert.doesNotMatch(await mainText(page), /Set up Caledonite/);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test('the first-time setup on a phone that already has a household opens it, never "That didn\'t save"', async () => {
+  const page = await openReal();
+  await fb(page, (f, h) => f.emitDoc(h, null), H);
+  await page.waitForTimeout(200);
+  assert.match(await mainText(page), /Set up Caledonite/);
+  // meanwhile the household turns out to be there, and the rules turn the second one down
+  await fb(page, (f, h, house) => { f.server[h] = house; f.failCommit = true; }, H, HOUSE);
+  await mods(page, (store, ui) => { ui.setup.myName = 'Ethan'; ui.setup.partnerName = 'Sophie'; });
+  await page.evaluate(() => { const b = [...document.querySelectorAll('[data-act="setupSave"]')][0]; b && b.click(); });
+  await page.waitForTimeout(400);
+  const toastText = await page.evaluate(() => (document.querySelector('#toast, .toast') || {}).textContent || '');
+  assert.doesNotMatch(toastText, /didn.t save/);
+  await page.waitForFunction((p) => window.__fb.listening(`${p}/people`), H, { timeout: 2000 });
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});

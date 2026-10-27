@@ -6,10 +6,13 @@
 //   __fb.listening(path)              whether something is listening there
 //   __fb.writes                       what the app saved
 //   __fb.authChanged(user)            the sign-in changing (null: signed out)
+//   __fb.server[path]                 what getDocFromServer finds there (missing: no such document)
+//   __fb.failCommit                   a batch commit is turned down (as the rules would)
 const SHARED = `
 const fb = window.__fb = window.__fb || {};
 fb.listeners = fb.listeners || [];
 fb.writes = fb.writes || [];
+fb.server = fb.server || {};
 fb.emitDoc = (path, data, meta = {}) => fb.listeners.filter((l) => l.path === path).forEach((l) => l.next({
   id: path.split('/').pop(), exists: () => data != null, data: () => data,
   metadata: { hasPendingWrites: !!meta.pending, fromCache: !!meta.fromCache }
@@ -47,7 +50,11 @@ export function onSnapshot(ref, a, b, c) {
 }
 export function writeBatch() {
   const ops = [];
-  return { set: (r, d, o) => ops.push({ type: 'set', path: r.path, data: d, merge: !!(o && o.merge) }), update: (r, d) => ops.push({ type: 'update', path: r.path, data: d }), delete: (r) => ops.push({ type: 'delete', path: r.path }), commit: async () => { fb.writes.push(...ops); } };
+  return { set: (r, d, o) => ops.push({ type: 'set', path: r.path, data: d, merge: !!(o && o.merge) }), update: (r, d) => ops.push({ type: 'update', path: r.path, data: d }), delete: (r) => ops.push({ type: 'delete', path: r.path }), commit: async () => { if (fb.failCommit) { const e = new Error('Missing or insufficient permissions.'); e.code = 'permission-denied'; throw e; } fb.writes.push(...ops); } };
+}
+export async function getDocFromServer(r) {
+  const d = fb.server[r.path];
+  return { id: r.path.split('/').pop(), exists: () => d != null, data: () => d, metadata: { hasPendingWrites: false, fromCache: false } };
 }
 export async function setDoc(r, d, o) { fb.writes.push({ type: 'set', path: r.path, data: d, merge: !!(o && o.merge) }); }
 export async function addDoc(c, d) { fb.writes.push({ type: 'add', path: c.path, data: d }); return { id: 'x' + fb.writes.length }; }

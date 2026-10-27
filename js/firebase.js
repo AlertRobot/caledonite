@@ -64,7 +64,13 @@ export async function createFirebaseBackend() {
       if (!snap.exists()) {
         // offline with nothing saved on this phone yet isn't "no household": wait for the server
         if (snap.metadata.fromCache) return;
-        setPhase('setup', { user: { email: u.email, name: u.displayName || '' } });
+        // ask the server once more before offering the first-time setup: a phone whose saved copy was just
+        // cleared (the site's data deleted while the app was open) can be told "not there" when it is
+        confirmMissing().then((d) => {
+          if (user !== u) return;
+          if (d) { useHousehold(d); return; }
+          setPhase('setup', { user: { email: u.email, name: u.displayName || '' } });
+        });
         return;
       }
       raw.household = snap.data();
@@ -80,6 +86,16 @@ export async function createFirebaseBackend() {
       // not allowed to read = not in this household
       setPhase('not-member', { user: { email: u.email, name: u.displayName || '' }, error: String(err && err.code || err) });
     }));
+  }
+  // the household as the server has it, or null if it really isn't there (or can't be reached or read)
+  async function confirmMissing() {
+    try { const d = await fs.getDocFromServer(ref('')); if (d.exists()) return d.data(); } catch (e) { console.warn('household check', e); }
+    return null;
+  }
+  function useHousehold(d) {
+    raw.household = d;
+    if (!listening) { listening = true; listenAll(); }
+    publish();
   }
   function listenAll() {
     const c = (name) => fs.collection(db, `${H}/${name}`);
@@ -225,7 +241,12 @@ export async function createFirebaseBackend() {
       const b = fs.writeBatch(db);
       for (const o of setupOps(user.email, info)) b.set(ref(o.path), o.data);
       creating = true;
-      try { await b.commit(); } finally { creating = false; }
+      try { await b.commit(); } catch (e) {
+        // already set up (this phone just couldn't see it): open it, never a second household
+        const d = await confirmMissing();
+        if (d) { useHousehold(d); return 'exists'; }
+        throw e;
+      } finally { creating = false; }
     }
   };
   return backend;
