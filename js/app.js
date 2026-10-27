@@ -3,7 +3,7 @@ import { store, actions, setPhase, setLinked, requestPassed } from './store.js';
 import { ui, resetAsk, resetAdd } from './uistate.js';
 import { viewToday, viewCalendar, waitingForMe, rotateCountdown } from './views-main.js';
 import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey } from './views-requests.js';
-import { viewSettings, viewSignedOut, viewSetup, viewNotMember, viewLoading } from './views-settings.js';
+import { viewSettings, viewSignedOut, viewSetup, viewStuck, viewNotMember, viewLoading } from './views-settings.js';
 import { viewEvent, findEvent } from './views-event.js';
 import { viewJobs, viewJar, STARTER_IDEAS, pickIdea, jarBudget } from './views-extra.js';
 import { loadLinked, parseBudgieLink, setBudgieLink, unlinkBudgie } from './linked.js';
@@ -53,6 +53,7 @@ export function render() {
   if (st.phase === 'loading') html = viewLoading();
   else if (st.phase === 'signed-out') html = viewSignedOut();
   else if (st.phase === 'setup') html = viewSetup(st);
+  else if (st.phase === 'stuck') html = viewStuck(st);
   else if (st.phase === 'ready' && !st.me && !Object.keys(st.people).length) html = viewLoading();
   else if (st.phase === 'not-member' || !st.me) html = viewNotMember(st);
   else {
@@ -518,7 +519,8 @@ const H = {
     if ((s.partnerEmail || '').trim().toLowerCase() === (st.user && st.user.email || '').toLowerCase()) return toast('That’s your own email. Add your partner’s Google email, or leave it for now.');
     try { const r = await actions.createHousehold({ myName, myShifts: s.myShifts, partnerName: s.partnerName, partnerEmail: s.partnerEmail, partnerShifts: s.partnerShifts }); if (r === 'exists') toast(`${APP.name} was already set up. Opening it.`); } catch (e) { console.error(e); toast(`That didn’t save (${(e && e.code) || 'error'}${e && e.check ? '; household ' + e.check : ''}). Try Check again first.`); }
   },
-  setupRecheck: () => { const b = store.backend; if (b && b.recheck) b.recheck(); }
+  setupRecheck: () => { const b = store.backend; if (b && b.recheck) b.recheck(); },
+  healCache: () => { const b = store.backend; if (b && b.heal) b.heal(); }
 };
 // changes from selects, time boxes and tick boxes
 const C = {

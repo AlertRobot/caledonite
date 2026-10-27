@@ -69,7 +69,11 @@ export async function createFirebaseBackend() {
         confirmMissing().then((d) => {
           if (user !== u) return;
           if (d) { useHousehold(d); return; }
-          setPhase('setup', { user: { email: u.email, name: u.displayName || '' }, setupCheck: lastCheck });
+          const who = { user: { email: u.email, name: u.displayName || '' } };
+          // the server has it, but this phone's saved copy says it doesn't: never the first-time setup
+          if (lastDirect === 'exists') { setPhase('stuck', who); return; }
+          if (lastDirect === 'denied') { setPhase('not-member', Object.assign(who, { error: 'permission-denied' })); return; }
+          setPhase('setup', Object.assign(who, { setupCheck: lastCheck }));
         });
         return;
       }
@@ -90,14 +94,50 @@ export async function createFirebaseBackend() {
   // the household as the server has it, or null if it really isn't there (or can't be reached or read)
   // (what it said is shown on the setup page, so a phone that's wrongly offered it can say why)
   let lastCheck = '';
+  let lastDirect = '';
   async function confirmMissing() {
+    lastDirect = '';
     try {
       const d = await fs.getDocFromServer(ref(''));
       lastCheck = d.exists() ? 'found' : 'not found on the server';
       if (d.exists()) return d.data();
     } catch (e) { console.warn('household check', e); lastCheck = 'couldn\u2019t check (' + String((e && e.code) || e) + ')'; }
+    // asked once more straight from the server's web address, past this phone's saved copy: after the site's data is
+    // cleared while the app was open, that copy can get stuck and answer "not there" even when asked for the server's
+    lastDirect = await direct();
+    if (lastDirect === 'exists') { lastCheck = 'there on the server, but this phone\u2019s saved copy is stuck'; healCache(true); }
+    else if (lastDirect === 'missing') lastCheck = 'not found on the server';
+    else if (lastDirect === 'denied') lastCheck = 'not open to this account';
     lastCheck += ' at ' + new Date().toTimeString().slice(0, 5);
     return null;
+  }
+  // the household as the server has it, as this account (the rules apply as usual): exists, missing, denied or error
+  async function direct() {
+    try {
+      if (!user || !user.getIdToken) return 'error';
+      const tok = await user.getIdToken();
+      const r = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE.config.projectId}/databases/(default)/documents/${H}`, { headers: { Authorization: `Bearer ${tok}` }, cache: 'no-store' });
+      return r.status === 200 ? 'exists' : r.status === 404 ? 'missing' : r.status === 403 ? 'denied' : 'error';
+    } catch (e) { console.warn('direct check', e); return 'error'; }
+  }
+  // this phone's saved copy of Caledonite's data is thrown away and the app opens again, fetching everything afresh.
+  // Done by itself once (not again within a few minutes, so it can never keep reloading); the stuck page's button
+  // does it on request. Only Caledonite's own copy: Peckish shares this web address and keeps its own.
+  async function healCache(auto) {
+    const KEY = 'caledonite.healedAt';
+    try { if (auto && Date.now() - (+sessionStorage.getItem(KEY) || 0) < 5 * 60000) return false; sessionStorage.setItem(KEY, String(Date.now())); } catch (e) { if (auto) return false; }
+    stopAll();
+    try { await fs.terminate(db); await fs.clearIndexedDbPersistence(db); } catch (e) {
+      console.warn('clear saved copy', e);
+      try {
+        const all = indexedDB.databases ? await indexedDB.databases() : [];
+        await Promise.all(all.filter((x) => /^firestore\//.test(x.name || '') && x.name.includes(`/${FIREBASE.config.projectId}/`)).map((x) => new Promise((res) => {
+          const q = indexedDB.deleteDatabase(x.name); q.onsuccess = q.onerror = q.onblocked = () => res();
+        })));
+      } catch (e2) { console.warn('clear saved copy', e2); }
+    }
+    location.reload();
+    return true;
   }
   function useHousehold(d) {
     raw.household = d;
@@ -246,6 +286,8 @@ export async function createFirebaseBackend() {
     // the household and both of you, in one go: the rules only allow your two records while the household is being made
     // the setup page's Check again: start over as this account
     recheck() { if (user) start(user); },
+    // the stuck page's "Fix this phone"
+    heal() { return healCache(false); },
     async createHousehold(info) {
       const b = fs.writeBatch(db);
       for (const o of setupOps(user.email, info)) b.set(ref(o.path), o.data);

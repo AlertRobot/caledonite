@@ -8,6 +8,7 @@
 //   __fb.authChanged(user)            the sign-in changing (null: signed out)
 //   __fb.server[path]                 what getDocFromServer finds there (missing: no such document)
 //   __fb.failCommit                   a batch commit is turned down (as the rules would)
+//   (the signed-in user has getIdToken; clearing the saved copy counts itself in sessionStorage 'fake.cleared')
 const SHARED = `
 const fb = window.__fb = window.__fb || {};
 fb.listeners = fb.listeners || [];
@@ -27,7 +28,7 @@ const MODULES = {
   'firebase-app.js': `export function initializeApp(config) { return { config }; }`,
   'firebase-auth.js': `${SHARED}
 export function getAuth(app) { return { app }; }
-export function onAuthStateChanged(auth, cb) { fb.authChanged = cb; setTimeout(() => cb(fb.user || null), 0); return () => {}; }
+export function onAuthStateChanged(auth, cb) { fb.authChanged = cb; setTimeout(() => cb(fb.user ? Object.assign({ getIdToken: async () => 'test-token' }, fb.user) : null), 0); return () => {}; }
 export async function getRedirectResult() { return null; }
 export class GoogleAuthProvider { setCustomParameters() {} }
 export async function signInWithPopup() {}
@@ -38,6 +39,8 @@ export function initializeFirestore() { return {}; }
 export function getFirestore() { return {}; }
 export function persistentLocalCache() { return {}; }
 export function persistentMultipleTabManager() { return {}; }
+export async function terminate() { fb.terminated = true; }
+export async function clearIndexedDbPersistence() { fb.cleared = (fb.cleared || 0) + 1; try { sessionStorage.setItem('fake.cleared', String((+sessionStorage.getItem('fake.cleared') || 0) + 1)); } catch (e) {} }
 export function doc(db, path) { return { path }; }
 export function collection(db, path) { return { path }; }
 export function query(c) { return { path: c.path }; }

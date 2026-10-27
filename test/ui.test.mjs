@@ -334,6 +334,10 @@ async function openReal(hash = '#today') {
   page.on('pageerror', (e) => page.errors.push(String(e)));
   await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
   await useFakeFirebase(page, { email: 'e@x.com', displayName: 'Ethan Dunning' });
+  // the household asked for straight from the server's web address (past the saved copy): as page.restStatus says
+  page.restStatus = 404;
+  page.restCalls = 0;
+  await page.route(/firestore\.googleapis\.com/, (r) => { page.restCalls++; return r.fulfill({ status: page.restStatus, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: '{}' }); });
   await page.goto(`${URL}${hash}`);
   await page.waitForFunction((p) => window.__fb && window.__fb.listening && window.__fb.listening(p), H);
   return page;
@@ -739,6 +743,44 @@ test('the setup page says what the server said about this account, and can check
   await page.waitForTimeout(100);
   await fb(page, (f, h) => f.emitDoc(h, null), H);
   await page.waitForFunction((p) => window.__fb.listening(`${p}/people`), H, { timeout: 2000 });
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test("a phone whose saved copy is stuck after its data was cleared: the server is asked directly, the copy is cleared once by itself, and setup is never offered", async () => {
+  const page = await openReal();
+  page.restStatus = 200;
+  // the saved copy says there's no household, and so does the SDK's own "ask the server" (it answers from that copy)
+  const reloaded = page.waitForEvent('load', { timeout: 4000 });
+  await fb(page, (f, h) => f.emitDoc(h, null), H);
+  await reloaded;
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('fake.cleared')), '1');
+  assert.ok(page.restCalls >= 1);
+  // still stuck after the reload: it doesn't clear it again by itself, and says what to do instead of setup
+  await page.waitForFunction((p) => window.__fb && window.__fb.listening && window.__fb.listening(p), H);
+  await fb(page, (f, h) => f.emitDoc(h, null), H);
+  await page.waitForSelector('[data-act="healCache"]', { timeout: 3000 });
+  const t = await mainText(page);
+  assert.doesNotMatch(t, /Set up Caledonite/);
+  assert.match(t, /saved copy is stuck/);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('fake.cleared')), '1');
+  // "Fix this phone" clears it on request
+  const again = page.waitForEvent('load', { timeout: 4000 });
+  await page.click('[data-act="healCache"]');
+  await again;
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('fake.cleared')), '2');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
+test("the server says this account can't open the household: Not on the list, never the first-time setup", async () => {
+  const page = await openReal();
+  page.restStatus = 403;
+  await fb(page, (f, h) => f.emitDoc(h, null), H);
+  await page.waitForTimeout(300);
+  const t = await mainText(page);
+  assert.match(t, /Not on the list yet/);
+  assert.doesNotMatch(t, /Set up Caledonite/);
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
