@@ -224,7 +224,7 @@ function secShifts(state) {
         <div class="grid2"><div class="field"><label for="st-${t}">Starts</label><input id="st-${t}" type="time" value="${esc(def.start)}" data-act="shiftTime" data-p="${esc(who)}" data-t="${t}" data-f="start"></div>
         <div class="field"><label for="en-${t}">Ends</label><input id="en-${t}" type="time" value="${esc(def.end)}" data-act="shiftTime" data-p="${esc(who)}" data-t="${t}" data-f="end"></div></div></div>`;
     }).join('')}</div></section>`);
-  out.push(`<section class="stack-s"><h2 class="h4">After a night shift</h2><div class="card grid2 pad">
+  out.push(`<section class="stack-s"><h2 class="h4">After a night shift</h2><div class="card grid2 pad after-nights">
     <div class="field"><label for="sleep-until">Sleeps until</label><input id="sleep-until" type="time" value="${esc(s.sleepUntil)}" data-act="personField" data-p="${esc(who)}" data-f="sleepUntil"></div>
     <div class="field"><label for="travel">Travel home</label><select id="travel" data-act="personField" data-p="${esc(who)}" data-f="travelMins">${[15, 30, 45, 60].map((m) => `<option value="${m}" ${Number(s.travelMins) === m ? 'selected' : ''}>${m === 60 ? '1 hour' : m + ' minutes'}</option>`).join('')}</select></div>
   </div></section>`);
