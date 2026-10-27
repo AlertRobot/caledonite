@@ -2039,6 +2039,12 @@ function processNotify_(ctx) {
         return;
       }
     }
+    // a question (with Yes and Can't on it) that waited for quiet hours or sleep: not sent once it's been answered
+    // or called off, or its time has gone by ("Still waiting" the afternoon after)
+    if (d.reqId && d.ask && !askStillOpen_(String(d.reqId), ctx, now)) {
+      try { fsCommit_([ifSame_(upd_(HOUSEHOLD + '/notify/' + n.id, { sent: true, sentAt: now, error: 'already answered' }, ['sent', 'sentAt', 'error']), n)]); } catch (e) { /* the next run tries again */ }
+      return;
+    }
     // claim it, so two accounts never send the same one
     try {
       fsCommit_([{ update: { name: docName_(HOUSEHOLD + '/notify/' + n.id), fields: toFields_({ sent: true, sentAt: now }) }, updateMask: { fieldPaths: ['sent', 'sentAt'] }, currentDocument: { updateTime: n.updateTime } }]);
@@ -2064,6 +2070,21 @@ function processNotify_(ctx) {
     // a couple of times, rather than lost. Never when one phone has it (it would arrive twice there).
     if (!delivered && again) unclaim_(n.id, now);
   });
+}
+// The request a question is about still wants an answer (read once a run; if it can't be read, it's asked as before)
+function askStillOpen_(id, ctx, now) {
+  ctx.asks = ctx.asks || {};
+  if (!(id in ctx.asks)) {
+    var open = true;
+    try {
+      if (/^[A-Za-z0-9_-]+$/.test(id)) {
+        var r = fsGet_(HOUSEHOLD + '/requests/' + id);
+        open = !!r && (r.status === 'waiting' || r.status === 'maybe') && !whenOver_(r.when, now);
+      }
+    } catch (err) { open = true; }
+    ctx.asks[id] = open;
+  }
+  return ctx.asks[id];
 }
 // Back to waiting, as it was before it was claimed (no fields of its own added, so Peckish can still keep its ones
 // up to date). How many times is kept in the script's cache, shared by every account's run.

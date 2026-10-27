@@ -1846,3 +1846,25 @@ test("the summaries never say your partner's working hours when every work calen
   // your own are always said
   assert.match(hidden, /You: working 9am to 6pm/);
 });
+
+test('a question that waited for quiet hours or sleep is not sent once it has been answered or its time has gone', () => {
+  const realToken = ctx.saToken_, realProp = ctx.prop_;
+  const day = (n) => ctx.Utilities.formatDate(new Date(Date.now() + n * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const reqs = {
+    'households/main/requests/rYes': { status: 'yes', when: { day: day(2), start: '19:00' } },
+    'households/main/requests/rOver': { status: 'waiting', when: { day: day(-1), start: '12:00', end: '13:00' } },
+    'households/main/requests/rOpen': { status: 'waiting', when: { day: day(2), start: '19:00' } },
+    'households/main/requests/rMaybe': { status: 'maybe', when: null }
+  };
+  const { sent, writes } = notifyHarness(() => 200);
+  ctx.fsGet_ = (p) => reqs[p] || null;
+  const ask = (id, reqId) => ({ id, data: { to: 'sophie', kind: 'requests', title: 'Still waiting: Ethan asked you something', reqId, ask: '1', sendAfter: 0, sent: false }, updateTime: 't' });
+  ctx.fsQuery_ = (coll) => (coll === 'notify' ? [ask('n1', 'rYes'), ask('n2', 'rOver'), ask('n3', 'rOpen'), ask('n4', 'rMaybe'),
+    { id: 'n5', data: { to: 'sophie', kind: 'requests', title: 'Ethan said yes', reqId: 'rYes', sendAfter: 0, sent: false }, updateTime: 't' }] : []);
+  ctx.fsList_ = () => [{ id: 't1', data: { token: 'tok' } }];
+  ctx.processNotify_({ people: { sophie: { settings: { quiet: { on: false } } } } });
+  assert.equal(sent.length, 3, 'the open ones, and the one that is not a question');
+  const skipped = writes.filter((w) => w.update && w.update.fields.error).map((w) => w.update.name.split('/').pop());
+  assert.deepEqual(skipped.sort(), ['n1', 'n2']);
+  ctx.saToken_ = realToken; ctx.prop_ = realProp;
+});
