@@ -448,21 +448,18 @@ function syncCalendars_(me, ctx, errors) {
       // written by another of your accounts until now, or not kept up for a while: what this account remembers
       // writing may not be all there is, so start from what's really there (no month is left behind)
       var reseed = !!doc && (String(doc.account || '') !== me.email || !doc.lastSeen || Date.now() - doc.lastSeen > 12 * 3600e3 || props.getProperty('h_' + calKey) === null);
+      // put right on the record, in the same write as its details (one write per record)
+      var fix = {};
       // calendars set up before family calendars were recognised, or renamed since: shown as family, but never
       // shared more than before without you choosing it
-      if (doc && !doc.userSet && doc.layer === 'own' && isFamilyCal_(id, meta.name)) {
-        writes.push(upd_(docPath, { layer: 'family' }, ['layer']));
-        doc = merge_(doc, { layer: 'family' });
-      }
+      if (doc && !doc.userSet && doc.layer === 'own' && isFamilyCal_(id, meta.name)) fix.layer = 'family';
       // set up before it could be told apart as your partner's (before their sync had recorded it, as when you
       // connect first, or before partners' calendars were recognised at all): put right when its details are next
       // checked, unless you've chosen its sharing yourself
       var due = !!doc && (reseed || !doc.lastSeen || Date.now() - doc.lastSeen > 6 * 3600e3);
       if (due && !doc.userSet && (doc.share !== 'none' || doc.role !== 'normal') && partnersCal_(me, ctx, id, meta.canWrite)) {
-        var fix = { share: 'none', role: 'normal', layer: isFamilyCal_(id, meta.name) ? 'family' : 'other' };
-        writes.push(upd_(docPath, fix, Object.keys(fix)));
+        fix = { share: 'none', role: 'normal', layer: isFamilyCal_(id, meta.name) ? 'family' : 'other' };
         if (doc.role === 'rota') toForget.push('rota_' + calKey);
-        doc = merge_(doc, fix);
       }
       if (!doc) {
         doc = merge_(meta, defaultsFor_(cal, isPrimary, me, ctx));
@@ -471,8 +468,12 @@ function syncCalendars_(me, ctx, errors) {
         // is put right now, so it's never shown back to you as theirs
         if (meta.canWrite) writes = writes.concat(theirRecordsOfMine_(me, ctx, id, meta.name));
       } else if (doc.name !== meta.name || doc.color !== meta.color || doc.canWrite !== meta.canWrite || doc.primary !== meta.primary || !doc.lastSeen || Date.now() - doc.lastSeen > 6 * 3600e3) {
-        writes.push(upd_(docPath, meta, Object.keys(meta)));
-        doc = merge_(doc, meta);
+        var both = merge_(meta, fix);
+        writes.push(upd_(docPath, both, Object.keys(both)));
+        doc = merge_(doc, both);
+      } else if (Object.keys(fix).length) {
+        writes.push(upd_(docPath, fix, Object.keys(fix)));
+        doc = merge_(doc, fix);
       }
       count++;
       var events = [];

@@ -1996,6 +1996,8 @@ test("your partner's calendar, set up in your account before their sync had reco
   ctx.syncCalendars_(couple('e@gmail.com', 'ethan'), { appEmail: 'e@gmail.com', hh: {}, people: { ethan: {}, sophie: {} }, person: { name: 'Ethan' }, calDocs: docs }, []);
   const fix = writes.find((w) => w.update && w.update.name.endsWith('/calendars/ethan__' + key) && w.update.fields.share);
   assert.ok(fix, 'the record is put right');
+  assert.equal(writes.filter((w) => w.update && w.update.name.endsWith('/calendars/ethan__' + key)).length, 1, 'in one write with its details');
+  assert.ok(fix.update.fields.lastSeen, 'with its details');
   assert.equal(fix.update.fields.share.stringValue, 'none');
   assert.equal(fix.update.fields.role.stringValue, 'normal');
   assert.ok(!writes.some((w) => w.update && w.update.name.includes('/sharedFeeds/ethan__' + key)), 'never copied back to her');
