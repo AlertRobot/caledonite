@@ -1868,3 +1868,13 @@ test('a question that waited for quiet hours or sleep is not sent once it has be
   assert.deepEqual(skipped.sort(), ['n1', 'n2']);
   ctx.saToken_ = realToken; ctx.prop_ = realProp;
 });
+
+test('after nights, the sleep starts after the travel time home the app assumes (half an hour until it is set)', () => {
+  const L = (day, hm) => ctx.localTime_(day, hm);
+  const night = { ev: { t: 'Night', s: L('2026-11-09', '19:30'), e: L('2026-11-10', '08:00') }, cal: { role: 'rota' } };
+  const p = (extra) => ({ id: 'sophie', settings: Object.assign({ hasShifts: true, sleepUntil: '14:00' }, extra), items: [night], mine: false });
+  const data = { overrides: {}, jobs: [] };
+  assert.equal(ctx.sleepUntil_(p({}), data, L('2026-11-10', '08:15')), 0, 'still on the way home');
+  assert.equal(ctx.sleepUntil_(p({}), data, L('2026-11-10', '08:35')), L('2026-11-10', '14:00'));
+  assert.equal(ctx.sleepUntil_(p({ travelMins: 0 }), data, L('2026-11-10', '08:05')), L('2026-11-10', '14:00'));
+});
