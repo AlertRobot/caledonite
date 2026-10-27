@@ -252,7 +252,7 @@ const H = {
   jarPick: () => {
     const st = store.state;
     const fun = jarBudget(st);
-    const idea = pickIdea(st, fun ? Math.floor(fun.left) : null, ui.jar.filter);
+    const idea = pickIdea(st, fun ? Math.floor(fun.left) : null, ui.jar.filter, ui.jar.pick);
     ui.jar.pickNone = !idea;
     ui.jar.pick = idea ? idea.id : null;
     render();

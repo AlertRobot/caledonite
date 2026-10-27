@@ -58,6 +58,14 @@ export const STARTER_IDEAS = [
   ['Breakfast in bed, then a lazy morning', 8, 'home'], ['No-phones evening with a card game', 0, 'home'], ['Tapas night at home', 20, 'home'],
   ['Visit family together', 15, 'trip'], ['Sunday roast out', 45, 'out'], ['Take a train somewhere new for the day', 50, 'trip']
 ].map(([title, cost, where], i) => ({ id: `seed${String(i + 1).padStart(2, '0')}`, title, cost, where }));
+// Starter ideas that only make sense at one time of year (months 1 to 12), so the jar never offers a Christmas market in
+// June. By the starter's id, as ideas already in the jar were saved without this.
+const SEASONS = { 'Ice skating (in winter)': [11, 12, 1, 2], 'Christmas market (in December)': [11, 12], 'Fireworks display (in November)': [10, 11], 'Pick-your-own fruit (in season)': [6, 7, 8, 9] };
+export const IDEA_MONTHS = Object.fromEntries(STARTER_IDEAS.filter((i) => SEASONS[i.title]).map((i) => [i.id, SEASONS[i.title]]));
+export function inSeason(idea, now = new Date()) {
+  const m = (Array.isArray(idea.months) && idea.months.length ? idea.months : null) || (IDEA_MONTHS[idea.id] && STARTER_IDEAS.some((s) => s.id === idea.id && s.title === idea.title) ? IDEA_MONTHS[idea.id] : null);
+  return !m || m.includes(now.getMonth() + 1);
+}
 
 const WHERE = { home: 'At home', out: 'Going out', trip: 'Day trip' };
 const money = (n) => (n ? `about £${n}` : 'free');
@@ -67,8 +75,10 @@ export function jarBudget(state) {
   if (!b || !b.fun) return null;
   return b.fun;
 }
-export function pickIdea(state, maxCost, where) {
-  const pool = state.ideas.filter((i) => (maxCost === null || (Number(i.cost) || 0) <= maxCost) && (!where || where === 'all' || i.where === where));
+// (not one out of season, and not the one just shown when there's another to pick)
+export function pickIdea(state, maxCost, where, avoid = null, now = new Date()) {
+  let pool = state.ideas.filter((i) => (maxCost === null || (Number(i.cost) || 0) <= maxCost) && (!where || where === 'all' || i.where === where) && inSeason(i, now));
+  if (pool.length > 1 && avoid) pool = pool.filter((i) => i.id !== avoid);
   if (!pool.length) return null;
   // ideas you've done less often come up more
   const weights = pool.map((i) => 1 / (1 + (i.used || 0)));

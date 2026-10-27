@@ -961,3 +961,21 @@ test('a birthday reminder that was ticked off can still be changed for that birt
   assert.equal(r.auto, false);
   assert.ok(Object.keys(r.done).length, 'and it stays ticked off for this year');
 });
+
+test('the ideas jar only offers a seasonal idea in its season, and Pick again shows a different one', async () => {
+  const { STARTER_IDEAS, pickIdea, inSeason } = await import('../js/views-extra.js');
+  const st = { ideas: STARTER_IDEAS.map((i) => ({ ...i })) };
+  const xmas = st.ideas.find((i) => /Christmas market/.test(i.title));
+  assert.equal(inSeason(xmas, new Date(2027, 5, 12)), false, 'not in June');
+  assert.equal(inSeason(xmas, new Date(2027, 11, 3)), true, 'in December');
+  // an idea of your own with the same id as a starter (made before), and any idea you added, can come up any time
+  assert.equal(inSeason({ id: xmas.id, title: 'Kayaking', where: 'out' }, new Date(2027, 5, 12)), true);
+  const june = new Date(2027, 5, 12);
+  for (let k = 0; k < 400; k++) assert.doesNotMatch(pickIdea(st, null, 'all', null, june).title, /Christmas|Ice skating|Fireworks/);
+  let seenXmas = false;
+  for (let k = 0; k < 2000 && !seenXmas; k++) seenXmas = /Christmas market/.test(pickIdea(st, null, 'all', null, new Date(2027, 11, 3)).title);
+  assert.ok(seenXmas, 'December can pick the Christmas market');
+  const two = { ideas: st.ideas.slice(0, 2) };
+  for (let k = 0; k < 50; k++) assert.notEqual(pickIdea(two, null, 'all', two.ideas[0].id, june).id, two.ideas[0].id);
+  assert.equal(pickIdea({ ideas: [two.ideas[0]] }, null, 'all', two.ideas[0].id, june).id, two.ideas[0].id, 'the only one left still comes up');
+});
