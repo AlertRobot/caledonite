@@ -561,3 +561,20 @@ test('an opened list of older requests or done jobs stays open when the screen r
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
+
+test('a list being chosen from is never redrawn away under the picker, and the choice then shows', async () => {
+  const page = await open('ethan', '#add');
+  await page.click('[data-act="addMore"]');
+  await page.focus('#add-repeat');
+  await page.evaluate(() => { window.__sel = document.getElementById('add-repeat'); });
+  // something changes on the other phone while the picker is open
+  await mods(page, (store) => store.store.backend.commit([{ type: 'update', path: '', data: { settingsRev: Date.now() } }]));
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => document.getElementById('add-repeat') === window.__sel && document.activeElement === window.__sel), true);
+  await page.selectOption('#add-repeat', 'WEEKLY:1');
+  await page.waitForTimeout(150);
+  assert.match(await page.textContent('.more-btn'), /Every week/);
+  assert.equal(await page.inputValue('#add-repeat'), 'WEEKLY:1');
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});

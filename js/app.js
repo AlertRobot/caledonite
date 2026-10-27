@@ -25,7 +25,8 @@ function route() {
 }
 function isEditing() {
   const a = document.activeElement;
-  return a && root.contains(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes(a.type)));
+  // (a list being chosen from too: redrawn while its picker is open, the choice would go nowhere)
+  return a && root.contains(a) && (a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes(a.type)));
 }
 
 function navBar(state, r) {
@@ -571,6 +572,8 @@ root.addEventListener('click', (e) => {
 });
 root.addEventListener('change', (e) => {
   const el = e.target;
+  // chosen: let go of the list, so the screen shows what the choice changed
+  if (el.tagName === 'SELECT') setTimeout(() => { if (document.activeElement === el) el.blur(); }, 0);
   if (el.dataset && el.dataset.act && C[el.dataset.act]) C[el.dataset.act](el, e);
 });
 root.addEventListener('input', (e) => {
