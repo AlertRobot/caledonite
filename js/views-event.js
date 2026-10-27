@@ -105,7 +105,7 @@ function priorityLink(state, src) {
   const c = state.calendars[cid];
   if (!c || (c.primary && c.owner === state.me)) return '';
   const low = isLowCal(state, cid);
-  return `<button type="button" class="btn link-btn self-start" data-act="calPriority" data-k="${esc(cid)}" data-v="${low ? 'normal' : 'low'}">${low ? `Show “${esc(c.name)}” on Today and the week again` : `Keep “${esc(c.name)}” off Today and the week`}</button>`;
+  return `<button type="button" class="btn link-btn self-start" data-act="calPriority" data-k="${esc(cid)}" data-v="${low ? 'normal' : 'low'}">${low ? `Make “${esc(c.name)}” normal priority` : `Make “${esc(c.name)}” low priority`}</button>`;
 }
 // Things made in this app, or your own events in a calendar you can edit
 export function canChange(state, src, cal) {

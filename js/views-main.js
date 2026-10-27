@@ -3,7 +3,7 @@ import {
   esc, dayKey, fromDayKey, addDays, fmtDate, fmtTime, fmtRange, MONTH_NAMES, atTime, mondayOf, fmtDateShort, agoText, minutesOf
 } from './util.js';
 import {
-  buildDay, dayList, statusNow, nextBothFree, itemTime, itemTitle, itemSub, nameOf, personColour, monthCell, allLayers, layerChipLabel, LAYER_INFO, settingsOf, reminderFor, myReminders, reminderLine, countdowns, countdownText, jobsOn, inQuietHours, quietNight, lowCount
+  buildDay, dayList, statusNow, nextBothFree, itemTime, itemTitle, itemSub, nameOf, shortName, personColour, monthCell, allLayers, layerChipLabel, LAYER_INFO, settingsOf, reminderFor, myReminders, reminderLine, countdowns, countdownText, jobsOn, inQuietHours, quietNight, lowCount
 } from './logic.js';
 import { jobRow } from './views-extra.js';
 import { icon, avatar, whoChip, seg } from './ui.js';
@@ -237,10 +237,10 @@ export function whoLabel(state, who) {
   if (who && who.includes(':')) {
     const [owner, layer] = who.split(':');
     const info = LAYER_INFO[layer] || LAYER_INFO.other;
-    const l = owner === state.me ? `Your ${info.label}` : `${nameOf(state, owner)}'s ${info.label}`;
+    const l = owner === state.me ? `Your ${info.label}` : `${shortName(state, owner)}'s ${info.label}`;
     return l.charAt(0).toUpperCase() + l.slice(1);
   }
-  return who === state.me ? 'You' : nameOf(state, who);
+  return who === state.me ? 'You' : shortName(state, who);
 }
 function whoColour(state, who) {
   if (who === 'both') return 'var(--tog)';
@@ -287,7 +287,7 @@ export function viewCalendar(state) {
   // layer chips
   const chips = [];
   const ids = [state.me, state.partner].filter(Boolean);
-  for (const pid of ids) chips.push({ k: pid, label: pid === state.me ? 'You' : nameOf(state, pid), dot: `var(--${personColour(state, pid)})` });
+  for (const pid of ids) chips.push({ k: pid, label: pid === state.me ? 'You' : shortName(state, pid), dot: `var(--${personColour(state, pid)})` });
   for (const lk of allLayers(state)) {
     const layer = lk.split(':')[1];
     chips.push({ k: lk, label: layerChipLabel(state, lk), dot: `var(--layer-${layer}, ${(LAYER_INFO[layer] || LAYER_INFO.other).colour})` });
@@ -350,8 +350,8 @@ function monthView(state) {
   const d = buildDay(state, selKey);
   const P = state.partner;
   const showLegend = [
-    ['me', 'Your plans'], ...(P ? [['partner', `${nameOf(state, P)}'s plans`]] : []),
-    ...(P && settingsOf(state, P).hasShifts ? [['sleep', `${nameOf(state, P)} sleeping`]] : []),
+    ['me', 'Your plans'], ...(P ? [['partner', `${shortName(state, P)}'s plans`]] : []),
+    ...(P && settingsOf(state, P).hasShifts ? [['sleep', `${shortName(state, P)} sleeping`]] : []),
     ['together', 'Together']
   ];
   return `<div class="card month">
@@ -428,7 +428,7 @@ function weekView(state) {
         if (t.allDay) lines.push('var(--tog)');
         else list.push([t.start.getTime(), t.end.getTime(), t.kind === 'hold' ? 'var(--tog-hold)' : 'var(--tog)']);
       }
-      rows.push(`<span class="strip-label ink-${personColour(state, pid)}">${pid === state.me ? 'You' : esc(nameOf(state, pid))}</span><div class="strip">${allDayLine(lines)}${segs(list)}</div>`);
+      rows.push(`<span class="strip-label ink-${personColour(state, pid)}">${pid === state.me ? 'You' : esc(shortName(state, pid))}</span><div class="strip">${allDayLine(lines)}${segs(list)}</div>`);
     }
     if (P) {
       const list = d.bothFree.map(([s, e]) => [s, e, 'var(--free)']);

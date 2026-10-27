@@ -1,6 +1,6 @@
 // Shared bits of interface: icons, avatars, chips, switches, segmented buttons.
 import { esc, initial } from './util.js';
-import { nameOf, personColour, LAYER_INFO } from './logic.js';
+import { nameOf, shortName, personColour, LAYER_INFO } from './logic.js';
 
 const svg = (inner, size = 22, extra = '') => `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${extra}>${inner}</svg>`;
 export const icon = {
@@ -46,11 +46,11 @@ export function whoChip(state, who) {
   if (who && who.includes(':')) {
     const [owner, layer] = who.split(':');
     const info = LAYER_INFO[layer] || LAYER_INFO.other;
-    const label = owner === state.me ? `Your ${info.label}` : `${nameOf(state, owner)}'s ${info.label}`;
+    const label = owner === state.me ? `Your ${info.label}` : `${shortName(state, owner)}'s ${info.label}`;
     return `<span class="chip" style="background:var(--layer-${layer}-soft, ${info.soft});color:var(--layer-${layer}-ink, ${info.ink})">${esc(label.charAt(0).toUpperCase() + label.slice(1))}</span>`;
   }
   const col = personColour(state, who);
-  return `<span class="chip chip-${col}">${who === state.me ? 'You' : esc(nameOf(state, who))}</span>`;
+  return `<span class="chip chip-${col}">${who === state.me ? 'You' : esc(shortName(state, who))}</span>`;
 }
 export function seg(items, { act, label, cls = '' } = {}) {
   return `<div class="seg ${cls}" role="group" aria-label="${esc(label || '')}">${items.map((it) =>

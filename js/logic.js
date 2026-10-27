@@ -77,6 +77,15 @@ export function nameOf(state, pid) {
   if (pid === 'both') return 'Both of you';
   return (state.people[pid] && state.people[pid].name) || 'Someone';
 }
+// The name on a button, chip or label: just the first name ("Sophie Magill" is "Sophie"), unless you both have the same one
+export function shortName(state, pid) {
+  const n = nameOf(state, pid);
+  if (pid === 'both') return n;
+  const first = (s) => String(s || '').trim().split(/\s+/)[0];
+  const f = first(n).toLowerCase();
+  const twin = Object.keys(state.people || {}).some((k) => k !== pid && first(nameOf(state, k)).toLowerCase() === f);
+  return f && !twin ? first(n) : n;
+}
 export function personColour(state, pid) {
   const p = state.people[pid];
   return (p && p.colour) || (pid === state.me ? 'blue' : 'orange');
@@ -96,7 +105,7 @@ export function layerLabel(state, key) {
   const info = LAYER_INFO[layer] || LAYER_INFO.other;
   const label = info.label;
   if (owner === state.me) return `Your ${label}`;
-  return `${nameOf(state, owner)}'s ${label}`;
+  return `${shortName(state, owner)}'s ${label}`;
 }
 export function layerChipLabel(state, key) {
   const l = layerLabel(state, key);

@@ -1,6 +1,6 @@
 // Requests, asking something, and adding something.
 import { esc, dayKey, addDays, fmtTime, agoText, atTime } from './util.js';
-import { nameOf, freeSlots, sleepingUntil, settingsOf, SHIFT_ORDER, REMIND_OPTIONS, REMIND_NOTES, remindSummary, leaveDaysFor, leaveSummary, JOB_REPEATS } from './logic.js';
+import { nameOf, shortName, freeSlots, sleepingUntil, settingsOf, SHIFT_ORDER, REMIND_OPTIONS, REMIND_NOTES, remindSummary, leaveDaysFor, leaveSummary, JOB_REPEATS } from './logic.js';
 import { whenLabel, requestPassed } from './store.js';
 import { icon, avatar, seg, toggleRow, empty } from './ui.js';
 import { ui } from './uistate.js';
@@ -20,7 +20,7 @@ export function viewRequests(state) {
   const recent = list.filter((r) => isOpen(r) || (Date.now() - (r.answeredAt || r.created || 0)) < 7 * 86400000);
   const older = list.filter((r) => !recent.includes(r));
   return `${pageHeader(state, 'Requests', 'Between you two')}
-    ${P ? `<a href="#ask" class="btn big-btn" data-act="askNew">${icon.plus(20)} Ask ${esc(nameOf(state, P))} something</a>` : ''}
+    ${P ? `<a href="#ask" class="btn big-btn" data-act="askNew">${icon.plus(20)} Ask ${esc(shortName(state, P))} something</a>` : ''}
     ${seg([{ v: 'for', label: `For you (${openForMe})`, on: ui.reqTab === 'for' }, { v: 'sent', label: `You sent (${openSent})`, on: ui.reqTab === 'sent' }], { act: 'reqTab', label: 'Which requests', cls: 'seg-full' })}
     <div class="stack">${recent.length ? recent.map((r) => reqCard(state, r)).join('') : empty(ui.reqTab === 'for' ? 'Nothing waiting for you.' : 'You haven’t asked anything lately.')}</div>
     ${older.length ? `<details class="older" data-keep="older-${ui.reqTab}" ${ui.opened[`older-${ui.reqTab}`] ? 'open' : ''}><summary class="b">Older (${older.length})</summary><div class="stack">${older.slice(0, 20).map((r) => reqCard(state, r)).join('')}</div></details>` : ''}`;
@@ -166,7 +166,7 @@ export function viewAsk(state) {
     <section class="stack-s">
       <label for="ask-title" class="h4">${a.type === 'leave' ? 'Where or what? (optional)' : 'What is it?'}</label>
       ${a.type === 'plan' ? `<a href="#jar" class="b small-link" data-act="jarFromAsk">${icon.heart(18)} Pick something from the ideas jar</a>` : ''}
-      ${a.type === 'favour' && favours.length ? `<div class="row-wrap">${favours.map((f) => `<button type="button" class="chip-btn" data-act="askFav" data-v="${esc(f)}">${esc(f)}</button>`).join('')}</div>` : ''}
+      ${a.type === 'favour' && favours.length ? `<div class="row-wrap">${favours.map((f) => `<button type="button" class="chip-btn fav-chip" data-act="askFav" data-v="${esc(f)}">${esc(f)}</button>`).join('')}</div>` : ''}
       <input id="ask-title" type="text" data-bind="ask.title" value="${esc(a.title)}" placeholder="For example: ${esc(placeholder)}" autocomplete="off">
     </section>
     ${needsWhen ? `<section class="stack-s">
@@ -246,7 +246,7 @@ export function viewAdd(state) {
 
   // what, who, when
   const whos = [{ v: 'me', label: 'Me' }];
-  if (P) { whos.push({ v: 'partner', label: nameOf(state, P) }); whos.push({ v: 'both', label: 'Both' }); }
+  if (P) { whos.push({ v: 'partner', label: shortName(state, P) }); whos.push({ v: 'both', label: 'Both' }); }
   out.push(`<div class="card flush form-card">
     ${titleRow('add-title', 'add.title', a.title, 'What is it?', 'For example: Dentist')}
     ${P ? fRow('Who', seg(whos.map((w) => Object.assign(w, { on: a.who === w.v })), { act: 'addWho', label: 'Who is it for?' })) : ''}
@@ -268,7 +268,7 @@ export function viewAdd(state) {
     if (a.more) {
       inner.push(fRow('<label for="add-repeat">Repeats</label>', `<select id="add-repeat" data-bind="add.repeat" data-act="addRerender">${EVENT_REPEATS.map(([v, l]) => `<option value="${v}" ${(a.repeat || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`));
       if (a.who === 'me' && cals.length > 1) inner.push(fRow('<label for="add-cal">Calendar</label>', `<select id="add-cal" data-bind="add.cal" data-act="addRerender">${cals.map((c) => `<option value="${esc(c.calKey)}" ${cal && cal.calKey === c.calKey ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`));
-      if (a.who === 'me' && P) inner.push(fRow(`${esc(nameOf(state, P))} sees`, seg([{ v: 'all', label: 'Everything', on: !a.busyOnly }, { v: 'busy', label: '“Busy”', on: a.busyOnly }], { act: 'addBusy', label: 'What your partner sees' })));
+      if (a.who === 'me' && P) inner.push(fRow(`${esc(shortName(state, P))} sees`, seg([{ v: 'all', label: 'Everything', on: !a.busyOnly }, { v: 'busy', label: '“Busy”', on: a.busyOnly }], { act: 'addBusy', label: 'What your partner sees' })));
       const opts = REMIND_OPTIONS.filter((o) => !a.allDay || !o.timedOnly);
       inner.push(`<div class="f-block"><span class="b">Remind me</span>
         <div class="row-wrap">${opts.map((o) => `<button type="button" class="chip-btn ${a.remind.includes(o.v) ? 'on' : ''}" aria-pressed="${a.remind.includes(o.v)}" data-act="addRemind" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
@@ -282,7 +282,7 @@ export function viewAdd(state) {
       ${inner.join('')}
     </div>`);
   }
-  const label = a.who === 'me' ? 'Add to my calendar' : a.who === 'both' ? 'Add for both of us' : `Send to ${nameOf(state, P)}`;
+  const label = a.who === 'me' ? 'Add to my calendar' : a.who === 'both' ? 'Add for both of us' : `Send to ${shortName(state, P)}`;
   out.push(`<div class="save-bar"><button type="button" class="btn big-btn" data-act="addSave">${esc(label)}</button></div>`);
   return out.join('');
 }
@@ -299,7 +299,7 @@ function dayRows(a) {
 function addJobForm(state) {
   const a = ui.add;
   const P = state.partner;
-  const whos = [['me', 'Me'], ...(P ? [['partner', nameOf(state, P)], ['both', 'Together']] : [])];
+  const whos = [['me', 'Me'], ...(P ? [['partner', shortName(state, P)], ['both', 'Together']] : [])];
   return `<div class="card flush form-card">
       ${titleRow('job-title', 'add.title', a.title, 'What needs doing?', 'Food shop')}
       ${fRow('Who', seg(whos.map(([v, l]) => ({ v, label: l, on: (a.jobWho || 'me') === v })), { act: 'addJobWho', label: 'Who is doing it' }))}
@@ -332,7 +332,7 @@ function addShiftForm(state) {
   const types = settingsOf(state, who).shiftTypes;
   const options = [me, P].filter((x) => x && settingsOf(state, x).hasShifts);
   return `<div class="card flush form-card">
-      ${options.length > 1 ? fRow('Whose', seg(options.map((x) => ({ v: x, label: x === me ? 'Mine' : nameOf(state, x), on: who === x })), { act: 'addShiftWho', label: 'Whose shift' })) : ''}
+      ${options.length > 1 ? fRow('Whose', seg(options.map((x) => ({ v: x, label: x === me ? 'Mine' : shortName(state, x), on: who === x })), { act: 'addShiftWho', label: 'Whose shift' })) : ''}
       ${dayRows(a)}
       <div class="f-block"><span class="b">Which shift?</span>
       <div class="grid2">${SHIFT_ORDER.map((t) => {

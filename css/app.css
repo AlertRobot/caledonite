@@ -193,13 +193,15 @@ p { margin: 0; }
 
 /* segmented */
 .seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--pill-bg); }
-.seg button { min-height: 36px; padding: 0 12px; border: none; border-radius: 999px; background: transparent; color: var(--ink); font-weight: 700; font-size: 15px; cursor: pointer; }
+.seg button { white-space: nowrap; min-height: 36px; padding: 0 12px; border: none; border-radius: 999px; background: transparent; color: var(--ink); font-weight: 700; font-size: 15px; cursor: pointer; }
 .seg button.on { background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
 .seg-sm button.on { background: var(--ink); color: var(--bg); }
-.seg-full { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+/* (equal widths while the labels fit; a longer label takes more room rather than wrapping) */
+.seg-full { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
 .seg-full button { min-height: 42px; }
-.seg-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-radius: 14px; }
-.seg-3 button { min-height: 44px; padding: 4px; border-radius: 11px; font-size: 14px; line-height: 1.15; }
+/* (each takes the room its label needs, and only a label too long for the row goes onto two lines) */
+.seg-3 { display: flex; border-radius: 14px; }
+.seg-3 button { flex: 1 1 auto; min-width: 0; white-space: normal; min-height: 44px; padding: 4px 8px; border-radius: 11px; font-size: 14px; line-height: 1.15; }
 
 /* forms */
 input[type="text"], input[type="email"], input[type="url"], input[type="date"], input[type="time"], select, textarea {
@@ -243,7 +245,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .month-nav { padding: 0 4px 4px; }
 .mgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .mhead { text-align: center; font-size: 13px; font-weight: 700; color: var(--muted); }
-.mcell { position: relative; height: 54px; padding: 4px 3px; border-radius: 10px; border: 2px solid transparent; background: var(--soft); color: var(--ink); display: flex; flex-direction: column; align-items: stretch; gap: 3px; cursor: pointer; overflow: hidden; }
+.mcell { position: relative; height: 54px; padding: 4px 1px; border-radius: 10px; border: 2px solid transparent; background: var(--soft); color: var(--ink); display: flex; flex-direction: column; align-items: stretch; gap: 3px; cursor: pointer; overflow: hidden; }
 .mcell.out { background: transparent; cursor: default; color: var(--muted); }
 .mcell.sel { border-color: var(--accent); background: var(--accent-soft); }
 .mnum { align-self: center; width: 24px; height: 24px; border-radius: 12px; font-size: 14px; font-weight: 700; line-height: 24px; text-align: center; }
@@ -424,11 +426,11 @@ details.older .stack { margin-top: 8px; }
 .title-input { border: none !important; min-height: 56px !important; padding: 0 !important; font-size: 20px; font-weight: 700; background: transparent !important; }
 .title-input:focus-visible { outline: none; }
 .f-title:focus-within { box-shadow: inset 0 -2px 0 var(--accent); }
-.f-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 14px; border-top: 1px solid var(--line2); width: 100%; background: transparent; border-left: none; border-right: none; border-bottom: none; color: var(--ink); text-align: left; font: inherit; }
+.f-row { display: flex; flex-wrap: wrap; row-gap: 8px; align-items: center; gap: 12px; min-height: 56px; padding: 8px 14px; border-top: 1px solid var(--line2); width: 100%; background: transparent; border-left: none; border-right: none; border-bottom: none; color: var(--ink); text-align: left; font: inherit; }
 .form-card > .f-row:first-child { border-top: none; }
 button.f-row { cursor: pointer; }
 .f-label { flex: none; min-width: 64px; font-weight: 700; }
-.f-ctl { flex: 1; min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.f-ctl { flex: 1 1 auto; min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .f-ctl .seg button { min-height: 34px; padding: 0 11px; font-size: 14px; }
 .f-ctl select, .f-ctl input[type="date"] { width: auto; max-width: 100%; min-height: 40px; border-width: 1px; }
 .f-ctl input[type="time"] { width: 112px; min-height: 40px; padding: 0 8px; border-width: 1px; }
@@ -454,4 +456,12 @@ button.f-row { cursor: pointer; }
 .ag-divider { padding: 8px 14px 4px; border-top: 1px solid var(--line2); font-size: 13px; font-weight: 700; color: var(--muted); background: var(--soft); }
 .ag-divider + .ag-row { border-top: none; }
 .ag-more { color: var(--muted); font-size: 14px; min-height: 44px; }
+/* a favour you added yourself can be long: it's cut short here, and shows in full once tapped */
+.fav-chip { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* narrow screens (a small phone, or a phone with its text zoomed): theme tiles one a row, colours three a row */
+@media (max-width: 340px) {
+  .theme-grid { grid-template-columns: minmax(0, 1fr); }
+  .grid5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .seg button { padding: 0 8px; }
+}
 .agenda > .ag-more:first-child { border-top: none; }
