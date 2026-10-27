@@ -1556,3 +1556,37 @@ test('a rota shared as working hours, saved before all-day entries were left out
   ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'all' });
   assert.equal(writes.length, 0);
 });
+
+test('a change to something still waiting to be added by another of your accounts is handed on to it, not lost', () => {
+  ctx.fsGet_ = () => null;
+  // you added "Tea" for you both, your copy in your work calendar; your partner's copy shows up first and they delete
+  // it before your work account (which runs every 10 minutes, without the ping) has made yours
+  const create = { person: 'ethan', op: 'create', tag: 'both:t9', both: true, account: 'work@x.com', byEmail: 'e@x.com', done: false, created: 1, event: { title: 'Tea', day: '2026-11-07', start: '16:00', end: '17:00' } };
+  const del = { person: 'ethan', op: 'delete', tag: 'both:t9', byEmail: 's@x.com', done: false, created: 2 };
+  const ownEdit = { person: 'ethan', op: 'update', tag: 'both:t9', byEmail: 'e@x.com', done: false, created: 3, changes: { title: 'Tea and cake' } };
+  const writes = [];
+  ctx.Calendar = fakeCalendar([]);
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'primary@x', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'primary@x' }) };
+  ctx.fsQuery_ = (coll) => (coll === 'outbox' ? [create, del, ownEdit].map((data, i) => ({ id: `o${i}`, data })) : []);
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const me = { email: 'e@x.com', person: 'ethan', main: true, people: [{ id: 'ethan', data: { email: 'e@x.com', linked: ['work@x.com'] } }] };
+  ctx.processOutbox_(me, { appEmail: 'e@x.com', calDocs: {}, hh: {} });
+  // the delete goes to the work account; your own change after it waits its turn (and follows it there next run)
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].update.name, 'households/main/outbox/o1');
+  assert.equal(writes[0].update.fields.account.stringValue, 'work@x.com');
+  assert.ok(!writes[0].update.fields.done, 'not marked done here');
+  writes.length = 0;
+  ctx.fsQuery_ = () => [create, Object.assign({}, del, { account: 'work@x.com' }), ownEdit].map((data, i) => ({ id: `o${i}`, data }));
+  ctx.processOutbox_(me, { appEmail: 'e@x.com', calDocs: {}, hh: {} });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].update.name, 'households/main/outbox/o2');
+  assert.equal(writes[0].update.fields.account.stringValue, 'work@x.com');
+  // never handed to an account that isn't yours
+  writes.length = 0;
+  ctx.fsQuery_ = () => [Object.assign({}, create, { account: 'stranger@x.com' }), del].map((data, i) => ({ id: `o${i}`, data }));
+  ctx.processOutbox_(me, { appEmail: 'e@x.com', calDocs: {}, hh: {} });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+});

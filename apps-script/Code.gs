@@ -1077,7 +1077,16 @@ function rotaRekey_(m, keep) {
 
 // Returns true when something in Google Calendar changed, so the feeds can catch up.
 function processOutbox_(me, ctx) {
-  var items = fsQuery_('outbox', [['person', me.person], ['done', false]]).filter(function (it) {
+  var all = fsQuery_('outbox', [['person', me.person], ['done', false]]);
+  // something you added to a calendar in another of your accounts that that account hasn't made yet: a change to it
+  // before then (yours, or your partner's to something for you both) is handed on to it, never lost
+  var waitingIn = {};
+  var mine = accountsOf_(me, ctx);
+  all.forEach(function (it) {
+    var d = it.data, acc = String(d.account || '').toLowerCase();
+    if (d.op === 'create' && d.tag && acc && acc !== me.email && mine[acc] && !!ctx.appEmail && String(d.byEmail || '').toLowerCase() === ctx.appEmail) waitingIn[d.tag] = acc;
+  });
+  var items = all.filter(function (it) {
     var acc = String(it.data.account || '').toLowerCase();
     // your partner's asks go to your main account: they can't add anything to your work calendar. Only a change
     // to something you share by its tag (both of you, or a request) is handed to the account whose calendar it's in.
@@ -1118,7 +1127,7 @@ function processOutbox_(me, ctx) {
       // not in any calendar this account has: your copy may be in one of your other accounts' calendars (your
       // partner's change to something for you both always comes here first). Handed on to that account.
       if (result.none && me.main && !o.account) {
-        var holder = holderOf_(me, ctx, o.tag, rs);
+        var holder = (o.tag && waitingIn[o.tag]) || holderOf_(me, ctx, o.tag, rs);
         if (holder) {
           if (key) stuck[key] = true;
           writes.push(upd_(HOUSEHOLD + '/outbox/' + it.id, { account: holder }, ['account']));
