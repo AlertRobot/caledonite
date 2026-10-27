@@ -1878,3 +1878,18 @@ test('after nights, the sleep starts after the travel time home the app assumes 
   assert.equal(ctx.sleepUntil_(p({}), data, L('2026-11-10', '08:35')), L('2026-11-10', '14:00'));
   assert.equal(ctx.sleepUntil_(p({ travelMins: 0 }), data, L('2026-11-10', '08:05')), L('2026-11-10', '14:00'));
 });
+
+test("a contact's birthday in a rota kept in your main calendar never hides the night shift that day", () => {
+  withDigest();
+  const L = (day, hm) => ctx.localTime_(day, hm);
+  const bday = ctx.normApi_({ id: 'b1', iCalUID: 'b1@google.com', summary: "Dave's birthday", eventType: 'birthday', birthdayProperties: { type: 'birthday' }, start: { date: '2026-11-09' }, end: { date: '2026-11-10' } });
+  const night = ctx.normApi_({ id: 'n1', iCalUID: 'n1@google.com', summary: 'Night', start: { dateTime: new Date(L('2026-11-09', '19:30')).toISOString() }, end: { dateTime: new Date(L('2026-11-10', '08:00')).toISOString() } });
+  // your own copy, as the sync saves it (all-day entries first)
+  const { api } = fakeProps();
+  const w = ctx.feedWrites_({ person: 'sophie', email: 's@x.com' }, { appEmail: 's@x.com' }, 'p', { share: 'all' }, [night, bday], api).writes;
+  const saved = JSON.parse(JSON.stringify(w.find((x) => x.update.name.includes('/privateFeeds/')).update.fields.events.arrayValue.values.map((v) => ctx.fromValue_(v))));
+  const p = { id: 'sophie', settings: { hasShifts: true, sleepUntil: '14:00', travelMins: 0 }, items: saved.map((ev) => ({ ev, cal: { role: 'rota' } })), mine: true };
+  const data = { overrides: {}, jobs: [] };
+  assert.match(ctx.dayWords_(ctx.personDay_(p, '2026-11-09', data)), /night shift from 7:30pm/);
+  assert.equal(ctx.sleepUntil_(p, data, L('2026-11-10', '09:00')), L('2026-11-10', '14:00'), 'asleep after it');
+});

@@ -692,8 +692,9 @@ function feedWrites_(me, ctx, calKey, doc, events, props, known) {
     var list = byMonth[mk];
     var base = { owner: me.person, ownerEmail: ctx.appEmail, calKey: calKey, month: mk, account: me.email };
     if (doc.show !== false) {
-      // (pb stays: the app never shows the names of things you share only as "Busy", say in a shared countdown)
-      var priv = list.map(function (e) { var c = clone_(e); delete c.np; return c; });
+      // (pb stays: the app never shows the names of things you share only as "Busy", say in a shared countdown;
+      // so does np, so the summaries and sleep after nights never take a contact's birthday for your shift)
+      var priv = list.map(function (e) { return clone_(e); });
       put_(HOUSEHOLD + '/privateFeeds/' + me.person + '__' + calKey + '__' + mk, base, priv);
     }
     var shared = shareFilter_(doc, list);
@@ -1695,7 +1696,8 @@ function personDay_(p, key, data) {
     var s0 = e.ad ? localTime_(e.sd, '00:00') : e.s;
     var e0 = e.ad ? localTime_(e.ed || keyPlus_(e.sd, 1), '00:00') : e.e;
     if (!(s0 < dayEnd && e0 > dayStart)) return;
-    if (c.role === 'rota') { if (e.ad ? e.sd <= key && key < (e.ed || keyPlus_(e.sd, 1)) : evStartKey_(e) === key) rota.push(e); return; }
+    // (a contact's birthday in a rota kept in your main calendar is just a birthday, never the day's shift)
+    if (c.role === 'rota' && !e.np) { if (e.ad ? e.sd <= key && key < (e.ed || keyPlus_(e.sd, 1)) : evStartKey_(e) === key) rota.push(e); return; }
     if (e.tag && /^(both:|req:)/.test(e.tag)) {
       var tk = togetherOf_(e.tag, data);
       if (tk === 'skip') return;
