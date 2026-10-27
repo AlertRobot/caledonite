@@ -353,6 +353,20 @@ test('opening the app: no "Not on the list" while your records are still on thei
   await page.context().close();
 });
 
+test('signing out just as something arrives from the server never brings the calendars back up', async () => {
+  const page = await openReal();
+  await fb(page, (f, h, house) => f.emitDoc(h, house), H, HOUSE);
+  await fb(page, (f, h, people) => f.emitColl(`${h}/people`, people), H, PEOPLE);
+  await page.waitForSelector('.bottom-nav');
+  // a change arrives, and in the same moment this phone is signed out
+  await fb(page, (f, h, people) => { f.emitColl(`${h}/people`, people); f.authChanged(null); }, H, PEOPLE);
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.bottom-nav').count(), 0);
+  assert.match(await mainText(page), /Sign in with Google/);
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
 test('opening the app offline for the first time shows it loading, not the first-time setup', async () => {
   const page = await openReal();
   await fb(page, (f, h) => f.emitDoc(h, null, { fromCache: true }), H);

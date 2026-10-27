@@ -37,7 +37,8 @@ export async function createFirebaseBackend() {
       setRaw(raw, { phase: 'ready', user: { email: user.email, name: user.displayName || '' } });
     }, 60);
   }
-  function stopAll() { unsubs.forEach((u) => u()); unsubs = []; listening = false; }
+  // (and anything about to be shown: drawn after signing out, it would bring back what was there)
+  function stopAll() { clearTimeout(timer); unsubs.forEach((u) => u()); unsubs = []; listening = false; }
   function mapColl(name, q, into, map, tries = 0) {
     let un = null;
     const holder = () => un && un();

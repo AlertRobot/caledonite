@@ -5,6 +5,7 @@
 //   __fb.emitColl(path, { id: data }) a collection or query snapshot
 //   __fb.listening(path)              whether something is listening there
 //   __fb.writes                       what the app saved
+//   __fb.authChanged(user)            the sign-in changing (null: signed out)
 const SHARED = `
 const fb = window.__fb = window.__fb || {};
 fb.listeners = fb.listeners || [];
@@ -23,7 +24,7 @@ const MODULES = {
   'firebase-app.js': `export function initializeApp(config) { return { config }; }`,
   'firebase-auth.js': `${SHARED}
 export function getAuth(app) { return { app }; }
-export function onAuthStateChanged(auth, cb) { setTimeout(() => cb(fb.user || null), 0); return () => {}; }
+export function onAuthStateChanged(auth, cb) { fb.authChanged = cb; setTimeout(() => cb(fb.user || null), 0); return () => {}; }
 export async function getRedirectResult() { return null; }
 export class GoogleAuthProvider { setCustomParameters() {} }
 export async function signInWithPopup() {}
