@@ -995,12 +995,21 @@ export function countdowns(state, now = new Date()) {
     if (days < 0 || days > 400) return;
     out.push({ id, title, date: dateK, days, who, mine });
   };
+  // the event a countdown is for, moved since (in the app or in Google Calendar): its new day. Not something that
+  // repeats (every time has the same name), and the saved day when the event isn't in the calendars here
+  const dayNow = (c) => {
+    if (!c.ref) return c.date;
+    const evs = state.events.filter((e) => evRef(e) === c.ref);
+    if (!evs.length || evs.some((e) => e.sid || e.rid)) return c.date;
+    const days = new Set(evs.map((e) => (e.allDay ? (e.startKey || dayKey(e.start)) : dayKey(e.start))));
+    return days.size === 1 ? [...days][0] : c.date;
+  };
   for (const pid of [state.me, state.partner].filter(Boolean)) {
     const p = state.people[pid] || {};
     for (const [id, c] of Object.entries(p.countdowns || {})) {
       if (!c || typeof c.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(c.date)) continue;
       if (pid !== state.me && c.shared === false) continue;
-      add(`${pid}:${id}`, c.title, c.date, pid, pid === state.me);
+      add(`${pid}:${id}`, c.title, dayNow(c), pid, pid === state.me);
     }
   }
   const s = settingsOf(state, state.me);

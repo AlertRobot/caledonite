@@ -252,6 +252,23 @@ test('a countdown to something private shows only on your own Today', () => {
   assert.ok(titles.includes('Party') && !titles.includes('Job interview'));
 });
 
+test('a countdown follows its event when the event is moved to another day', () => {
+  // set on the trip when it was on the Saturday; since moved (in Google Calendar) to the Monday after
+  const mon = dayKey(addDays(new Date(`${sat}T12:00`), 2));
+  const trip = { owner: 'ethan', calKey: 'primary', id: 'trip1', uid: 'trip1', t: 'Trip to York', ad: 1, sd: mon, ed: dayKey(addDays(new Date(`${mon}T12:00`), 1)) };
+  const st = load({ events: [trip] });
+  const ref = L.evRef(st.events[0]);
+  st.people.ethan.countdowns = { c1: { title: 'Trip to York', date: sat, ref, shared: true } };
+  assert.equal(L.countdowns(st).find((c) => c.title === 'Trip to York').date, mon);
+  // something that repeats (every time has the same name), or one not in the calendars here: as it was saved
+  const st2 = load({ events: [Object.assign({}, trip, { sid: 'trip1' })] });
+  st2.people.ethan.countdowns = { c1: { title: 'Trip to York', date: sat, ref, shared: true } };
+  assert.equal(L.countdowns(st2).find((c) => c.title === 'Trip to York').date, sat);
+  const st3 = load();
+  st3.people.ethan.countdowns = { c1: { title: 'Trip to York', date: sat, ref, shared: true } };
+  assert.equal(L.countdowns(st3).find((c) => c.title === 'Trip to York').date, sat);
+});
+
 test('a countdown to something your partner sees only as "Busy" stays on your own Today', () => {
   // added with "Sophie sees Busy", still waiting to sync: it's private, whichever calendar it goes in
   const st = load({ outbox: { o1: { person: 'ethan', op: 'create', tag: 'add:ji', byEmail: 'e@x.com', done: false, event: { title: 'Job interview', day: sat, start: '10:00', end: '11:00', allDay: false, busyOnly: true } } } });
