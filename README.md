@@ -15,6 +15,7 @@ Try it with made-up data: open the app with `?demo=ethan` or `?demo=sophie` on t
 
 1. **Firebase project** (console.firebase.google.com): create a project, add a Web app, and copy its config into `js/config.js` (`FIREBASE.config`).
    - Firestore: create a database (London, `europe-west2`), then paste `firestore.rules` into Rules and publish.
+   - Firestore, Indexes, Composite: add an index on the collection `notify` with `sent` Ascending then `sendAfter` Ascending (query scope Collection). The sync then reads only the notifications that are due, not every one waiting (Peckish queues a week of them). Until it's built, the sync reads them all, as before.
    - Authentication: turn on Google. Under Settings, Authorised domains, add `alertrobot.github.io`.
    - Cloud Messaging: under Web Push certificates, generate a key pair and copy the key into `js/config.js` (`FIREBASE.vapidKey`).
    - Project settings, Service accounts: generate a new private key (a JSON file). Keep it private.

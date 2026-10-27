@@ -1556,3 +1556,252 @@ test('a rota shared as working hours, saved before all-day entries were left out
   ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'all' });
   assert.equal(writes.length, 0);
 });
+
+test('a change to something still waiting to be added by another of your accounts is handed on to it, not lost', () => {
+  ctx.fsGet_ = () => null;
+  // you added "Tea" for you both, your copy in your work calendar; your partner's copy shows up first and they delete
+  // it before your work account (which runs every 10 minutes, without the ping) has made yours
+  const create = { person: 'ethan', op: 'create', tag: 'both:t9', both: true, account: 'work@x.com', byEmail: 'e@x.com', done: false, created: 1, event: { title: 'Tea', day: '2026-11-07', start: '16:00', end: '17:00' } };
+  const del = { person: 'ethan', op: 'delete', tag: 'both:t9', byEmail: 's@x.com', done: false, created: 2 };
+  const ownEdit = { person: 'ethan', op: 'update', tag: 'both:t9', byEmail: 'e@x.com', done: false, created: 3, changes: { title: 'Tea and cake' } };
+  const writes = [];
+  ctx.Calendar = fakeCalendar([]);
+  ctx.CalendarApp = { getAllCalendars: () => [{ getId: () => 'primary@x', isOwnedByMe: () => true }], getDefaultCalendar: () => ({ getId: () => 'primary@x' }) };
+  ctx.fsQuery_ = (coll) => (coll === 'outbox' ? [create, del, ownEdit].map((data, i) => ({ id: `o${i}`, data })) : []);
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const me = { email: 'e@x.com', person: 'ethan', main: true, people: [{ id: 'ethan', data: { email: 'e@x.com', linked: ['work@x.com'] } }] };
+  ctx.processOutbox_(me, { appEmail: 'e@x.com', calDocs: {}, hh: {} });
+  // the delete goes to the work account; your own change after it waits its turn (and follows it there next run)
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].update.name, 'households/main/outbox/o1');
+  assert.equal(writes[0].update.fields.account.stringValue, 'work@x.com');
+  assert.ok(!writes[0].update.fields.done, 'not marked done here');
+  writes.length = 0;
+  ctx.fsQuery_ = () => [create, Object.assign({}, del, { account: 'work@x.com' }), ownEdit].map((data, i) => ({ id: `o${i}`, data }));
+  ctx.processOutbox_(me, { appEmail: 'e@x.com', calDocs: {}, hh: {} });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].update.name, 'households/main/outbox/o2');
+  assert.equal(writes[0].update.fields.account.stringValue, 'work@x.com');
+  // never handed to an account that isn't yours
+  writes.length = 0;
+  ctx.fsQuery_ = () => [Object.assign({}, create, { account: 'stranger@x.com' }), del].map((data, i) => ({ id: `o${i}`, data }));
+  ctx.processOutbox_(me, { appEmail: 'e@x.com', calDocs: {}, hh: {} });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].update.fields.done.booleanValue, true);
+});
+
+test('the morning summary says "Together" only for things you both do, as the app does', () => {
+  const day = '2026-11-10';
+  const L = (hm) => ctx.localTime_(day, hm);
+  const reqs = {
+    'households/main/requests/leave1': { type: 'leave', own: true, people: ['ethan'], status: 'yes' },
+    'households/main/requests/fav1': { type: 'favour', from: 'sophie', to: 'ethan', status: 'yes' },
+    'households/main/requests/plan1': { type: 'plan', from: 'ethan', to: 'sophie', status: 'yes' },
+    'households/main/requests/off1': { type: 'plan', from: 'sophie', to: 'ethan', status: 'cancelled' }
+  };
+  ctx.fsGet_ = (p) => reqs[p] || null;
+  const cal = { role: 'normal', layer: 'own' };
+  ctx.fsList_ = () => [{ id: 'ethan__p', data: cal }, { id: 'sophie__p', data: cal }];
+  const feeds = {
+    privateFeeds: [{ id: 'ethan__p__2026-11', data: { calKey: 'p', events: [
+      { id: '1', tag: 'req:leave1', t: 'Holiday: Spain', ad: 1, sd: day, ed: ctx.keyPlus_(day, 1) },
+      { id: '2', tag: 'req:fav1', t: 'Pick up the parcel (for Sophie)', s: L('12:00'), e: L('13:00') },
+      { id: '3', tag: 'req:plan1', t: 'Cinema', s: L('19:00'), e: L('21:00') },
+      { id: '4', tag: 'req:off1', t: 'Pencilled in: Bowling', s: L('15:00'), e: L('16:00') },
+      { id: '5', tag: 'both:tea', t: 'Tea at Mum\'s', s: L('17:00'), e: L('18:00') }
+    ] } }],
+    sharedFeeds: [{ id: 'sophie__p__2026-11', data: { calKey: 'p', events: [{ id: '6', tag: 'both:tea', t: 'Tea at Mum\'s', s: L('17:00'), e: L('18:00') }] } }]
+  };
+  ctx.fsQuery_ = (coll) => feeds[coll] || [];
+  const data = ctx.digestData_({ person: 'ethan' }, { settings: {}, people: { ethan: { name: 'Ethan' }, sophie: { name: 'Sophie' } } });
+  const text = ctx.morningText_(data, day);
+  const together = (text.match(/Together: ([^.]*)/) || [])[1] || '';
+  assert.match(together, /Cinema at 7pm/);
+  assert.match(together, /Tea at Mum's at 5pm/);
+  assert.doesNotMatch(together, /Holiday|parcel|Bowling/, text);
+  // your own holiday is a day off; the favour is one of your things today; the called-off one isn't there at all
+  assert.match(text, /You: on holiday/);
+  assert.match(text, /Pick up the parcel \(for Sophie\) at 12pm/);
+  assert.doesNotMatch(text, /Bowling/);
+});
+
+test('the morning summary is remembered as sent before it goes, so a run stopped just after never sends it twice', () => {
+  const realNow = vm.runInContext('Date.now', ctx);
+  const at = ctx.localTime_('2026-11-10', '07:40');
+  ctx.__fakeNow = at;
+  vm.runInContext('Date.now = function () { return __fakeNow; }', ctx);
+  const realData = ctx.digestData_, realText = ctx.morningText_;
+  ctx.digestData_ = () => ({});
+  ctx.morningText_ = () => 'You: nothing planned.';
+  try {
+    const { store, api } = smallProps({});
+    ctx.PropertiesService = { getUserProperties: () => api };
+    ctx.docName_ = (p) => p;
+    let seenAtCommit = null;
+    ctx.fsCommit_ = () => { seenAtCommit = store.digest_morning || null; };
+    const me = { person: 'ethan', main: true };
+    const c = { settings: { morning: { on: true, at: '07:30' }, weekAhead: { on: false } }, people: { ethan: {} } };
+    ctx.digests_(me, c);
+    assert.equal(seenAtCommit, '2026-11-10', 'already remembered when it was sent');
+    // and when it couldn't be saved, it's tried again next run
+    delete store.digest_morning;
+    ctx.fsCommit_ = () => { throw new Error('Firestore 503: unavailable'); };
+    assert.throws(() => ctx.digests_(me, c), /503/);
+    assert.equal(store.digest_morning, undefined);
+  } finally {
+    ctx.realNow = realNow;
+    vm.runInContext('Date.now = realNow', ctx);
+    ctx.digestData_ = realData; ctx.morningText_ = realText;
+  }
+});
+
+test('each run reads only the notifications that are due, not every one waiting (with a sweep an hour, and without the index)', () => {
+  const now = Date.now();
+  const cache = {};
+  ctx.CacheService = { getScriptCache: () => ({ get: (k) => (k in cache ? cache[k] : null), put: (k, v) => { cache[k] = String(v); }, remove: (k) => { delete cache[k]; } }) };
+  const queries = [];
+  const waiting = [
+    { id: 'pk-later', data: { to: 'sophie', kind: 'reminders', title: 'Dinner Friday', sendAfter: now + 3 * 864e5, sent: false }, updateTime: 't' },
+    { id: 'odd', data: { to: 'sophie', kind: 'notes', title: 'No time saved', sent: false }, updateTime: 't' }
+  ];
+  let indexed = true;
+  ctx.fsQuery_ = (coll, eqs) => {
+    queries.push(JSON.stringify(eqs));
+    if (coll !== 'notify') return [];
+    if (eqs.length > 1) {
+      if (!indexed) throw new Error('Firestore 400: FAILED_PRECONDITION: The query requires an index. You can create it here: ...');
+      return [];
+    }
+    return waiting;
+  };
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.fsList_ = () => [];
+  ctx.docName_ = (p) => p;
+  const c = () => ({ people: { sophie: { settings: { quiet: { on: false } } } } });
+  // the first run in an hour reads everything waiting, and so finds one saved without a time
+  ctx.processNotify_(c());
+  assert.deepEqual(queries, ['[["sent",false]]']);
+  assert.equal(writes.length, 1, 'the one with no time is sent');
+  assert.match(JSON.stringify(writes[0]), /odd/);
+  // the runs after it ask only for what's due: none of the week of meal reminders is read
+  queries.length = 0; writes.length = 0;
+  ctx.processNotify_(c());
+  assert.equal(queries.length, 1);
+  assert.deepEqual(JSON.parse(queries[0]), [['sent', false], ['sendAfter', JSON.parse(queries[0])[1][1], '<=']]);
+  assert.ok(Math.abs(JSON.parse(queries[0])[1][1] - now) < 60e3);
+  assert.equal(writes.length, 0);
+  // without the index: everything, as before, and it isn't asked for again for a while
+  indexed = false; queries.length = 0;
+  ctx.processNotify_(c());
+  ctx.processNotify_(c());
+  assert.deepEqual(queries.filter((q) => q.includes('sendAfter')).length, 1);
+  assert.equal(queries.filter((q) => q === '[["sent",false]]').length, 2);
+  // and the database's own query for it
+  const realCall = ctx.call_, realProp = ctx.prop_;
+  ctx.call_ = (m, url, body) => { queries.push(JSON.stringify(body)); return []; };
+  const realQuery = ctx.fsQuery_;
+  delete ctx.fsQuery_;
+  vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8').match(/function fsQuery_[\s\S]*?\n}\n/)[0], ctx);
+  ctx.prop_ = () => 'proj';
+  ctx.fsQuery_('notify', [['sent', false], ['sendAfter', 5, '<=']]);
+  assert.match(queries.pop(), /"op":"LESS_THAN_OR_EQUAL","value":\{"integerValue":"5"\}/);
+  ctx.fsQuery_ = realQuery; ctx.call_ = realCall; ctx.prop_ = realProp;
+});
+
+test('a travel time after nights beyond what the app allows never stops the sleep after a night shift', () => {
+  const L = (day, hm) => ctx.localTime_(day, hm);
+  const night = { ev: { t: 'Night', s: L('2026-11-09', '19:30'), e: L('2026-11-10', '08:00') }, cal: { role: 'rota' } };
+  const p = (travelMins) => ({ id: 'sophie', settings: { hasShifts: true, sleepUntil: '14:00', travelMins }, items: [night], mine: false });
+  const data = { overrides: {}, jobs: [] };
+  assert.equal(ctx.sleepUntil_(p(1e9), data, L('2026-11-10', '13:00')), L('2026-11-10', '14:00'));
+  assert.equal(ctx.sleepUntil_(p(-600), data, L('2026-11-10', '08:05')), L('2026-11-10', '14:00'));
+});
+
+test('a rota shared as working hours, then as everything: the leave already on it is never news', () => {
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 4 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const L = (hm) => ctx.localTime_(day, hm);
+  const { api } = smallProps({});
+  ctx.PropertiesService = { getUserProperties: () => api };
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  const evs = [{ t: 'Long day', s: L('07:30'), e: L('20:00') }, { ad: 1, sd: ctx.keyPlus_(day, 1), ed: ctx.keyPlus_(day, 3), t: 'Annual leave' }];
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'hours' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'hours' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', evs, api, { share: 'all' });
+  assert.deepEqual(writes.map((w) => w.update.fields.body.stringValue), []);
+  // a real change is still told, and under working hours never the leave
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'rota', [evs[1]], api, { share: 'hours' });
+  assert.equal(writes.length, 1);
+  assert.match(writes[0].update.fields.body.stringValue, /long day removed/);
+  assert.doesNotMatch(writes[0].update.fields.body.stringValue, /leave|all-day/i);
+});
+
+test('a very full calendar never stops the others saving: big saves go in parts, and a month too full is left as it was', () => {
+  withDigest();
+  // the saves are split well under what Firestore takes in one request (10 MB, 500 writes)
+  const sent = [];
+  const realCall = ctx.call_, realProp = ctx.prop_;
+  ctx.call_ = (m, url, body) => { sent.push(body.writes.length); return {}; };
+  ctx.prop_ = () => 'proj';
+  const realCommit = ctx.fsCommit_;
+  vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8').match(/function fsCommit_[\s\S]*?\n}\n/)[0], ctx);
+  const big = (i) => ({ update: { name: `d${i}`, fields: { x: { stringValue: 'x'.repeat(300e3) } } } });
+  ctx.fsCommit_(Array.from({ length: 40 }, (_, i) => big(i)));
+  assert.ok(sent.length >= 3, 'in parts');
+  assert.equal(sent.reduce((a, b) => a + b, 0), 40);
+  sent.length = 0;
+  ctx.fsCommit_(Array.from({ length: 900 }, (_, i) => ({ delete: `d${i}` })));
+  assert.deepEqual(sent, [400, 400, 100]);
+  ctx.fsCommit_ = realCommit; ctx.call_ = realCall; ctx.prop_ = realProp;
+  // one month with thousands of long events: that calendar says so, the others are saved
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const store = {};
+  ctx.PropertiesService = { getUserProperties: () => ({ getProperty: (k) => (k in store ? store[k] : null), getProperties: () => Object.assign({}, store), setProperties: (o) => Object.assign(store, o), setProperty: (k, v) => { store[k] = v; }, deleteProperty: (k) => { delete store[k]; } }) };
+  const s0 = ctx.localTime_(ctx.Utilities.formatDate(new Date(Date.now() + 5 * 864e5), 'Europe/London', 'yyyy-MM-dd'), '09:00');
+  const mk = (n, title) => Array.from({ length: n }, (_, i) => ({ id: `e${i}`, iCalUID: `e${i}@x`, summary: title, start: { dateTime: new Date(s0 + i * 60e3).toISOString() }, end: { dateTime: new Date(s0 + i * 60e3 + 30e3).toISOString() } }));
+  const items = { 'team@x': mk(4000, 'Ward cover '.repeat(20)), 'p@x': mk(3, 'Dentist') };
+  ctx.Calendar = { Events: { list: (id) => ({ items: items[id] }) } };
+  const cal = (id, name) => ({ getId: () => id, getName: () => name, getColor: () => '', isOwnedByMe: () => true });
+  ctx.CalendarApp = { getAllCalendars: () => [cal('team@x', 'Team'), cal('p@x', 'Main')], getDefaultCalendar: () => ({ getId: () => 'p@x' }) };
+  const errors = [];
+  const keyOf = (id) => ctx.shortKey_(id);
+  const docs = { [keyOf('team@x')]: { account: 'e@x.com', lastSeen: Date.now(), name: 'Team', color: '', canWrite: true, primary: false, show: true, share: 'busy' }, [keyOf('p@x')]: { account: 'e@x.com', lastSeen: Date.now(), name: 'Main', color: '', canWrite: true, primary: true, show: true, share: 'all' } };
+  store['h_' + keyOf('team@x')] = '{}'; store['h_' + keyOf('p@x')] = '{}';
+  ctx.syncCalendars_({ email: 'e@x.com', person: 'ethan', main: true, people: [] }, { appEmail: 'e@x.com', calDocs: docs, hh: {} }, errors);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /calendar Team: It has too many events in \d{4}-\d{2}/);
+  assert.ok(writes.some((w) => w.update && /ethan__.*__\d{4}-\d{2}$/.test(w.update.name) && w.update.name.includes(keyOf('p@x'))), 'the main calendar is saved');
+  assert.ok(!writes.some((w) => w.update && w.update.name.includes(keyOf('team@x'))), 'the full one is left as it was');
+});
+
+test("a rota kept in your main calendar never tells your partner about your contacts' birthdays", () => {
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 4 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const L = (hm) => ctx.localTime_(day, hm);
+  const bday = { ad: 1, sd: day, ed: ctx.keyPlus_(day, 1), t: "Dave's birthday", np: 1 };
+  const shift = { t: 'Long day', s: L('07:30'), e: L('20:00') };
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  // a new contact's birthday turning up is not news; nor is one going
+  let { api } = smallProps({});
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift], api, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift, bday], api, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift], api, { share: 'all' });
+  assert.deepEqual(writes.map((w) => w.update.fields.body.stringValue), []);
+  // saved by an earlier version, with the birthday in it: not "removed" either
+  ({ api } = smallProps({}));
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift, Object.assign({}, bday, { np: 0 })], api, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift, bday], api, { share: 'all' });
+  assert.deepEqual(writes.map((w) => w.update.fields.body.stringValue), []);
+});

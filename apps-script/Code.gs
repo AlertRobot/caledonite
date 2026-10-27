@@ -701,7 +701,11 @@ function feedWrites_(me, ctx, calKey, doc, events, props, known) {
   });
   function put_(path, base, evs) {
     // whose it is too (an email corrected before joining, or another of your accounts taking over)
-    var h = hash_(JSON.stringify([base, evs]));
+    var json = JSON.stringify([base, evs]);
+    // a month too full for one database record (at most 1 MB): this calendar keeps what it had, and says so,
+    // rather than every calendar's copies failing to save with it, every run
+    if (json.length > 800e3) throw new Error('It has too many events in ' + base.month + ' to copy into Caledonite.');
+    var h = hash_(json);
     next[path] = h;
     if (old[path] !== h) writes.push(upd_(path, merge_(base, { events: evs, updated: Date.now() })));
   }
@@ -992,6 +996,7 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   var now = Date.now();
   var win = { from: now - 864e5, to: now + 21 * 864e5 };
   var map = {};
+  var birthdays = {};
   // in time order, so a day's second shift is always its second, however Google listed them
   // (each start worked out once: Utilities calls aren't free)
   events = events.map(function (e) { return { e: e, s: e.ad ? Utilities.parseDate(e.sd, TZ, 'yyyy-MM-dd').getTime() : e.s }; })
@@ -1000,8 +1005,8 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     var e = x.e, s = x.s;
     var en = e.ad ? Utilities.parseDate(e.ed || keyPlus_(e.sd, 1), TZ, 'yyyy-MM-dd').getTime() : e.e;
     if (s < win.from || s > win.to) return;
-    // shared as working hours: your partner never sees all-day entries or very long ones, so never hears of them
-    if (share === 'hours' && (e.ad || en - s > 14 * 3600e3)) return;
+    // your contacts' birthdays (a rota kept in your main calendar) are never in your partner's copy, so never news
+    if (e.np) { birthdays[s + '|' + en] = true; return; }
     var k = evStartKey_(e);
     while (map[k]) k += '+';
     // a shift marked Private or #busy is never named, not even by a change to its name
@@ -1021,9 +1026,13 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   try { before = JSON.parse(props.getProperty(key) || 'null'); } catch (err) { before = null; }
   props.setProperty(key, JSON.stringify({ from: win.from, to: win.to, map: map }));
   if (!before || typeof before !== 'object' || !before.map || share === 'none') return;
-  // saved before working-hours sharing left out all-day and very long entries: compared the same way, so they
-  // never come up as removed (each day's entries numbered again in time order, as now)
-  before.map = rotaRekey_(before.map, function (v) { return !!v && (share !== 'hours' || (!v[3] && v[1] - v[0] <= 14 * 3600e3)); });
+  // Every entry is remembered, whatever the sharing, so changing it never makes old entries look new. Shared as
+  // working hours, your partner never sees all-day entries or very long ones, so never hears of them: both sides
+  // are compared without them (each day's entries numbered again in time order)
+  var keep = function (v) { return !!v && (share !== 'hours' || (!v[3] && v[1] - v[0] <= 14 * 3600e3)); };
+  // (saved before they were left out: never "removed" either)
+  before.map = rotaRekey_(before.map, function (v) { return keep(v) && !(v[3] && birthdays[v[0] + '|' + v[1]]); });
+  map = rotaRekey_(map, keep);
   var named = share === 'all';
   var lo = Math.max(before.from, win.from), hi = Math.min(before.to, win.to);
   var inside = function (v) { return v && v[0] >= lo && v[0] <= hi && v[1] > now; };
@@ -1077,7 +1086,16 @@ function rotaRekey_(m, keep) {
 
 // Returns true when something in Google Calendar changed, so the feeds can catch up.
 function processOutbox_(me, ctx) {
-  var items = fsQuery_('outbox', [['person', me.person], ['done', false]]).filter(function (it) {
+  var all = fsQuery_('outbox', [['person', me.person], ['done', false]]);
+  // something you added to a calendar in another of your accounts that that account hasn't made yet: a change to it
+  // before then (yours, or your partner's to something for you both) is handed on to it, never lost
+  var waitingIn = {};
+  var mine = accountsOf_(me, ctx);
+  all.forEach(function (it) {
+    var d = it.data, acc = String(d.account || '').toLowerCase();
+    if (d.op === 'create' && d.tag && acc && acc !== me.email && mine[acc] && !!ctx.appEmail && String(d.byEmail || '').toLowerCase() === ctx.appEmail) waitingIn[d.tag] = acc;
+  });
+  var items = all.filter(function (it) {
     var acc = String(it.data.account || '').toLowerCase();
     // your partner's asks go to your main account: they can't add anything to your work calendar. Only a change
     // to something you share by its tag (both of you, or a request) is handed to the account whose calendar it's in.
@@ -1118,7 +1136,7 @@ function processOutbox_(me, ctx) {
       // not in any calendar this account has: your copy may be in one of your other accounts' calendars (your
       // partner's change to something for you both always comes here first). Handed on to that account.
       if (result.none && me.main && !o.account) {
-        var holder = holderOf_(me, ctx, o.tag, rs);
+        var holder = (o.tag && waitingIn[o.tag]) || holderOf_(me, ctx, o.tag, rs);
         if (holder) {
           if (key) stuck[key] = true;
           writes.push(upd_(HOUSEHOLD + '/outbox/' + it.id, { account: holder }, ['account']));
@@ -1601,9 +1619,14 @@ function digests_(me, ctx) {
   var writes = [];
   if (wantMorning) writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: me.person, kind: 'summary', title: "Good morning. Here's " + WEEKDAYS_[isoWd_(today) - 1], body: morningText_(data, today), link: '#today', sendAfter: now, sent: false, created: now }));
   if (wantWeek) writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: me.person, kind: 'summary', title: 'Your week ahead', body: weekText_(data, nextMonday_(today)), link: '#calendar', sendAfter: now, sent: false, created: now }));
-  fsCommit_(writes);
+  // remembered before it's sent (as for reminders), so a run stopped just after sending never sends it again
+  var before = { digest_morning: props.getProperty('digest_morning'), digest_week: props.getProperty('digest_week') };
   if (wantMorning) props.setProperty('digest_morning', today);
   if (wantWeek) props.setProperty('digest_week', today);
+  try { fsCommit_(writes); } catch (err) {
+    Object.keys(before).forEach(function (k) { if (before[k] === null) props.deleteProperty(k); else props.setProperty(k, before[k]); });
+    throw err;
+  }
 }
 
 // Everything the summaries need: both people's settings, events, calendars, shifts and jobs.
@@ -1625,11 +1648,33 @@ function digestData_(me, ctx) {
   fsQuery_('shifts', [['day', since, '>=']]).forEach(function (d) { if (d.data.person && d.data.day) overrides[d.data.person + '|' + d.data.day] = d.data; });
   // only the ones still to do (done ones are kept, and there are more of them every week)
   var jobs = fsQuery_('jobs', [['done', false]]).map(function (j) { return j.data; });
-  return {
-    me: { id: me.person, name: 'You', settings: ctx.settings || {}, items: feedsFor('privateFeeds', me.person), mine: true },
-    partner: partner ? { id: partner.id, name: partner.name || 'Your partner', settings: partner.settings || {}, items: feedsFor('sharedFeeds', partner.id), mine: false } : null,
-    overrides: overrides, jobs: jobs
+  var mine = { id: me.person, name: 'You', settings: ctx.settings || {}, items: feedsFor('privateFeeds', me.person), mine: true };
+  var theirs = partner ? { id: partner.id, name: partner.name || 'Your partner', settings: partner.settings || {}, items: feedsFor('sharedFeeds', partner.id), mine: false } : null;
+  // whose calendars each thing made in the app is in, and the requests they came from (read only when needed)
+  var tagOwners = {};
+  [mine, theirs].forEach(function (p) {
+    if (p) p.items.forEach(function (x) { if (x.ev && x.ev.tag) (tagOwners[x.ev.tag] = tagOwners[x.ev.tag] || {})[p.id] = true; });
+  });
+  var reqs = {};
+  var reqOf = function (id) {
+    if (!(id in reqs)) reqs[id] = /^[A-Za-z0-9_-]+$/.test(id) ? fsGet_(HOUSEHOLD + '/requests/' + id) : null;
+    return reqs[id];
   };
+  return { me: mine, partner: theirs, overrides: overrides, jobs: jobs, tagOwners: tagOwners, reqOf: reqOf };
+}
+
+// Something made in the app, the way the app sees it: 'both' (added for you both, or a request between you),
+// 'own' (a favour, something added for one of you, a holiday booked just for yourself), or 'skip' (said no to or
+// called off)
+function togetherOf_(tag, data) {
+  tag = String(tag || '');
+  if (/^both:/.test(tag)) return 'both';
+  if (!/^req:/.test(tag)) return 'own';
+  var r = data.reqOf ? data.reqOf(tag.slice(4)) : null;
+  if (r && (r.status === 'no' || r.status === 'cancelled')) return 'skip';
+  if (Object.keys((data.tagOwners || {})[tag] || {}).length > 1) return 'both';
+  var justOne = r && (r.own === true || (Array.isArray(r.people) && r.people.length === 1));
+  return r && r.type !== 'favour' && r.type !== 'add' && !justOne ? 'both' : 'own';
 }
 
 // One person's day: shift, work, day off, their own events, and things together.
@@ -1646,7 +1691,11 @@ function personDay_(p, key, data) {
     var e0 = e.ad ? localTime_(e.ed || keyPlus_(e.sd, 1), '00:00') : e.e;
     if (!(s0 < dayEnd && e0 > dayStart)) return;
     if (c.role === 'rota') { if (e.ad ? e.sd <= key && key < (e.ed || keyPlus_(e.sd, 1)) : evStartKey_(e) === key) rota.push(e); return; }
-    if (e.tag && /^(both:|req:)/.test(e.tag)) { out.together.push(e); return; }
+    if (e.tag && /^(both:|req:)/.test(e.tag)) {
+      var tk = togetherOf_(e.tag, data);
+      if (tk === 'skip') return;
+      if (tk === 'both') { out.together.push(e); return; }
+    }
     if (c.role === 'work') return;
     if (c.layer && c.layer !== 'own') return;
     if (e.ad && HOLIDAY_RE_.test(e.t || '')) { if (e.sd === key || s0 <= dayStart) out.off = 'holiday'; return; }
@@ -1906,7 +1955,8 @@ function sleepUntil_(p, data, now) {
   var today = Utilities.formatDate(new Date(now), TZ, 'yyyy-MM-dd');
   var prev = personDay_(p, keyPlus_(today, -1), data).shift;
   if (!prev || !(prev.type ? prev.type === 'night' : shiftWords_(prev) === 'night shift')) return 0;
-  var from = prev.e + (Number(s.travelMins) || 0) * 60e3;
+  // (either of you can set the other's travel time: never more than the app allows, 4 hours)
+  var from = prev.e + Math.max(0, Math.min(240, Number(s.travelMins) || 0)) * 60e3;
   var until = localTime_(today, hm_(s.sleepUntil) || '14:00');
   return now >= from && now < until ? until : 0;
 }
@@ -1935,9 +1985,32 @@ function asleepUntil_(pid, who, ctx, now) {
   return ctx.asleep[pid];
 }
 
+// The notifications waiting to go now. Only those whose time has come are read (Peckish queues a week of meal
+// reminders, and every run of every account would otherwise read them all, which adds up against the free
+// database reads), using the index in the README. Once an hour, for everyone's runs, everything not yet sent is
+// read instead, so one saved without a proper time is never stuck; and if the index isn't there yet, always that.
+function dueNotify_(now) {
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+  var everything = function () { return fsQuery_('notify', [['sent', false]]).filter(function (n) { return (n.data.sendAfter || 0) <= now; }); };
+  if (!cache || !cache.get('notify_swept')) {
+    var all = everything();
+    if (cache) { try { cache.put('notify_swept', '1', 3600); } catch (e) { /* it's only a saving */ } }
+    return all;
+  }
+  if (!cache.get('notify_noindex')) {
+    try { return fsQuery_('notify', [['sent', false], ['sendAfter', now, '<=']]); } catch (err) {
+      if (!/index/i.test(String(err && err.message))) throw err;
+      Logger.log('notify: the index for waiting notifications is not set up yet (see the README)');
+      try { cache.put('notify_noindex', '1', 21600); } catch (e) { /* tried again next run */ }
+    }
+  }
+  return everything();
+}
+
 function processNotify_(ctx) {
   var now = Date.now();
-  var due = fsQuery_('notify', [['sent', false]]).filter(function (n) { return (n.data.sendAfter || 0) <= now; });
+  var due = dueNotify_(now);
   if (!due.length) return;
   var tokensFor = {};
   var outOfTime = false;
@@ -2079,9 +2152,9 @@ function fsList_(coll) {
   } while (token);
   return out;
 }
-// eqs: [field, value] (equal), or [field, value, '>='] for from that value on
+// eqs: [field, value] (equal), or [field, value, '>='] for from that value on ('<=' up to it)
 function fsQuery_(collId, eqs) {
-  var ops = { '>=': 'GREATER_THAN_OR_EQUAL' };
+  var ops = { '>=': 'GREATER_THAN_OR_EQUAL', '<=': 'LESS_THAN_OR_EQUAL' };
   var filters = eqs.map(function (f) { return { fieldFilter: { field: { fieldPath: f[0] }, op: ops[f[2]] || 'EQUAL', value: toValue_(f[1]) } }; });
   var where = filters.length === 1 ? filters[0] : { compositeFilter: { op: 'AND', filters: filters } };
   var r = call_('post', base_() + '/' + HOUSEHOLD + ':runQuery', { structuredQuery: { from: [{ collectionId: collId }], where: where, limit: 500 } });
@@ -2091,10 +2164,20 @@ function fsQuery_(collId, eqs) {
   });
   return out;
 }
+// In parts of at most 400 writes and about 4 MB (Firestore takes 500 writes and 10 MB at once): the first sync of a
+// few busy calendars is never one request too big to go through, every run
 function fsCommit_(writes) {
-  for (var i = 0; i < writes.length; i += 400) {
-    call_('post', base_().replace(/\/documents$/, '/documents:commit'), { writes: writes.slice(i, i + 400) });
-  }
+  var batch = [], size = 0;
+  var send = function () {
+    if (batch.length) call_('post', base_().replace(/\/documents$/, '/documents:commit'), { writes: batch });
+    batch = []; size = 0;
+  };
+  writes.forEach(function (w) {
+    var n = JSON.stringify(w).length;
+    if (batch.length && (batch.length >= 400 || size + n > 4e6)) send();
+    batch.push(w); size += n;
+  });
+  send();
 }
 function upd_(path, obj, mask) {
   var w = { update: { name: docName_(path), fields: toFields_(obj) } };
