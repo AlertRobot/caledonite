@@ -195,6 +195,18 @@ test('Ask, or Add for your partner: a time that has already gone is questioned, 
   await page.context().close();
 });
 
+test("going back with the phone's Back while a box is still focused (keyboard closed) moves to the screen it says", async () => {
+  const page = await open('ethan', '#today');
+  await go(page, '#ask');
+  await page.fill('#ask-title', 'Walk');
+  // the text box keeps focus after the keyboard is closed: Back changes the address
+  await page.evaluate(() => history.back());
+  await page.waitForTimeout(250);
+  assert.ok(await page.locator('.cd-strip, .page-head h1:text("Today")').count(), 'Today is showing');
+  assert.equal(await page.locator('#ask-title').count(), 0);
+  await page.context().close();
+});
+
 test("a partner's shift times can't break the Shifts page", async () => {
   const page = await open('ethan', '#settings/shifts');
   const p = await page.getAttribute('[data-act="cycleShift"]', 'data-p');

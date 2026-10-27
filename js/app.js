@@ -623,7 +623,8 @@ async function boot() {
   if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyLook());
   store.subscribe(() => render());
   setInterval(rotateCountdown, 5000);
-  window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); });
+  // a new screen (Back, a link): a box still focused after the keyboard was closed mustn't keep the old one up
+  window.addEventListener('hashchange', () => { if (isEditing()) document.activeElement.blur(); window.scrollTo(0, 0); render(); });
   setInterval(() => { newDay(); if (!document.hidden && !isEditing()) { store.state = Object.assign({}, store.state, { rev: store.state.rev + 1 }); render(); } }, 60000);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
