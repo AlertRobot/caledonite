@@ -881,3 +881,25 @@ test('dinner moved for your own shift says "you", not your own name', () => {
   assert.equal(d2.title, 'Dinner when you’re home');
   assert.match(d2.sub, /^You finish at 8pm/);
 });
+
+test('a birthday reminder that was ticked off can still be changed for that birthday', async () => {
+  const priv = {};
+  const loadB = () => setRaw({
+    household: {}, people: { ethan: { name: 'Ethan', email: 'e@x.com', settings: { autoRemind: { birthdays: ['d0'] } } }, sophie: { name: 'Sophie', email: 's@x.com' } },
+    calendars: { ethan__primary: { owner: 'ethan', calKey: 'primary', share: 'all', primary: true } },
+    feeds: [{ owner: 'ethan', calKey: 'primary', private: true, events: [{ id: 'b1', uid: 'b1', t: "Mum's birthday", ad: 1, sd: k(0), ed: k(1) }] }],
+    private: priv, privateFromServer: true, shifts: {}, requests: {}, notes: {}, outbox: {}, jobs: {}, ideas: {}, status: {}
+  }, { phase: 'ready', demo: true, me: 'ethan', user: { email: 'e@x.com' } });
+  // Firestore's set with merge: maps merge, so a field left out of a change stays as it was
+  const merge = (a, b) => { const o = Object.assign({}, a); for (const [x, v] of Object.entries(b)) o[x] = v && typeof v === 'object' && !Array.isArray(v) && a[x] && typeof a[x] === 'object' ? merge(a[x], v) : v; return o; };
+  store.backend = { ping() {}, async commit(ops) { for (const o of ops.filter(Boolean)) if (o.type === 'update' && o.path.endsWith('/private/main')) Object.assign(priv, merge(priv, o.data)); loadB(); } };
+  loadB();
+  const ev = store.state.events[0]; const ref = L.evRef(ev);
+  assert.deepEqual(L.reminderFor(store.state, ref, ev).times, ['d0']);
+  await actions.reminderDone(ref, `${ref}@${k(0)}`, "Mum's birthday");
+  await actions.setReminder({ ref, owner: 'ethan', title: "Mum's birthday", times: ['w1', 'd0'], note: '' });
+  const r = L.reminderFor(store.state, ref, ev);
+  assert.deepEqual(r.times, ['w1', 'd0']);
+  assert.equal(r.auto, false);
+  assert.ok(Object.keys(r.done).length, 'and it stays ticked off for this year');
+});

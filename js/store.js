@@ -392,7 +392,9 @@ export const actions = {
     const cur = ((st.people[st.me] || {}).reminders || {})[id] || {};
     const r = { ref, owner, title: title || cur.title || '', times: times ?? cur.times ?? [], note: note ?? cur.note ?? '', created: cur.created || now(), updated: now() };
     if (cur.done) r.done = cur.done;
-    if (cur.auto) r.auto = cur.auto;
+    // a birthday's automatic reminder that was ticked off, now changed here: from now on it's this birthday's own
+    // (as it would have been if it had never been ticked off), not the birthday setting's
+    if (cur.auto) r.auto = false;
     await commit([{ type: 'update', path: privatePath(), data: { reminders: { [id]: r } } }], false);
   },
   async removeReminder(ref) {
