@@ -1946,7 +1946,8 @@ function sleepUntil_(p, data, now) {
   var today = Utilities.formatDate(new Date(now), TZ, 'yyyy-MM-dd');
   var prev = personDay_(p, keyPlus_(today, -1), data).shift;
   if (!prev || !(prev.type ? prev.type === 'night' : shiftWords_(prev) === 'night shift')) return 0;
-  var from = prev.e + (Number(s.travelMins) || 0) * 60e3;
+  // (either of you can set the other's travel time: never more than the app allows, 4 hours)
+  var from = prev.e + Math.max(0, Math.min(240, Number(s.travelMins) || 0)) * 60e3;
   var until = localTime_(today, hm_(s.sleepUntil) || '14:00');
   return now >= from && now < until ? until : 0;
 }

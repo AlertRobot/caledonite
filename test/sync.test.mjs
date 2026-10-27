@@ -1709,3 +1709,12 @@ test('each run reads only the notifications that are due, not every one waiting 
   assert.match(queries.pop(), /"op":"LESS_THAN_OR_EQUAL","value":\{"integerValue":"5"\}/);
   ctx.fsQuery_ = realQuery; ctx.call_ = realCall; ctx.prop_ = realProp;
 });
+
+test('a travel time after nights beyond what the app allows never stops the sleep after a night shift', () => {
+  const L = (day, hm) => ctx.localTime_(day, hm);
+  const night = { ev: { t: 'Night', s: L('2026-11-09', '19:30'), e: L('2026-11-10', '08:00') }, cal: { role: 'rota' } };
+  const p = (travelMins) => ({ id: 'sophie', settings: { hasShifts: true, sleepUntil: '14:00', travelMins }, items: [night], mine: false });
+  const data = { overrides: {}, jobs: [] };
+  assert.equal(ctx.sleepUntil_(p(1e9), data, L('2026-11-10', '13:00')), L('2026-11-10', '14:00'));
+  assert.equal(ctx.sleepUntil_(p(-600), data, L('2026-11-10', '08:05')), L('2026-11-10', '14:00'));
+});
