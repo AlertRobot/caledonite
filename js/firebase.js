@@ -159,6 +159,9 @@ export async function createFirebaseBackend() {
       for (const o of ops) {
         if (o.type === 'set') b.set(ref(o.path), o.data);
         else if (o.type === 'update') b.set(ref(o.path), o.data, { merge: true });
+        // a change to something that must still be there (a job or idea the other phone may have just removed):
+        // never made again as a blank one
+        else if (o.type === 'patch') b.update(ref(o.path), o.data);
         else if (o.type === 'add') b.set(fs.doc(fs.collection(db, `${H}/${o.path}`)), o.data);
         else if (o.type === 'delete') b.delete(ref(o.path));
         // taken out of a map (a.b.c), whether or not the document is there yet

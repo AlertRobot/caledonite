@@ -46,7 +46,7 @@ export function onSnapshot(ref, a, b, c) {
 }
 export function writeBatch() {
   const ops = [];
-  return { set: (r, d, o) => ops.push({ type: 'set', path: r.path, data: d, merge: !!(o && o.merge) }), delete: (r) => ops.push({ type: 'delete', path: r.path }), commit: async () => { fb.writes.push(...ops); } };
+  return { set: (r, d, o) => ops.push({ type: 'set', path: r.path, data: d, merge: !!(o && o.merge) }), update: (r, d) => ops.push({ type: 'update', path: r.path, data: d }), delete: (r) => ops.push({ type: 'delete', path: r.path }), commit: async () => { fb.writes.push(...ops); } };
 }
 export async function setDoc(r, d, o) { fb.writes.push({ type: 'set', path: r.path, data: d, merge: !!(o && o.merge) }); }
 export async function addDoc(c, d) { fb.writes.push({ type: 'add', path: c.path, data: d }); return { id: 'x' + fb.writes.length }; }

@@ -214,6 +214,7 @@ export function createDemoBackend(me = 'ethan') {
       for (const o of ops) {
         if (o.type === 'set') { const { obj, key } = at(o.path); obj[key] = JSON.parse(JSON.stringify(o.data)); }
         else if (o.type === 'update') { const { obj, key } = at(o.path); obj[key] = deepMerge(obj[key] || {}, JSON.parse(JSON.stringify(o.data))); }
+        else if (o.type === 'patch') { const { obj, key } = at(o.path); if (obj[key]) obj[key] = Object.assign({}, obj[key], JSON.parse(JSON.stringify(o.data))); }
         else if (o.type === 'add') { raw[o.path] = raw[o.path] || {}; raw[o.path][uid()] = JSON.parse(JSON.stringify(o.data)); }
         else if (o.type === 'delete') { const { obj, key } = at(o.path); delete obj[key]; }
         else if (o.type === 'unset') {

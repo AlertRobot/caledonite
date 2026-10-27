@@ -827,3 +827,29 @@ test('notifications name the date, not "Tomorrow": they can arrive after quiet h
     assert.ok(n.body.includes(date), a);
   }
 });
+
+test('ticking off a job (or using an idea) your partner has just removed never brings it back as a blank one', async () => {
+  load();
+  // what the server has: the job and the idea are gone, removed on the other phone
+  const server = { 'notes/n1': { text: 'hi' } };
+  store.backend = {
+    ping() {},
+    async commit(ops) {
+      for (const o of ops.filter(Boolean)) {
+        if (o.type === 'update') server[o.path] = Object.assign({}, server[o.path] || {}, o.data); // Firestore's set with merge makes it
+        else if (o.type === 'patch') { if (!server[o.path]) throw new Error('not-found'); Object.assign(server[o.path], o.data); }
+        else if (o.type === 'set') server[o.path] = o.data;
+      }
+    }
+  };
+  await assert.rejects(actions.jobDone({ id: 'j1', title: 'Bins', who: 'ethan', day: k(0), repeat: { unit: 'week', every: 1 } }));
+  await assert.rejects(actions.jobDone({ id: 'j2', title: 'Hoover', who: 'ethan', day: k(0) }));
+  await assert.rejects(actions.updateJob('j2', { done: false }));
+  await assert.rejects(actions.updateIdea('i1', { used: 1, lastUsed: 5 }));
+  assert.deepEqual(Object.keys(server), ['notes/n1']);
+  await actions.noteSeen('n1');
+  assert.equal(server['notes/n1'].seen, true);
+  // the real backend saves these as a change to what's there (which fails if it's gone), not a set with merge
+  const { readFileSync } = await import('node:fs');
+  assert.match(readFileSync(new URL('../js/firebase.js', import.meta.url), 'utf8'), /o\.type === 'patch'\) b\.update\(ref\(o\.path\), o\.data\)/);
+});

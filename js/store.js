@@ -328,7 +328,7 @@ export const actions = {
     ]);
   },
   async noteSeen(id) {
-    await commit([{ type: 'update', path: `notes/${id}`, data: { seen: true, seenAt: now() } }], false);
+    await commit([{ type: 'patch', path: `notes/${id}`, data: { seen: true, seenAt: now() } }], false);
   },
 
   async updateCalendar(key, patch) {
@@ -463,15 +463,15 @@ export const actions = {
     await commit(ops, false);
   },
   async updateJob(id, patch) {
-    await commit([{ type: 'update', path: `jobs/${id}`, data: patch }], false);
+    await commit([{ type: 'patch', path: `jobs/${id}`, data: patch }], false);
   },
   async jobDone(job) {
     const st = store.state;
     const patch = job.repeat ? { day: nextJobDay(job, dayKey(new Date())), lastDone: now(), lastDoneBy: st.me } : { done: true, doneAt: now(), lastDoneBy: st.me };
-    await commit([{ type: 'update', path: `jobs/${job.id}`, data: patch }], false);
+    await commit([{ type: 'patch', path: `jobs/${job.id}`, data: patch }], false);
   },
   async jobUndo(job, prev) {
-    await commit([{ type: 'update', path: `jobs/${job.id}`, data: prev }], false);
+    await commit([{ type: 'patch', path: `jobs/${job.id}`, data: prev }], false);
   },
   async deleteJob(id) {
     await commit([{ type: 'delete', path: `jobs/${id}` }], false);
@@ -487,7 +487,7 @@ export const actions = {
     await commit([{ type: 'add', path: 'ideas', data: { title: title.trim(), cost: Number(cost) || 0, where: where || 'out', used: 0, created: now(), by: store.state.me } }], false);
   },
   async updateIdea(id, patch) {
-    await commit([{ type: 'update', path: `ideas/${id}`, data: patch }], false);
+    await commit([{ type: 'patch', path: `ideas/${id}`, data: patch }], false);
   },
   async deleteIdea(id) {
     await commit([{ type: 'delete', path: `ideas/${id}` }], false);
