@@ -2018,7 +2018,8 @@ function dueNotify_(now) {
 
 function processNotify_(ctx) {
   var now = Date.now();
-  var due = dueNotify_(now);
+  // in the order they were made (a request, then it being called off), not the database's order of their ids
+  var due = dueNotify_(now).sort(function (a, b) { return ((a.data.created || a.data.sendAfter || 0) - (b.data.created || b.data.sendAfter || 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
   if (!due.length) return;
   var tokensFor = {};
   var outOfTime = false;

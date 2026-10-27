@@ -1893,3 +1893,14 @@ test("a contact's birthday in a rota kept in your main calendar never hides the 
   assert.match(ctx.dayWords_(ctx.personDay_(p, '2026-11-09', data)), /night shift from 7:30pm/);
   assert.equal(ctx.sleepUntil_(p, data, L('2026-11-10', '09:00')), L('2026-11-10', '14:00'), 'asleep after it');
 });
+
+test('notifications held until the morning arrive in the order they were made', () => {
+  const realToken = ctx.saToken_, realProp = ctx.prop_;
+  const { sent } = notifyHarness(() => 200);
+  const n = (id, title, created) => ({ id, data: { to: 'sophie', kind: 'requests', title, sendAfter: 0, sent: false, created }, updateTime: 't' });
+  ctx.fsQuery_ = (coll) => (coll === 'notify' ? [n('a9', 'Ethan called it off', 300), n('zz', 'Ethan wants to plan something', 100), n('b1', 'Ethan changed something', 200)] : []);
+  ctx.fsList_ = () => [{ id: 't1', data: { token: 'tok' } }];
+  ctx.processNotify_({ people: { sophie: { settings: { quiet: { on: false } } } } });
+  assert.deepEqual(sent.map((p) => JSON.parse(p).message.data.title), ['Ethan wants to plan something', 'Ethan changed something', 'Ethan called it off']);
+  ctx.saToken_ = realToken; ctx.prop_ = realProp;
+});
