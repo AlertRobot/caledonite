@@ -727,3 +727,18 @@ test('the first-time setup on a phone that already has a household opens it, nev
   assert.deepEqual(page.errors, []);
   await page.context().close();
 });
+
+test('the setup page says what the server said about this account, and can check again', async () => {
+  const page = await openReal();
+  await fb(page, (f, h) => f.emitDoc(h, null), H);
+  await page.waitForTimeout(250);
+  assert.match(await mainText(page), /household was not found on the server at \d\d:\d\d/);
+  // it's there after all: Check again opens it
+  await fb(page, (f, h, house) => { f.server[h] = house; }, H, HOUSE);
+  await page.click('[data-act="setupRecheck"]');
+  await page.waitForTimeout(100);
+  await fb(page, (f, h) => f.emitDoc(h, null), H);
+  await page.waitForFunction((p) => window.__fb.listening(`${p}/people`), H, { timeout: 2000 });
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});

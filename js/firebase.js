@@ -69,7 +69,7 @@ export async function createFirebaseBackend() {
         confirmMissing().then((d) => {
           if (user !== u) return;
           if (d) { useHousehold(d); return; }
-          setPhase('setup', { user: { email: u.email, name: u.displayName || '' } });
+          setPhase('setup', { user: { email: u.email, name: u.displayName || '' }, setupCheck: lastCheck });
         });
         return;
       }
@@ -88,8 +88,15 @@ export async function createFirebaseBackend() {
     }));
   }
   // the household as the server has it, or null if it really isn't there (or can't be reached or read)
+  // (what it said is shown on the setup page, so a phone that's wrongly offered it can say why)
+  let lastCheck = '';
   async function confirmMissing() {
-    try { const d = await fs.getDocFromServer(ref('')); if (d.exists()) return d.data(); } catch (e) { console.warn('household check', e); }
+    try {
+      const d = await fs.getDocFromServer(ref(''));
+      lastCheck = d.exists() ? 'found' : 'not found on the server';
+      if (d.exists()) return d.data();
+    } catch (e) { console.warn('household check', e); lastCheck = 'couldn\u2019t check (' + String((e && e.code) || e) + ')'; }
+    lastCheck += ' at ' + new Date().toTimeString().slice(0, 5);
     return null;
   }
   function useHousehold(d) {
@@ -237,6 +244,8 @@ export async function createFirebaseBackend() {
       await fa.signOut(auth);
     },
     // the household and both of you, in one go: the rules only allow your two records while the household is being made
+    // the setup page's Check again: start over as this account
+    recheck() { if (user) start(user); },
     async createHousehold(info) {
       const b = fs.writeBatch(db);
       for (const o of setupOps(user.email, info)) b.set(ref(o.path), o.data);
@@ -245,6 +254,7 @@ export async function createFirebaseBackend() {
         // already set up (this phone just couldn't see it): open it, never a second household
         const d = await confirmMissing();
         if (d) { useHousehold(d); return 'exists'; }
+        e.check = lastCheck;
         throw e;
       } finally { creating = false; }
     }

@@ -516,8 +516,9 @@ const H = {
     const myName = (s.myName || (st.user && st.user.name || '').split(' ')[0] || '').trim();
     if (!myName || !s.partnerName.trim()) return toast('Add both first names.');
     if ((s.partnerEmail || '').trim().toLowerCase() === (st.user && st.user.email || '').toLowerCase()) return toast('That’s your own email. Add your partner’s Google email, or leave it for now.');
-    try { const r = await actions.createHousehold({ myName, myShifts: s.myShifts, partnerName: s.partnerName, partnerEmail: s.partnerEmail, partnerShifts: s.partnerShifts }); if (r === 'exists') toast(`${APP.name} was already set up. Opening it.`); } catch (e) { console.error(e); toast('That didn’t save. Try again.'); }
-  }
+    try { const r = await actions.createHousehold({ myName, myShifts: s.myShifts, partnerName: s.partnerName, partnerEmail: s.partnerEmail, partnerShifts: s.partnerShifts }); if (r === 'exists') toast(`${APP.name} was already set up. Opening it.`); } catch (e) { console.error(e); toast(`That didn’t save (${(e && e.code) || 'error'}${e && e.check ? '; household ' + e.check : ''}). Try Check again first.`); }
+  },
+  setupRecheck: () => { const b = store.backend; if (b && b.recheck) b.recheck(); }
 };
 // changes from selects, time boxes and tick boxes
 const C = {

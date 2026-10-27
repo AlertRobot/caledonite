@@ -465,6 +465,7 @@ export function viewSetup(state) {
   return `<div class="welcome left">
     <h1 class="h1">Set up ${esc(APP.name)}</h1>
     <p class="muted">Signed in as ${esc(state.user && state.user.email)}. This only happens once.</p>
+    ${state.setupCheck ? `<p class="small muted">Already set up on another phone? This account&rsquo;s household was ${esc(state.setupCheck)}. If that&rsquo;s wrong, check the email above is the one you use for ${esc(APP.name)}, then <button type="button" class="link-btn" data-act="setupRecheck">Check again</button>.</p>` : ''}
     <div class="card stack pad">
       <div class="field"><label for="su-me">Your first name</label><input id="su-me" type="text" data-bind="setup.myName" value="${esc(s.myName || (state.user && state.user.name || '').split(' ')[0])}"></div>
       <label class="check"><input type="checkbox" data-act="setupFlag" data-f="myShifts" ${s.myShifts ? 'checked' : ''}> I work shifts</label>
