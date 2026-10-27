@@ -77,7 +77,7 @@ export function nameOf(state, pid) {
   if (pid === 'both') return 'Both of you';
   return (state.people[pid] && state.people[pid].name) || 'Someone';
 }
-// The name on a button, chip or label: just the first name ("Sophie Magill" is "Sophie"), unless you both have the same one
+// The name on a button, chip or label: just the first name ("Sophie Marchetti" is "Sophie"), unless you both have the same one
 export function shortName(state, pid) {
   const n = nameOf(state, pid);
   if (pid === 'both') return n;

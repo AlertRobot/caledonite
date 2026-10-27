@@ -333,7 +333,7 @@ async function openReal(hash = '#today') {
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(String(e)));
   await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
-  await useFakeFirebase(page, { email: 'e@x.com', displayName: 'Ethan Dunning' });
+  await useFakeFirebase(page, { email: 'e@x.com', displayName: 'Ethan Whitfield' });
   // the household asked for straight from the server's web address (past the saved copy): as page.restStatus says
   page.restStatus = 404;
   page.restCalls = 0;
@@ -828,8 +828,8 @@ test('buttons, tabs and chips fit their labels on one line and button rows are n
       await page.goto(`${URL}?demo=${who}#today`);
       await page.waitForSelector('.bottom-nav');
       await mods(page, async (store) => {
-        await store.store.backend.update('people/ethan', { name: 'Ethan Dunning' });
-        await store.store.backend.update('people/sophie', { name: 'Sophie Magill' });
+        await store.store.backend.update('people/ethan', { name: 'Ethan Whitfield' });
+        await store.store.backend.update('people/sophie', { name: 'Sophie Marchetti' });
       });
       const bad = [];
       const look = async (name) => { for (const p of await page.evaluate(labelProblems)) bad.push(`${w}px ${who} ${name}: ${p}`); };
