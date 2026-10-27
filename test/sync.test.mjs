@@ -1805,3 +1805,25 @@ test("a rota kept in your main calendar never tells your partner about your cont
   ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift, bday], api, { share: 'all' });
   assert.deepEqual(writes.map((w) => w.update.fields.body.stringValue), []);
 });
+
+test("a day off on one of your contacts' birthdays is told once, never again every run", () => {
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 4 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const off = { ad: 1, sd: day, ed: ctx.keyPlus_(day, 1), t: 'Day off' };
+  const bday = { ad: 1, sd: day, ed: ctx.keyPlus_(day, 1), t: "Dave's birthday", np: 1 };
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  const { api } = smallProps({});
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [bday], api, { share: 'all' });
+  for (let i = 0; i < 4; i++) ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [off, bday], api, { share: 'all' });
+  assert.deepEqual(writes.map((w) => w.update.fields.body.stringValue).map((b) => b.replace(/^\w+ \d+ \w+: /, '')), ['Day off added.']);
+  // and a birthday saved by an earlier version still never comes up as removed
+  writes.length = 0;
+  const { api: a2 } = smallProps({});
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [off, Object.assign({}, bday, { np: 0 })], a2, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [off, bday], a2, { share: 'all' });
+  assert.deepEqual(writes, []);
+});
