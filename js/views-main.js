@@ -469,12 +469,13 @@ function allDayLine(cols) {
   const u = [...new Set(cols)].slice(0, 3);
   return u.map((c, i) => `<span class="seg-line" style="background:${c};top:${u.length === 1 ? 7 : 3 + i * 5}px"></span>`).join('');
 }
-function freeText(d) {
+// (any day of the week, so never "today")
+export function freeText(d) {
   const tog = d.together.filter((t) => !t.auto && !t.allDay);
   const iv = d.bothFree.filter((x) => x[1] - x[0] >= 60 * 60000);
   if (!iv.length && !tog.length) {
     const din = d.together.find((t) => t.auto);
-    return din ? `${din.title} at ${fmtTime(din.start)}` : 'Not free together today';
+    return din ? `${din.title} at ${fmtTime(din.start)}` : 'Not free together';
   }
   const parts = [];
   if (tog.length) parts.push(`${tog[0].title} at ${fmtTime(tog[0].start)}`);

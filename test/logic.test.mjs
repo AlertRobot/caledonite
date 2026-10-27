@@ -979,3 +979,10 @@ test('the ideas jar only offers a seasonal idea in its season, and Pick again sh
   for (let k = 0; k < 50; k++) assert.notEqual(pickIdea(two, null, 'all', two.ideas[0].id, june).id, two.ideas[0].id);
   assert.equal(pickIdea({ ideas: [two.ideas[0]] }, null, 'all', two.ideas[0].id, june).id, two.ideas[0].id, 'the only one left still comes up');
 });
+
+test('a day in the week view with no time together says so without calling it today', async () => {
+  const { freeText } = await import('../js/views-main.js');
+  assert.equal(freeText({ together: [], bothFree: [] }), 'Not free together');
+  const s = atTime(dayKey(addDays(T, 3)), '19:00').getTime(), e = atTime(dayKey(addDays(T, 3)), '21:00').getTime();
+  assert.match(freeText({ together: [], bothFree: [[s, e]] }), /^Both free 7(:00)?\s?pm to 9(:00)?\s?pm$/i);
+});
