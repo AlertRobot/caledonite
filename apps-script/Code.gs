@@ -452,7 +452,7 @@ function syncCalendars_(me, ctx, errors) {
         doc = merge_(doc, { layer: 'family' });
       }
       if (!doc) {
-        doc = merge_(meta, defaultsFor_(cal, isPrimary, me));
+        doc = merge_(meta, defaultsFor_(cal, isPrimary, me, ctx));
         writes.push(upd_(docPath, doc));
       } else if (doc.name !== meta.name || doc.color !== meta.color || doc.canWrite !== meta.canWrite || doc.primary !== meta.primary || !doc.lastSeen || Date.now() - doc.lastSeen > 6 * 3600e3) {
         writes.push(upd_(docPath, meta, Object.keys(meta)));
@@ -540,11 +540,14 @@ function accountsOf_(me, ctx) {
   return out;
 }
 
-function defaultsFor_(cal, isPrimary, me) {
+function defaultsFor_(cal, isPrimary, me, ctx) {
   var id = cal.getId();
   var name = (cal.getName() || '').toLowerCase();
   var personal = /@(gmail|googlemail)\.com$/.test(me.email);
   if (/#contacts@|birthday/.test(id + ' ' + name)) return { show: false, share: 'none', role: 'normal', layer: 'own' };
+  // one of your partner's own calendars, shared with this account in Google: you see it, but it's never copied back
+  // to them (it would show their own things as yours, as "Busy"), nor taken for your rota or your work
+  if (partnersCal_(me, ctx, id, cal.isOwnedByMe())) return { show: true, share: 'none', role: 'normal', layer: isFamilyCal_(id, name) ? 'family' : 'other' };
   if (isFamilyCal_(id, name)) return { show: true, share: 'all', role: 'normal', layer: 'family' };
   if (/#holiday@|holidays in/.test(id + ' ' + name)) return { show: true, share: 'none', role: 'normal', layer: 'own' };
   if (/rota|roster|shift|loop|healthroster/.test(name)) return { show: true, share: 'all', role: 'rota', layer: 'own' };
@@ -560,6 +563,29 @@ function defaultsFor_(cal, isPrimary, me) {
     return { show: true, share: 'busy', role: 'normal', layer: 'other' };
   }
   return { show: true, share: 'busy', role: 'normal', layer: 'own' };
+}
+
+// A calendar that's your partner's: their main one (at one of their addresses in Caledonite), or one their sync
+// has recorded as theirs (one they own and you don't). Asked once, when a calendar is first seen. Never Google's
+// family group calendar, which is all of yours.
+function partnersCal_(me, ctx, id, owned) {
+  var lid = String(id || '').toLowerCase();
+  if (/^family\d*@group\.calendar\.google\.com$/.test(lid)) return false;
+  var mine = accountsOf_(me, ctx || {});
+  var theirs = {};
+  (me.people || []).forEach(function (p) {
+    if (p.id === me.person) return;
+    if (p.data && p.data.email) theirs[String(p.data.email).toLowerCase()] = true;
+    ((p.data && p.data.linked) || []).forEach(function (x) { if (x) theirs[String(x).toLowerCase()] = true; });
+  });
+  (((ctx || {}).hh || {}).linked || []).forEach(function (x) { if (x && x.person && x.person !== me.person && x.email) theirs[String(x.email).toLowerCase()] = true; });
+  if (theirs[lid] && !mine[lid]) return true;
+  if (owned) return false;
+  try {
+    return fsQuery_('calendars', [['calId', id]]).some(function (d) {
+      return d.data && d.data.owner && d.data.owner !== me.person && d.data.canWrite === true && d.id === d.data.owner + '__' + d.data.calKey && !mine[String(d.data.account || '').toLowerCase()];
+    });
+  } catch (e) { return false; }
 }
 
 // Google's family group calendar, or one called "Family"
@@ -637,6 +663,8 @@ function normApi_(it) {
 }
 
 function norm_(ev) {
+  // where you're working from (Home, Office) is never an event, as with the Calendar API
+  try { if (CalendarApp.EventType && CalendarApp.EventType.WORKING_LOCATION && ev.getEventType() === CalendarApp.EventType.WORKING_LOCATION) return null; } catch (e) { /* older events */ }
   try {
     var st = ev.getMyStatus();
     if (st === CalendarApp.GuestStatus.NO) return null;
@@ -692,8 +720,9 @@ function feedWrites_(me, ctx, calKey, doc, events, props, known) {
     var list = byMonth[mk];
     var base = { owner: me.person, ownerEmail: ctx.appEmail, calKey: calKey, month: mk, account: me.email };
     if (doc.show !== false) {
-      // (pb stays: the app never shows the names of things you share only as "Busy", say in a shared countdown)
-      var priv = list.map(function (e) { var c = clone_(e); delete c.np; return c; });
+      // (pb stays: the app never shows the names of things you share only as "Busy", say in a shared countdown;
+      // so does np, so the summaries and sleep after nights never take a contact's birthday for your shift)
+      var priv = list.map(function (e) { return clone_(e); });
       put_(HOUSEHOLD + '/privateFeeds/' + me.person + '__' + calKey + '__' + mk, base, priv);
     }
     var shared = shareFilter_(doc, list);
@@ -1005,8 +1034,10 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     var e = x.e, s = x.s;
     var en = e.ad ? Utilities.parseDate(e.ed || keyPlus_(e.sd, 1), TZ, 'yyyy-MM-dd').getTime() : e.e;
     if (s < win.from || s > win.to) return;
-    // your contacts' birthdays (a rota kept in your main calendar) are never in your partner's copy, so never news
-    if (e.np) { birthdays[s + '|' + en] = true; return; }
+    // your contacts' birthdays (a rota kept in your main calendar) are never in your partner's copy, so never news.
+    // Remembered by their times and name as an earlier version saved them, so a day off on someone's birthday
+    // (the same times) is never taken for one
+    if (e.np) { birthdays[s + '|' + en + '|' + (e.pb ? '' : String(e.t || 'Shift').slice(0, 40))] = true; return; }
     var k = evStartKey_(e);
     while (map[k]) k += '+';
     // a shift marked Private or #busy is never named, not even by a change to its name
@@ -1023,7 +1054,8 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   }
   var key = 'rota_' + calKey;
   var before = null;
-  try { before = JSON.parse(props.getProperty(key) || 'null'); } catch (err) { before = null; }
+  var saved = props.getProperty(key);
+  try { before = JSON.parse(saved || 'null'); } catch (err) { before = null; }
   props.setProperty(key, JSON.stringify({ from: win.from, to: win.to, map: map }));
   if (!before || typeof before !== 'object' || !before.map || share === 'none') return;
   // Every entry is remembered, whatever the sharing, so changing it never makes old entries look new. Shared as
@@ -1031,7 +1063,7 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   // are compared without them (each day's entries numbered again in time order)
   var keep = function (v) { return !!v && (share !== 'hours' || (!v[3] && v[1] - v[0] <= 14 * 3600e3)); };
   // (saved before they were left out: never "removed" either)
-  before.map = rotaRekey_(before.map, function (v) { return keep(v) && !(v[3] && birthdays[v[0] + '|' + v[1]]); });
+  before.map = rotaRekey_(before.map, function (v) { return keep(v) && !(v[3] && birthdays[v[0] + '|' + v[1] + '|' + v[2]]); });
   map = rotaRekey_(map, keep);
   var named = share === 'all';
   var lo = Math.max(before.from, win.from), hi = Math.min(before.to, win.to);
@@ -1064,7 +1096,13 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     if (pid === me.person) return;
     writes.push(upd_(HOUSEHOLD + '/notify/' + Utilities.getUuid(), { to: pid, kind: 'rota', title: name + "'s rota has changed", body: parts.join(' '), link: '#calendar', sendAfter: now, sent: false, created: now }));
   });
-  if (writes.length) fsCommit_(writes);
+  // not saved after all: compared with the rota as it was again next run, so the change is still told
+  if (writes.length) {
+    try { fsCommit_(writes); } catch (err) {
+      if (saved === null) props.deleteProperty(key); else props.setProperty(key, saved);
+      throw err;
+    }
+  }
 }
 
 // A saved rota with only the entries keep() allows, each day's numbered again in time order ("day", "day+", ...)
@@ -1351,7 +1389,7 @@ function editOwn_(o, rs) {
 
 // An error that's Google or the network having a moment, not something wrong with the change itself
 function transient_(err) {
-  return /rate limit|backend error|internal error|service unavailable|unavailable|timed out|timeout|try again|too many|quota|limit exceeded|\b(429|500|502|503|504)\b|address unavailable|dns error|unexpected error/i.test(String(err && err.message || err));
+  return /rate limit|backend error|internal error|service unavailable|unavailable|timed out|timeout|try again|too many|quota|limits? exceeded|\b(429|500|502|503|504)\b|address unavailable|dns error|unexpected error/i.test(String(err && err.message || err));
 }
 
 // The Calendar API saying an event isn't there (any more)
@@ -1649,7 +1687,10 @@ function digestData_(me, ctx) {
   // only the ones still to do (done ones are kept, and there are more of them every week)
   var jobs = fsQuery_('jobs', [['done', false]]).map(function (j) { return j.data; });
   var mine = { id: me.person, name: 'You', settings: ctx.settings || {}, items: feedsFor('privateFeeds', me.person), mine: true };
-  var theirs = partner ? { id: partner.id, name: partner.name || 'Your partner', settings: partner.settings || {}, items: feedsFor('sharedFeeds', partner.id), mine: false } : null;
+  // (their working hours aren't said when every work calendar of theirs is shared as Nothing, as in the app)
+  var workCals = partner ? Object.keys(cals).map(function (k) { return cals[k]; }).filter(function (c) { return c && c.owner === partner.id && c.role === 'work'; }) : [];
+  var hideWork = workCals.length > 0 && workCals.every(function (c) { return c.share === 'none'; });
+  var theirs = partner ? { id: partner.id, name: partner.name || 'Your partner', settings: partner.settings || {}, items: feedsFor('sharedFeeds', partner.id), mine: false, hideWork: hideWork } : null;
   // whose calendars each thing made in the app is in, and the requests they came from (read only when needed)
   var tagOwners = {};
   [mine, theirs].forEach(function (p) {
@@ -1690,7 +1731,8 @@ function personDay_(p, key, data) {
     var s0 = e.ad ? localTime_(e.sd, '00:00') : e.s;
     var e0 = e.ad ? localTime_(e.ed || keyPlus_(e.sd, 1), '00:00') : e.e;
     if (!(s0 < dayEnd && e0 > dayStart)) return;
-    if (c.role === 'rota') { if (e.ad ? e.sd <= key && key < (e.ed || keyPlus_(e.sd, 1)) : evStartKey_(e) === key) rota.push(e); return; }
+    // (a contact's birthday in a rota kept in your main calendar is just a birthday, never the day's shift)
+    if (c.role === 'rota' && !e.np) { if (e.ad ? e.sd <= key && key < (e.ed || keyPlus_(e.sd, 1)) : evStartKey_(e) === key) rota.push(e); return; }
     if (e.tag && /^(both:|req:)/.test(e.tag)) {
       var tk = togetherOf_(e.tag, data);
       if (tk === 'skip') return;
@@ -1723,7 +1765,7 @@ function personDay_(p, key, data) {
     var days = s.workDays || [1, 2, 3, 4, 5];
     if (days.indexOf(wd) >= 0) {
       if (altOff_(s, key)) out.off = out.off || 'day off';
-      else if (!out.off) out.work = { s: localTime_(key, hm_(s.workStart) || '09:00'), e: localTime_(key, hm_(s.workEnd) || '18:00') };
+      else if (!out.off && !p.hideWork) out.work = { s: localTime_(key, hm_(s.workStart) || '09:00'), e: localTime_(key, hm_(s.workEnd) || '18:00') };
     }
   }
   out.events.sort(function (a, b) { return (a.ad ? 0 : a.s) - (b.ad ? 0 : b.s); });
@@ -1955,8 +1997,9 @@ function sleepUntil_(p, data, now) {
   var today = Utilities.formatDate(new Date(now), TZ, 'yyyy-MM-dd');
   var prev = personDay_(p, keyPlus_(today, -1), data).shift;
   if (!prev || !(prev.type ? prev.type === 'night' : shiftWords_(prev) === 'night shift')) return 0;
-  // (either of you can set the other's travel time: never more than the app allows, 4 hours)
-  var from = prev.e + Math.max(0, Math.min(240, Number(s.travelMins) || 0)) * 60e3;
+  // (either of you can set the other's travel time: never more than the app allows, 4 hours; half an hour, as in
+  // the app, until it's set)
+  var from = prev.e + Math.max(0, Math.min(240, Number(s.travelMins === undefined ? 30 : s.travelMins) || 0)) * 60e3;
   var until = localTime_(today, hm_(s.sleepUntil) || '14:00');
   return now >= from && now < until ? until : 0;
 }
@@ -2010,7 +2053,8 @@ function dueNotify_(now) {
 
 function processNotify_(ctx) {
   var now = Date.now();
-  var due = dueNotify_(now);
+  // in the order they were made (a request, then it being called off), not the database's order of their ids
+  var due = dueNotify_(now).sort(function (a, b) { return ((a.data.created || a.data.sendAfter || 0) - (b.data.created || b.data.sendAfter || 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
   if (!due.length) return;
   var tokensFor = {};
   var outOfTime = false;
@@ -2033,6 +2077,12 @@ function processNotify_(ctx) {
         try { fsCommit_([ifSame_(upd_(HOUSEHOLD + '/notify/' + n.id, { sendAfter: until }, ['sendAfter']), n)]); } catch (e) { /* the next run tries again */ }
         return;
       }
+    }
+    // a question (with Yes and Can't on it) that waited for quiet hours or sleep: not sent once it's been answered
+    // or called off, or its time has gone by ("Still waiting" the afternoon after)
+    if (d.reqId && d.ask && !askStillOpen_(String(d.reqId), ctx, now)) {
+      try { fsCommit_([ifSame_(upd_(HOUSEHOLD + '/notify/' + n.id, { sent: true, sentAt: now, error: 'already answered' }, ['sent', 'sentAt', 'error']), n)]); } catch (e) { /* the next run tries again */ }
+      return;
     }
     // claim it, so two accounts never send the same one
     try {
@@ -2059,6 +2109,21 @@ function processNotify_(ctx) {
     // a couple of times, rather than lost. Never when one phone has it (it would arrive twice there).
     if (!delivered && again) unclaim_(n.id, now);
   });
+}
+// The request a question is about still wants an answer (read once a run; if it can't be read, it's asked as before)
+function askStillOpen_(id, ctx, now) {
+  ctx.asks = ctx.asks || {};
+  if (!(id in ctx.asks)) {
+    var open = true;
+    try {
+      if (/^[A-Za-z0-9_-]+$/.test(id)) {
+        var r = fsGet_(HOUSEHOLD + '/requests/' + id);
+        open = !!r && (r.status === 'waiting' || r.status === 'maybe') && !whenOver_(r.when, now);
+      }
+    } catch (err) { open = true; }
+    ctx.asks[id] = open;
+  }
+  return ctx.asks[id];
 }
 // Back to waiting, as it was before it was claimed (no fields of its own added, so Peckish can still keep its ones
 // up to date). How many times is kept in the script's cache, shared by every account's run.
