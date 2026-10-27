@@ -1781,3 +1781,27 @@ test('a very full calendar never stops the others saving: big saves go in parts,
   assert.ok(writes.some((w) => w.update && /ethan__.*__\d{4}-\d{2}$/.test(w.update.name) && w.update.name.includes(keyOf('p@x'))), 'the main calendar is saved');
   assert.ok(!writes.some((w) => w.update && w.update.name.includes(keyOf('team@x'))), 'the full one is left as it was');
 });
+
+test("a rota kept in your main calendar never tells your partner about your contacts' birthdays", () => {
+  const now = Date.now();
+  const day = ctx.Utilities.formatDate(new Date(now + 4 * 864e5), 'Europe/London', 'yyyy-MM-dd');
+  const L = (hm) => ctx.localTime_(day, hm);
+  const bday = { ad: 1, sd: day, ed: ctx.keyPlus_(day, 1), t: "Dave's birthday", np: 1 };
+  const shift = { t: 'Long day', s: L('07:30'), e: L('20:00') };
+  ctx.Utilities.getUuid = () => 'u' + Math.random();
+  const writes = [];
+  ctx.fsCommit_ = (w) => writes.push(...w);
+  ctx.docName_ = (p) => p;
+  const c = { person: { name: 'Sophie' }, people: { sophie: {}, ethan: {} } };
+  // a new contact's birthday turning up is not news; nor is one going
+  let { api } = smallProps({});
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift], api, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift, bday], api, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift], api, { share: 'all' });
+  assert.deepEqual(writes.map((w) => w.update.fields.body.stringValue), []);
+  // saved by an earlier version, with the birthday in it: not "removed" either
+  ({ api } = smallProps({}));
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift, Object.assign({}, bday, { np: 0 })], api, { share: 'all' });
+  ctx.rotaChanged_({ person: 'sophie' }, c, 'p', [shift, bday], api, { share: 'all' });
+  assert.deepEqual(writes.map((w) => w.update.fields.body.stringValue), []);
+});

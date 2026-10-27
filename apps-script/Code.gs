@@ -996,6 +996,7 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   var now = Date.now();
   var win = { from: now - 864e5, to: now + 21 * 864e5 };
   var map = {};
+  var birthdays = {};
   // in time order, so a day's second shift is always its second, however Google listed them
   // (each start worked out once: Utilities calls aren't free)
   events = events.map(function (e) { return { e: e, s: e.ad ? Utilities.parseDate(e.sd, TZ, 'yyyy-MM-dd').getTime() : e.s }; })
@@ -1004,6 +1005,8 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
     var e = x.e, s = x.s;
     var en = e.ad ? Utilities.parseDate(e.ed || keyPlus_(e.sd, 1), TZ, 'yyyy-MM-dd').getTime() : e.e;
     if (s < win.from || s > win.to) return;
+    // your contacts' birthdays (a rota kept in your main calendar) are never in your partner's copy, so never news
+    if (e.np) { birthdays[s + '|' + en] = true; return; }
     var k = evStartKey_(e);
     while (map[k]) k += '+';
     // a shift marked Private or #busy is never named, not even by a change to its name
@@ -1027,7 +1030,8 @@ function rotaChanged_(me, ctx, calKey, events, props, doc) {
   // working hours, your partner never sees all-day entries or very long ones, so never hears of them: both sides
   // are compared without them (each day's entries numbered again in time order)
   var keep = function (v) { return !!v && (share !== 'hours' || (!v[3] && v[1] - v[0] <= 14 * 3600e3)); };
-  before.map = rotaRekey_(before.map, keep);
+  // (saved before they were left out: never "removed" either)
+  before.map = rotaRekey_(before.map, function (v) { return keep(v) && !(v[3] && birthdays[v[0] + '|' + v[1]]); });
   map = rotaRekey_(map, keep);
   var named = share === 'all';
   var lo = Math.max(before.from, win.from), hi = Math.min(before.to, win.to);
