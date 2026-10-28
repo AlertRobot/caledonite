@@ -439,7 +439,7 @@ test("odd values in the household record (dinner time, favours, birthdays) can't
   await page.waitForTimeout(200);
   for (const h of ['#today', '#calendar', '#ask', '#settings', '#settings/routine', '#settings/requests']) {
     await go(page, h);
-    if (h === '#ask') await page.click('[data-act="askType"][data-v="favour"]');
+    if (h === '#ask') await page.selectOption('#ask-type', 'favour');
     assert.doesNotMatch(await page.textContent('main'), /Something went wrong|NaN|undefined/, h);
   }
   assert.deepEqual(page.errors, []);
@@ -794,10 +794,15 @@ test('Plan on Today: the free time is chosen, what it is gets the cursor, and Se
   await page.waitForSelector('#ask-title');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'ask-title');
   assert.equal(await page.locator('[data-act="askSlot"][aria-pressed="true"]').count(), 1);
-  // the kinds of request are a row of chips, with the one chosen explained in a line
-  assert.equal(await page.locator('[data-act="askType"]').count(), 5);
-  assert.equal(await page.locator('.type-card[data-act="askType"]').count(), 0);
+  // the kind of request is one line to choose from, with the one chosen explained under it
+  assert.equal(await page.locator('#ask-type option').count(), 5);
+  assert.equal(await page.inputValue('#ask-type'), 'plan');
   assert.match(await page.textContent('main'), /A date, a trip, seeing people\./);
+  await page.focus('#ask-type'); // (as a tap on it would: the box for what it is lets go)
+  await page.selectOption('#ask-type', 'heads');
+  await page.waitForTimeout(150);
+  assert.match(await page.textContent('main'), /Just so you know\. No answer needed\./);
+  assert.equal(await page.textContent('[data-act="askSend"]'), 'Send heads up');
   // Send sits in the bar above the tabs, so it's on screen before scrolling
   const box = await page.locator('[data-act="askSend"]').boundingBox();
   const vh = page.viewportSize().height;
@@ -838,6 +843,9 @@ test('a shift: tapped on Today it opens that day in Settings, Shifts, and one mo
   const today = await dayAhead(page, 0);
   assert.equal(await page.getAttribute('[data-act="shiftDay"][aria-expanded="true"]', 'data-day'), today);
   assert.ok(await page.evaluate(() => { const r = document.getElementById('shift-open').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }), 'the opened day is on screen');
+  // the six shifts sit in even rows of two, never four and two left over
+  const tops = await page.$$eval('[data-act="shiftSet"]', (els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+  assert.deepEqual([...new Set(tops)].map((t) => tops.filter((x) => x === t).length), [2, 2, 2]);
   await page.click('[data-act="shiftSet"][data-v="late"]');
   assert.equal(await mods(page, (store, ui, k) => store.store.state.shifts[`sophie|${k}`].type, today), 'late');
   assert.match(await page.textContent('.toast'), /^Late today\.$/);
@@ -900,6 +908,39 @@ test('choosing what your partner sees of a calendar says so', async () => {
   await page.context().close();
 });
 
+test("the week strips show \"Ethan's family\" in full, on two short lines, not cut short", async () => {
+  const page = await open('sophie', '#calendar');
+  await page.click('[data-act="calView"][data-v="week"]');
+  await page.click('[data-act="weekNext"]');
+  await page.click('[data-act="weekPrev"]');
+  const labels = await page.$$eval('.strip-label', (els) => els.map((e) => ({ t: e.textContent, cut: e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1 })));
+  const fam = labels.filter((l) => /family/.test(l.t));
+  assert.ok(fam.length, 'a family row this week');
+  for (const l of fam) assert.ok(!l.cut, `"${l.t}" is cut short`);
+  await page.context().close();
+});
+
+test('each theme name stays inside its tile at 360 and 384 wide with larger text (115% and 130%)', async () => {
+  for (const [w, z] of [[360, 1.15], [384, 1.3], [412, 1.3]]) {
+    const ctx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: w, height: 800 }, locale: 'en-GB', timezoneId: 'Europe/London', bypassCSP: true });
+    const page = await ctx.newPage();
+    await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+    await page.goto(`${URL}?demo=ethan#settings/theme`);
+    await page.waitForSelector('.theme-tile');
+    // larger text: every font size in the stylesheet scaled up, as the phone's text size setting does
+    const bad = await page.evaluate((z) => {
+      const scale = (v) => v.replace(/(\d*\.?\d+)px/g, (m, n) => `${(n * z).toFixed(2)}px`);
+      const walk = (r) => { if (r.cssRules) for (const c of r.cssRules) walk(c); if (r.style && r.style.fontSize) r.style.fontSize = scale(r.style.fontSize); };
+      for (const sh of document.styleSheets) { try { for (const r of sh.cssRules) walk(r); } catch (e) { /* another site's */ } }
+      // (the name is sized to its tile, so even a wide font like Dragonfire's fits; the real fonts are checked by the crawler)
+      return [...document.querySelectorAll('.theme-tile')].filter((t) => t.scrollWidth > t.clientWidth + 1
+        || parseFloat(getComputedStyle(t.querySelector('.tt-name')).fontSize) > t.clientWidth * 0.13).map((t) => t.textContent.trim());
+    }, z);
+    assert.deepEqual(bad, [], `${w}px at ${z * 100}%`);
+    await ctx.close();
+  }
+});
+
 // every button, tab and chip on a screen: its text stays inside it, it stays inside its row or card, a one-line label stays
 // on one line (a card button with parts is several), a row of buttons is never left ragged (two on a line and one under
 // them), and nothing makes the page scroll sideways
@@ -954,7 +995,7 @@ test('buttons, tabs and chips fit their labels on one line and button rows are n
       }
       await go(page, '#calendar'); await tap('[data-act="calView"][data-v="week"]'); await look('calendar week');
       for (const k of ['event', 'job', 'leave', 'shift']) { await go(page, '#add'); await tap(`[data-act="addKind"][data-v="${k}"]`); await tap('[data-act="addMore"]'); await look(`add ${k}`); }
-      await go(page, '#ask'); await tap('[data-act="askType"][data-v="favour"]'); await look('ask a favour');
+      await go(page, '#ask'); await page.selectOption('#ask-type', 'favour'); await page.waitForTimeout(150); await look('ask a favour');
       await go(page, '#settings/calendars'); await tap('[data-act="openCal"]'); await look('a calendar opened');
       await go(page, '#today'); await tap('[data-act="openEv"]'); await look('an event');
       await tap('[data-act="evEdit"]'); await look('changing an event'); await tap('[data-act="evEditCancel"]');

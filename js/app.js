@@ -554,6 +554,7 @@ const H = {
 // changes from selects, time boxes and tick boxes
 const C = {
   addAllDay: (el) => { ui.add.allDay = el.checked; render(); },
+  askTypeSel: (el) => { ui.ask.type = el.value; render(); },
   setupFlag: (el) => { ui.setup[el.dataset.f] = el.checked; },
   calRole: (el) => {
     const v = el.value;

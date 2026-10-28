@@ -449,7 +449,9 @@ function weekView(state) {
       const shown = d.layers[lk].filter((x) => !x.low);
       if (!shown.length) continue;
       const timed = shown.filter((x) => !x.allDay);
-      rows.push(`<span class="strip-label" style="color:var(--layer-${layer}-ink, ${(LAYER_INFO[layer] || LAYER_INFO.other).ink})">${esc(layerChipLabel(state, lk).replace(/^Your /, '').replace(/^\w/, (c) => c.toUpperCase()))}</span><div class="strip">${allDayLine(shown.some((x) => x.allDay) ? [col] : [])}${segs(timed.map((x) => [x.start.getTime(), x.end.getTime(), col]))}</div>`);
+      // ("Family" for yours; "Sophie's family" for your partner's, on two short lines rather than cut short)
+      const lname = layerChipLabel(state, lk).replace(/^Your /, '').replace(/^\w/, (c) => c.toUpperCase());
+      rows.push(`<span class="strip-label${lname.includes(' ') ? ' two' : ''}" style="color:var(--layer-${layer}-ink, ${(LAYER_INFO[layer] || LAYER_INFO.other).ink})">${esc(lname)}</span><div class="strip">${allDayLine(shown.some((x) => x.allDay) ? [col] : [])}${segs(timed.map((x) => [x.start.getTime(), x.end.getTime(), col]))}</div>`);
     }
     const items = dayList(state, k, Object.assign({}, f, { hideLow: true }));
     cards.push(`<article class="card wday ${k === todayK ? 'is-today' : ''}">

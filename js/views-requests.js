@@ -161,8 +161,8 @@ export function viewAsk(state) {
   return `<a href="#requests" class="back-link">${icon.back(20)}Requests</a>
     <h1 class="h1">Ask ${esc(pn)}</h1>
     <section class="stack-s">
-      <h2 class="h4">What kind of request?</h2>
-      <div class="row-wrap type-chips" role="group" aria-label="What kind of request">${TYPES.map(([v]) => `<button type="button" class="chip-btn chip-sm ${a.type === v ? 'on' : ''}" aria-pressed="${a.type === v}" data-act="askType" data-v="${v}">${esc(TYPE_LABEL[v])}</button>`).join('')}</div>
+      <label for="ask-type" class="h4">What kind of request?</label>
+      <select id="ask-type" data-act="askTypeSel">${TYPES.map(([v, t]) => `<option value="${v}" ${a.type === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
       <span class="small muted">${esc((TYPES.find(([v]) => v === a.type) || TYPES[0])[2])}</span>
     </section>
     <section class="stack-s">

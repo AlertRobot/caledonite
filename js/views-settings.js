@@ -209,7 +209,7 @@ function secShifts(state) {
     rows.push(`<button type="button" class="list-row btn-row" ${open ? 'id="shift-open"' : ''} aria-expanded="${open}" data-act="shiftDay" data-p="${esc(who)}" data-day="${k}" aria-label="${esc(fmtDate(d))}: ${esc(label)}${ov ? ', changed here' : ''}. Tap to change.">
       <span class="grow col"><span class="b">${esc(fmtDate(d))}</span><span class="small muted">${esc(times)}${ov ? '. Changed here' : ''}</span></span>
       <span class="shift-pill sp-${esc(type || 'none')}">${esc(label)}</span></button>
-      ${open ? `<div class="shift-pick"><div class="row-wrap">${SHIFT_ORDER.map((t) => `<button type="button" class="chip-btn chip-sm ${type === t ? 'on' : ''}" aria-pressed="${type === t}" data-act="shiftSet" data-p="${esc(who)}" data-day="${k}" data-v="${t}">${esc((s.shiftTypes[t] || {}).label || t)}</button>`).join('')}</div>
+      ${open ? `<div class="shift-pick"><div class="grid2 pick-grid">${SHIFT_ORDER.map((t) => `<button type="button" class="chip-btn chip-sm ${type === t ? 'on' : ''}" aria-pressed="${type === t}" data-act="shiftSet" data-p="${esc(who)}" data-day="${k}" data-v="${t}">${esc((s.shiftTypes[t] || {}).label || t)}</button>`).join('')}</div>
         ${ov ? `<button type="button" class="btn link-btn sm self-start" data-act="clearShift" data-p="${esc(who)}" data-day="${k}">${rotaCals.length ? 'Back to the rota' : 'No shift'}</button>` : ''}</div>` : ''}`);
   }
   out.push(`<section class="stack-s"><h2 class="h4">Change a shift</h2>

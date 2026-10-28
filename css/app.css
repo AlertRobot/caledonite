@@ -470,9 +470,8 @@ button.f-row { cursor: pointer; }
 }
 .agenda > .ag-more:first-child { border-top: none; }
 /* ---------- usability pass (1.4.22) ---------- */
-/* small choice chips, as in Add's More options: what kind of request */
+/* small choice chips: the shifts to choose from for a day */
 .chip-btn.chip-sm { min-height: 40px; padding: 0 12px; font-size: 15px; }
-.type-chips { gap: 8px; }
 /* a row of answers sharing the width (and stacking full width when they don't fit); the quieter ones sit close under */
 .row-even > .btn { flex: 1 1 0; min-width: max-content; }
 .row-even.stacked > .btn { flex: none; min-width: 0; }
@@ -487,6 +486,9 @@ button.shift-card { width: 100%; text-align: left; font: inherit; color: var(--i
 button.shift-card:active { transform: scale(.99); }
 /* a day in Settings, Shifts, opened: the shift it is */
 .shift-pick { display: flex; flex-direction: column; gap: 4px; padding: 0 14px 12px; background: var(--card); }
+/* (six, in even rows of two: never four and two left over) */
+.pick-grid { gap: 8px; }
+.pick-grid .chip-btn { min-width: 0; padding: 0 8px; }
 /* start and end times beside their label, sharing the room; on a narrow screen they go under it, the full width */
 .f-times { flex-wrap: nowrap; }
 .f-times .f-ctl input[type="time"] { flex: 1 1 0; width: auto; min-width: 0; max-width: 132px; }
@@ -501,3 +503,8 @@ button.shift-card:active { transform: scale(.99); }
 .nowrap { white-space: nowrap; }
 /* a message never covers the button at the bottom of a form */
 .page:has(.save-bar) ~ .toast { bottom: calc(160px + env(safe-area-inset-bottom, 0px)); }
+/* a two-word name in the week strips ("Sophie's family") takes two short lines */
+.strip-label.two { white-space: normal; overflow-wrap: anywhere; font-size: 13px; line-height: 1.05; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+/* a theme's name stays inside its tile, whatever the text size (Dragonfire's letters are wide) */
+.theme-tile { container-type: inline-size; min-width: 0; }
+.tt-name { font-size: clamp(15px, 12.5cqi, 20px); }
