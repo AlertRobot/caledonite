@@ -73,6 +73,7 @@ export function render() {
   if (keepScroll) window.scrollTo(0, y);
   lastRoute = key;
   if (ui.focus) { const el = document.getElementById(ui.focus); if (el) el.focus(); ui.focus = null; }
+  if (ui.scrollTo) { const el = document.getElementById(ui.scrollTo); if (el) el.scrollIntoView({ block: 'center' }); ui.scrollTo = null; }
 }
 
 function toast(text) {
@@ -99,6 +100,11 @@ function nextWeekday(iso) {
   for (let i = 0; i < 7; i++) { const d = addDays(new Date(), i); if ((d.getDay() || 7) === iso) return dayKey(d); }
   return dayKey(new Date());
 }
+// "today", "tomorrow" or "on Friday 30 October"
+function onDay(day) {
+  const w = whenLabel({ day, allDay: true }).replace(', all day', '');
+  return /^(Today|Tomorrow)$/.test(w) ? w.toLowerCase() : `on ${w}`;
+}
 function plusMins(hm, mins) {
   const t = Math.min(23 * 60 + 59, minutesOf(hm) + mins);
   return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`;
@@ -122,8 +128,18 @@ const H = {
     resetAsk();
     ui.ask.custom = true; ui.ask.cday = el.dataset.day; ui.ask.cstart = el.dataset.start || '19:00'; ui.ask.cend = plusMins(ui.ask.cstart, 120);
     const slots = freeSlots(store.state, new Date(), 4);
-    const i = slots.findIndex((s) => s.key === el.dataset.day && s.start === ui.ask.cstart);
+    // that free time, or the one on that day it falls in (one already under way starts from now)
+    let i = slots.findIndex((s) => s.key === el.dataset.day && s.start === ui.ask.cstart);
+    if (i < 0) i = slots.findIndex((s) => s.key === el.dataset.day && s.start <= ui.ask.cstart && ui.ask.cstart < s.end);
+    if (i < 0) i = slots.findIndex((s) => s.key === el.dataset.day && s.key === dayKey(new Date()) && s.start > ui.ask.cstart);
     if (i >= 0) { ui.ask.custom = false; ui.ask.slot = i; ui.ask.pick = slots[i]; }
+    else if (el.dataset.day === dayKey(new Date())) {
+      // today, and already under way: from the next half hour
+      const n = new Date(); const m = Math.ceil((n.getHours() * 60 + n.getMinutes() + 1) / 30) * 30;
+      if (m < 24 * 60 && ui.ask.cstart < `${pad(Math.floor(m / 60))}:${pad(m % 60)}`) { ui.ask.cstart = `${pad(Math.floor(m / 60))}:${pad(m % 60)}`; ui.ask.cend = plusMins(ui.ask.cstart, 120); }
+    }
+    // the time is chosen: what it is comes next
+    ui.focus = 'ask-title';
   },
   calGo: (el) => {
     const d = fromDayKey(el.dataset.day);
@@ -384,7 +400,7 @@ const H = {
     const day = addDayKey();
     try { await actions.setShift(who, day, ui.add.shiftType); } catch (e) { console.error(e); return toast('That didn’t save. Check your connection and try again.'); }
     const label = settingsOf(st, who).shiftTypes[ui.add.shiftType].label;
-    ui.add.done = `Saved: ${label} on ${whenLabel({ day, allDay: true }).replace(', all day', '')}${who === st.me ? '' : ` for ${nameOf(st, who)}`}.`;
+    ui.add.done = `Saved: ${label} ${onDay(day)}${who === st.me ? '' : ` for ${nameOf(st, who)}`}.`;
     render();
   },
   addWho: (el) => { ui.add.who = el.dataset.v; render(); },
@@ -429,7 +445,11 @@ const H = {
   // hiding a calendar from yourself also stops your partner seeing it, unless you've chosen its sharing yourself
   calShow: (el) => { const c = store.state.calendars[el.dataset.k]; const show = c.show === false; run(actions.updateCalendar(el.dataset.k, !show && !c.shareSet && c.share !== 'none' ? { show, share: 'none' } : { show })); },
   // (shareSet, roleSet: what you chose yourself, which the sync never puts right; showing or hiding it is neither)
-  calShare: (el) => run(actions.updateCalendar(el.dataset.k, { share: el.dataset.v, shareSet: true })),
+  calShare: (el) => {
+    const st = store.state; const c = st.calendars[el.dataset.k];
+    const what = { all: 'everything', busy: '“Busy”', none: 'nothing', hours: 'just your working hours' }[el.dataset.v] || 'nothing';
+    run(actions.updateCalendar(el.dataset.k, { share: el.dataset.v, shareSet: true }), `${nameOf(st, st.partner)} now sees ${what} from ${c ? c.name : 'it'}, within 10 minutes.`);
+  },
   myHasShifts: () => {
     const s = settingsOf(store.state, store.state.me);
     run(actions.updateMySettings(s.hasShifts ? { hasShifts: false, workDays: [1, 2, 3, 4, 5] } : { hasShifts: true, workDays: [] }));
@@ -440,18 +460,24 @@ const H = {
     if (v && !/^https?:\/\//i.test(v) && !/^webcal:\/\//i.test(v)) return toast('That doesn’t look like a link.');
     run(actions.updateMySettings({ rotaUrl: v.replace(/^webcal:/i, 'https:') }), v ? 'Rota link saved. It syncs within a few minutes.' : 'Rota link removed.');
   },
-  cycleShift: (el) => {
-    const st = store.state;
-    const { p, day } = el.dataset;
-    const cur = st.shifts[`${p}|${day}`];
-    const curType = cur ? cur.type : (el.dataset.type || null);
-    const order = ['long', 'night', 'early', 'late', 'off', 'leave'];
-    const i = curType ? order.indexOf(curType) : -1;
-    const next = i + 1 < order.length ? order[i + 1] : null;
-    run(actions.setShift(p, day, next));
+  // a day in Settings, Shifts: open its choice of shifts (or close it again)
+  shiftDay: (el) => { ui.settings.shiftOpen = ui.settings.shiftOpen === el.dataset.day ? null : el.dataset.day; render(); },
+  shiftSet: (el) => {
+    const st = store.state; const { p, day, v } = el.dataset;
+    ui.settings.shiftOpen = null;
+    const label = (settingsOf(st, p).shiftTypes[v] || {}).label || v;
+    run(actions.setShift(p, day, v), `${label} ${onDay(day)}${p === st.me ? '' : ` for ${nameOf(st, p)}`}.`);
   },
-  clearShift: (el) => run(actions.setShift(el.dataset.p, el.dataset.day, null)),
-  shiftWeek: (el) => { ui.settings.shiftWeek += Number(el.dataset.d); render(); },
+  // a shift on Today or in the calendar: that day, open, in Settings, Shifts
+  shiftEdit: (el) => {
+    const { p, day } = el.dataset;
+    ui.settings.shiftPerson = p; ui.settings.shiftOpen = day;
+    ui.settings.shiftWeek = Math.round((mondayOf(fromDayKey(day)) - mondayOf(new Date())) / (7 * 86400000));
+    ui.scrollTo = 'shift-open';
+    go('#settings/shifts');
+  },
+  clearShift: (el) => { ui.settings.shiftOpen = null; run(actions.setShift(el.dataset.p, el.dataset.day, null), 'Changed back.'); },
+  shiftWeek: (el) => { ui.settings.shiftWeek += Number(el.dataset.d); ui.settings.shiftOpen = null; render(); },
   workDay: (el) => {
     const s = settingsOf(store.state, store.state.me);
     const v = Number(el.dataset.v);

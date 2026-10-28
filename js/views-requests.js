@@ -57,11 +57,12 @@ function reqCard(state, r) {
           ${slots.map((s, i) => `<button type="button" class="slot" data-act="suggest" data-id="${id}" data-i="${i}">${esc(s.label)}</button>`).join('') || '<p class="muted small">No shared free time in the next three weeks.</p>'}
           <button type="button" class="btn link-btn self-start" data-act="suggestCancel">Cancel</button></div>`;
       } else if (r.type === 'favour') {
-        body = `${maybeNote}<div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="yes" data-id="${id}">Yes, I'll do it</button><button type="button" class="btn sec" data-act="answer" data-a="no" data-id="${id}">I can't</button></div>`;
+        body = `${maybeNote}<div class="row-wrap row-even"><button type="button" class="btn tog" data-act="answer" data-a="yes" data-id="${id}">Yes, I'll do it</button><button type="button" class="btn sec" data-act="answer" data-a="no" data-id="${id}">I can't</button></div>`;
       } else {
-        body = `${maybeNote}<div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="yes" data-id="${id}">${r.type === 'leave' ? 'Yes, book it' : 'Yes, add it'}</button>
-          ${r.when && r.type !== 'leave' ? `<button type="button" class="btn sec" data-act="suggestOpen" data-id="${id}">Another time</button>` : ''}
-          ${r.status === 'waiting' ? `<button type="button" class="btn link-btn" data-act="answer" data-a="maybe" data-id="${id}">Not sure yet</button>` : ''}
+        // the answers in two even rows: yes or another time, then the quieter ones
+        body = `${maybeNote}<div class="row-wrap row-even"><button type="button" class="btn tog" data-act="answer" data-a="yes" data-id="${id}">${r.type === 'leave' ? 'Yes, book it' : 'Yes, add it'}</button>
+          ${r.when && r.type !== 'leave' ? `<button type="button" class="btn sec" data-act="suggestOpen" data-id="${id}">Another time</button>` : ''}</div>
+          <div class="row-wrap row-even row-quiet">${r.status === 'waiting' ? `<button type="button" class="btn link-btn" data-act="answer" data-a="maybe" data-id="${id}">Not sure yet</button>` : ''}
           <button type="button" class="btn link-btn" data-act="answer" data-a="no" data-id="${id}">Not this time</button></div>`;
       }
     } else if (r.status === 'sent') {
@@ -79,7 +80,7 @@ function reqCard(state, r) {
         <div class="row-wrap">${askerButtons(r, id, on)}</div>`;
     } else if (r.status === 'other') {
       body = `<p class="note-box">${esc(on)} suggested <b>${esc(whenText(r.counter))}</b> instead.</p>
-        <div class="row-wrap"><button type="button" class="btn tog" data-act="answer" data-a="accept-counter" data-id="${id}">That works</button><button type="button" class="btn link-btn" data-act="answer" data-a="cancel" data-id="${id}">Not this time</button></div>`;
+        <div class="row-wrap row-even"><button type="button" class="btn tog" data-act="answer" data-a="accept-counter" data-id="${id}">That works</button><button type="button" class="btn link-btn" data-act="answer" data-a="cancel" data-id="${id}">Not this time</button></div>`;
     } else if (r.status === 'sent') {
       body = `<p class="small muted">Sent. No answer needed.</p>`;
     } else body = resultLine(state, r, true);
@@ -122,11 +123,11 @@ function resultLine(state, r, mine) {
 
 // ---------------- ASK ----------------
 const TYPES = [
-  ['plan', 'Plan something together', 'A date, a trip, seeing people'],
+  ['plan', 'Plan something together', 'A date, a trip, seeing people.'],
   ['favour', 'Ask a favour', 'Can you do something for me?'],
-  ['free', 'Keep time free', 'Please don’t book anything then'],
-  ['heads', 'Heads up', 'Just so you know. No answer needed'],
-  ['leave', 'Book a holiday', 'Time off together, from your allowances']
+  ['free', 'Keep time free', 'Please don’t book anything then.'],
+  ['heads', 'Heads up', 'Just so you know. No answer needed.'],
+  ['leave', 'Book a holiday', 'Time off together, from your allowances.']
 ];
 export function viewAsk(state) {
   const P = state.partner;
@@ -159,9 +160,10 @@ export function viewAsk(state) {
   const placeholder = { plan: 'Cinema, then food', favour: 'Pick up a parcel', free: 'My friends are visiting', heads: "I'll be home late", leave: 'Spain' }[a.type];
   return `<a href="#requests" class="back-link">${icon.back(20)}Requests</a>
     <h1 class="h1">Ask ${esc(pn)}</h1>
-    <section class="stack">
+    <section class="stack-s">
       <h2 class="h4">What kind of request?</h2>
-      <div class="grid2">${TYPES.map(([v, t, d]) => `<button type="button" class="type-card ${a.type === v ? 'on' : ''}" aria-pressed="${a.type === v}" data-act="askType" data-v="${v}"><span class="b">${t}</span><span class="small muted">${d}</span></button>`).join('')}</div>
+      <div class="row-wrap type-chips" role="group" aria-label="What kind of request">${TYPES.map(([v]) => `<button type="button" class="chip-btn chip-sm ${a.type === v ? 'on' : ''}" aria-pressed="${a.type === v}" data-act="askType" data-v="${v}">${esc(TYPE_LABEL[v])}</button>`).join('')}</div>
+      <span class="small muted">${esc((TYPES.find(([v]) => v === a.type) || TYPES[0])[2])}</span>
     </section>
     <section class="stack-s">
       <label for="ask-title" class="h4">${a.type === 'leave' ? 'Where or what? (optional)' : 'What is it?'}</label>
@@ -171,7 +173,7 @@ export function viewAsk(state) {
     </section>
     ${needsWhen ? `<section class="stack-s">
       <h2 class="h4">When?</h2>
-      ${slots.length ? `<span class="small muted">Times you're both free, from both your calendars${settingsOf(state, P).hasShifts || settingsOf(state, state.me).hasShifts ? ' and the rota' : ''}:</span>` : ''}
+      ${slots.length ? '<span class="small muted">When you’re both free:</span>' : ''}
       ${slots.map((s, i) => `<button type="button" class="slot ${!a.custom && a.slot === i ? 'on' : ''}" aria-pressed="${!a.custom && a.slot === i}" data-act="askSlot" data-i="${i}">${esc(s.label)}</button>`).join('')}
       <button type="button" class="btn link-btn self-start" data-act="askCustom">${slots.length ? 'Choose a different time' : 'Choose a time'}</button>
       ${a.custom || !slots.length ? `<div class="grid3">
@@ -182,7 +184,7 @@ export function viewAsk(state) {
     </section>` : ''}
     ${a.type === 'leave' ? leavePicker(state) : ''}
     ${a.type === 'plan' || a.type === 'free' ? `<div class="card flush">${toggleRow({ act: 'askHold', on: hold, label: 'Pencil it in while I wait', sub: 'Shows in both calendars as "Pencilled in", so nothing else gets booked.' })}</div>` : ''}
-    <button type="button" class="btn big-btn" data-act="askSend">${a.type === 'heads' ? 'Send heads up' : `Send to ${esc(pn)}`}</button>`;
+    <div class="save-bar"><button type="button" class="btn big-btn" data-act="askSend">${a.type === 'heads' ? 'Send heads up' : `Send to ${esc(pn)}`}</button></div>`;
 }
 // The dates of a holiday, and what it takes from each allowance
 function leavePicker(state) {
@@ -234,7 +236,7 @@ export function viewAdd(state) {
   const out = [pageHeader(state, 'Add', '')];
   if (a.done) {
     out.push(`<section class="card stack done-card"><span class="tick">${icon.check(26)}</span><p class="b">${esc(a.done)}</p>
-      <div class="row-wrap"><button type="button" class="btn" data-act="addAgain">Add another</button><a href="#calendar" class="btn sec">See the calendar</a></div></section>`);
+      <div class="row-wrap"><button type="button" class="btn" data-act="addAgain">Add another</button>${a.kind === 'job' ? '<a href="#jobs" class="btn sec">See all jobs</a>' : '<a href="#calendar" class="btn sec">See the calendar</a>'}</div></section>`);
     return out.join('');
   }
   const kinds = [{ v: 'event', label: 'Event' }, { v: 'job', label: 'Job' }, { v: 'leave', label: 'Holiday' }];
@@ -252,7 +254,7 @@ export function viewAdd(state) {
     ${P ? fRow('Who', seg(whos.map((w) => Object.assign(w, { on: a.who === w.v })), { act: 'addWho', label: 'Who is it for?' })) : ''}
     ${dayRows(a)}
     <button type="button" class="f-row" aria-pressed="${a.allDay}" data-act="addAllDayT"><span class="b grow">All day</span><span class="switch ${a.allDay ? 'on' : ''}"><span></span></span></button>
-    ${a.allDay ? '' : fRow('<label for="add-start">Time</label>', `<input id="add-start" type="time" aria-label="Starts" data-bind="add.start" value="${esc(a.start)}"><span class="muted">to</span><input id="add-end" type="time" aria-label="Ends" data-bind="add.end" value="${esc(a.end)}">`)}
+    ${a.allDay ? '' : fRow('<label for="add-start">Time</label>', `<input id="add-start" type="time" aria-label="Starts" data-bind="add.start" value="${esc(a.start)}"><span class="muted">to</span><input id="add-end" type="time" aria-label="Ends" data-bind="add.end" value="${esc(a.end)}">`, 'f-times')}
   </div>`);
   if (a.who !== 'me' && P) out.push(`<p class="small muted f-hint">${esc(whoNote(state, a.who))}</p>`);
 
@@ -287,7 +289,7 @@ export function viewAdd(state) {
   return out.join('');
 }
 function fmtHMs(hm) { return fmtTime(atTime('2000-01-01', hm)); }
-function fRow(label, ctl) { return `<div class="f-row"><span class="f-label">${label}</span><div class="f-ctl">${ctl}</div></div>`; }
+function fRow(label, ctl, cls = '') { return `<div class="f-row ${cls}"><span class="f-label">${label}</span><div class="f-ctl">${ctl}</div></div>`; }
 function titleRow(id, bind, value, label, placeholder) {
   return `<div class="f-title"><label for="${id}" class="sr">${esc(label)}</label><input id="${id}" class="title-input" type="text" data-bind="${bind}" value="${esc(value)}" placeholder="${esc(label)}" autocomplete="off" enterkeyhint="done"></div>`;
 }

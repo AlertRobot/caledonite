@@ -1,6 +1,6 @@
 // Today and Calendar screens.
 import {
-  esc, dayKey, fromDayKey, addDays, fmtDate, fmtTime, fmtRange, MONTH_NAMES, atTime, mondayOf, fmtDateShort, agoText, minutesOf
+  esc, dayKey, fromDayKey, addDays, fmtDate, fmtTime, fmtRange, MONTH_NAMES, atTime, mondayOf, fmtDateShort, agoText, minutesOf, relDay
 } from './util.js';
 import {
   buildDay, dayList, statusNow, nextBothFree, itemTime, itemTitle, itemSub, nameOf, shortName, personColour, monthCell, allLayers, layerChipLabel, LAYER_INFO, settingsOf, reminderFor, myReminders, reminderLine, countdowns, countdownText, jobsOn, inQuietHours, quietNight, lowCount
@@ -65,11 +65,11 @@ export function viewToday(state) {
   if (myShift) {
     const s = settingsOf(state, me);
     const home = new Date(myShift.end.getTime() + (s.travelMins || 0) * 60000);
-    out.push(`<section class="shift-card">
-      <span class="b small shift-ink">Your shift today</span>
+    out.push(`<button type="button" class="shift-card" data-act="shiftEdit" data-p="${esc(me)}" data-day="${key}" aria-label="Your shift today: ${esc(itemTitle(state, myShift))}. Change it">
+      <span class="row between"><span class="b small shift-ink">Your shift today</span><span class="shift-ink">${icon.pencil(18)}</span></span>
       <span class="h2">${esc(itemTitle(state, myShift))}</span>
       <span class="b">${esc(fmtRange(myShift.start, myShift.end))}. Home about ${esc(fmtTime(home))}${myShift.end.getDate() !== myShift.start.getDate() ? ' tomorrow morning' : ''}.</span>
-    </section>`);
+    </button>`);
   }
 
   // right now, the two of you
@@ -110,16 +110,18 @@ export function viewToday(state) {
     const nf = nextBothFree(state, now);
     if (nf) {
       out.push(`<div class="card flush"><div class="now-row"><span class="tog-ic">${icon.heart(18)}</span>
-        <span class="grow col"><span class="b">Both free ${esc(nf.label.charAt(0).toLowerCase() + nf.label.slice(1))}</span><span class="small muted">${esc(nf.sub)} <a href="#jar">Ideas jar</a></span></span>
+        <span class="grow col"><span class="b">Both free ${esc(nf.label.charAt(0).toLowerCase() + nf.label.slice(1))}</span><span class="small muted">${esc(nf.sub)} <a href="#jar" class="nowrap">Ideas jar</a></span></span>
         <a href="#ask" class="btn tog sm" data-act="askFrom" data-day="${nf.key}" data-start="${hm(nf.start)}">Plan</a></div></div>`);
     }
   }
 
   // jobs for today (and anything overdue)
   const jobs = jobsOn(state, key);
-  if (jobs.length) {
-    out.push(`<section class="stack-s"><div class="row between"><h2 class="label">Jobs</h2><a href="#jobs" class="b small">All jobs</a></div>
-      <div class="card flush">${jobs.map((j) => jobRow(state, j, key, true)).join('')}</div></section>`);
+  // (nothing due today, but jobs coming up: just the next one, so all of them are still a tap away)
+  const next = jobs.length ? null : state.jobs.filter((j) => !j.done && j.day > key).sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))[0];
+  if (jobs.length || next) {
+    out.push(`<section class="stack-s"><div class="row between"><h2 class="label">Jobs</h2><a href="#jobs" class="b small small-link">All jobs</a></div>
+      ${jobs.length ? `<div class="card flush">${jobs.map((j) => jobRow(state, j, key, true)).join('')}</div>` : `<a href="#jobs" class="card flush next-job"><span class="list-row"><span class="grow col"><span class="b">${esc(next.title)}</span><span class="small muted">Nothing due today. Next: ${esc(relDay(fromDayKey(next.day)))}.</span></span>${icon.next(18)}</span></a>`}</section>`);
   }
   out.push(`<a href="#calendar" class="small-link center-link" data-act="calGo" data-v="week" data-day="${dayKey(addDays(now, 1))}">See the rest of the week ${icon.next(16)}</a>`);
   return out.join('');
@@ -227,7 +229,7 @@ function freeTonight(state, d) {
   const s = new Date(Math.max(iv[0], now.getTime())); const e = new Date(iv[1]);
   const open = e >= atTime(d.key, '22:30');
   return `<div class="ag-row ag-free"><span class="ag-time"><b>${esc(open ? 'From' : fmtTime(s))}</b><span>${esc(open ? fmtTime(new Date(iv[0])) : fmtTime(e))}</span></span><span class="ag-bar"></span>
-    <span class="ag-main"><span class="b ink-tog">Free together</span><span class="small muted">Nothing planned yet. <a href="#jar">Ideas jar</a></span></span>
+    <span class="ag-main"><span class="b ink-tog">Free together</span><span class="small muted">Nothing planned yet. <a href="#jar" class="nowrap">Ideas jar</a></span></span>
     <a href="#ask" class="btn tog sm" data-act="askFrom" data-day="${d.key}" data-start="${hm(new Date(iv[0]))}">Plan</a></div>`;
 }
 
@@ -258,6 +260,11 @@ export function agendaRow(state, it, key) {
     <span class="ag-bar${dashed ? ' dashed' : ''}" style="background:${whoColour(state, it.who)}"></span>
     <span class="ag-main"><span class="b ag-title">${esc(itemTitle(state, it))}${bellFor(state, it)}</span>
     <span class="small muted ag-sub">${esc(whoLabel(state, it.who))}${sub ? ` · ${esc(sub)}` : ''}</span></span>`;
+  // a shift (from the rota, or changed here): tapped, that day opens in Settings, Shifts
+  if (!it.ref && it.kind === 'shift' && it.shift && settingsOf(state, it.who).hasShifts) {
+    const day = it.cont ? dayKey(addDays(fromDayKey(key), -1)) : key;
+    return `<button type="button" class="ag-row ag-tap" data-act="shiftEdit" data-p="${esc(it.who)}" data-day="${day}" aria-label="${esc(itemTitle(state, it))}, ${esc(itemTime(it, key))}, ${esc(whoLabel(state, it.who))}. Change it">${inner}</button>`;
+  }
   if (!it.ref) return `<div class="ag-row">${inner}</div>`;
   return `<button type="button" class="ag-row ag-tap" data-act="openEv" data-ref="${esc(it.ref)}" data-day="${key}" aria-label="${esc(itemTitle(state, it))}, ${esc(itemTime(it, key))}, ${esc(whoLabel(state, it.who))}">${inner}</button>`;
 }
@@ -452,8 +459,9 @@ function weekView(state) {
         <span class="b link small">${open ? 'Hide' : 'Details'}</span>
       </button>
       <div class="strips">${rows.join('')}</div>
-      ${P ? `<p class="b small ink-tog">${esc(freeText(d))}</p>` : ''}
-      ${open ? `<div class="wday-list agenda">${items.length ? items.map((it) => agendaRow(state, it, k)).join('') : '<p class="muted pad">Nothing planned.</p>'}${moreLink(state, k)}</div>` : ''}
+      ${P ? freeLine(d, k) : ''}
+      ${open ? `<div class="wday-list agenda">${items.length ? items.map((it) => agendaRow(state, it, k)).join('') : '<p class="muted pad">Nothing planned.</p>'}${moreLink(state, k)}
+        <a href="#add" class="ag-add" data-act="addFor" data-day="${k}">${icon.plus(18)} Add on this day</a></div>` : ''}
     </article>`);
   }
   return `<div class="row between week-nav">
@@ -468,6 +476,17 @@ function weekView(state) {
 function allDayLine(cols) {
   const u = [...new Set(cols)].slice(0, 3);
   return u.map((c, i) => `<span class="seg-line" style="background:${c};top:${u.length === 1 ? 7 : 3 + i * 5}px"></span>`).join('');
+}
+// what the two of you have that day; time you're both free still to come is tapped to plan it
+function freeLine(d, k) {
+  const text = esc(freeText(d));
+  const iv = bestFree(d);
+  if (!iv || iv[1] <= Date.now() || d.together.some((t) => !t.auto && !t.allDay)) return `<p class="b small ink-tog">${text}</p>`;
+  return `<a href="#ask" class="wday-free b small ink-tog" data-act="askFrom" data-day="${k}" data-start="${hm(new Date(Math.max(iv[0], atTime(k, '09:00').getTime())))}"><span class="grow">${text}</span><span class="wday-plan">Plan ${icon.next(16)}</span></a>`;
+}
+function bestFree(d) {
+  const iv = d.bothFree.filter((x) => x[1] - x[0] >= 60 * 60000);
+  return iv.length ? iv.reduce((a, b) => (b[1] - b[0] > a[1] - a[0] ? b : a)) : null;
 }
 // (any day of the week, so never "today")
 export function freeText(d) {

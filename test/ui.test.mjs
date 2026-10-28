@@ -209,7 +209,7 @@ test("going back with the phone's Back while a box is still focused (keyboard cl
 
 test("a partner's shift times can't break the Shifts page", async () => {
   const page = await open('ethan', '#settings/shifts');
-  const p = await page.getAttribute('[data-act="cycleShift"]', 'data-p');
+  const p = await page.getAttribute('[data-act="shiftDay"]', 'data-p');
   assert.equal(p, 'sophie');
   const src = (await import('node:fs')).readFileSync(new globalThis.URL('../js/views-settings.js', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /data-p="\$\{who\}"/);
@@ -785,6 +785,120 @@ test("the server says this account can't open the household: Not on the list, ne
   await page.context().close();
 });
 
+// ---------- the usability pass (1.4.22) ----------
+const dayAhead = (page, n) => page.evaluate((n) => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }, n);
+
+test('Plan on Today: the free time is chosen, what it is gets the cursor, and Send stays in reach above the tabs', async () => {
+  const page = await open('ethan');
+  await page.click('a.btn.tog[data-act="askFrom"]');
+  await page.waitForSelector('#ask-title');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'ask-title');
+  assert.equal(await page.locator('[data-act="askSlot"][aria-pressed="true"]').count(), 1);
+  // the kinds of request are a row of chips, with the one chosen explained in a line
+  assert.equal(await page.locator('[data-act="askType"]').count(), 5);
+  assert.equal(await page.locator('.type-card[data-act="askType"]').count(), 0);
+  assert.match(await page.textContent('main'), /A date, a trip, seeing people\./);
+  // Send sits in the bar above the tabs, so it's on screen before scrolling
+  const box = await page.locator('[data-act="askSend"]').boundingBox();
+  const vh = page.viewportSize().height;
+  assert.ok(box.y + box.height <= vh, `Send is at ${box.y}, below the screen (${vh})`);
+  await page.context().close();
+});
+
+test('the week: time you are both free is tapped to plan it, and an open day can have something added', async () => {
+  const page = await open('sophie', '#calendar');
+  await page.click('[data-act="calView"][data-v="week"]');
+  const link = page.locator('a.wday-free').first();
+  assert.ok(await link.count(), 'a free time in the week can be tapped');
+  const day = await link.getAttribute('data-day');
+  assert.ok(day >= await dayAhead(page, 0));
+  await link.click();
+  await page.waitForSelector('#ask-title');
+  const when = await mods(page, (store, ui) => (ui.ask.custom ? { key: ui.ask.cday } : ui.ask.pick));
+  assert.equal(when.key, day);
+  await go(page, '#calendar');
+  assert.ok(await page.locator('.wday-list [data-act="addFor"]').count(), 'Add on this day');
+  await page.context().close();
+});
+
+test('a request for you: its answers sit in two rows, each on one line', async () => {
+  const page = await open('ethan', '#requests');
+  const card = page.locator('article', { hasText: 'IKEA' });
+  const tops = async (sel) => new Set(await card.locator(sel).evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)))).size;
+  assert.equal(await tops('.row-even:not(.row-quiet) .btn'), 1);
+  assert.equal(await tops('.row-quiet .btn'), 1);
+  assert.equal(await card.locator('.btn').count(), 4);
+  await page.context().close();
+});
+
+test('a shift: tapped on Today it opens that day in Settings, Shifts, and one more tap changes it', async () => {
+  const page = await open('sophie');
+  await page.click('.shift-card');
+  await page.waitForSelector('[data-act="shiftSet"]');
+  const today = await dayAhead(page, 0);
+  assert.equal(await page.getAttribute('[data-act="shiftDay"][aria-expanded="true"]', 'data-day'), today);
+  assert.ok(await page.evaluate(() => { const r = document.getElementById('shift-open').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }), 'the opened day is on screen');
+  await page.click('[data-act="shiftSet"][data-v="late"]');
+  assert.equal(await mods(page, (store, ui, k) => store.store.state.shifts[`sophie|${k}`].type, today), 'late');
+  assert.match(await page.textContent('.toast'), /^Late today\.$/);
+  // and back to the rota again
+  await page.click(`[data-act="shiftDay"][data-day="${today}"]`);
+  await page.click('[data-act="clearShift"]');
+  assert.equal(await mods(page, (store, ui, k) => store.store.state.shifts[`sophie|${k}`] || null, today), null);
+  await page.context().close();
+});
+
+test("Ethan can tap Sophie's shift in the day too, and the one from last night opens yesterday", async () => {
+  const page = await open('ethan');
+  const rows = page.locator('.agenda [data-act="shiftEdit"]');
+  assert.ok(await rows.count() >= 2);
+  assert.equal(await rows.first().getAttribute('data-day'), await dayAhead(page, -1));
+  assert.equal(await rows.first().getAttribute('data-p'), 'sophie');
+  await page.context().close();
+});
+
+test('Add: the start and end times sit on one line beside "Time" on a 384px phone', async () => {
+  const ctx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 384, height: 832 }, locale: 'en-GB', timezoneId: 'Europe/London', bypassCSP: true });
+  const page = await ctx.newPage();
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await page.goto(`${URL}?demo=ethan#add`);
+  await page.waitForSelector('#add-start');
+  const tops = await page.evaluate(() => ['label[for="add-start"]', '#add-start', '#add-end'].map((s) => { const r = document.querySelector(s).getBoundingClientRect(); return Math.round(r.top + r.height / 2); }));
+  assert.ok(Math.max(...tops) - Math.min(...tops) <= 2, `on different lines: ${tops}`);
+  await ctx.close();
+});
+
+test('a job: the done card goes to all the jobs, and Today points to the next one when none is due', async () => {
+  const page = await open('ethan', '#add');
+  await page.click('[data-act="addKind"][data-v="job"]');
+  await page.fill('#job-title', 'Clean the oven');
+  await page.click('[data-act="addJobSave"]');
+  await page.waitForSelector('.done-card a[href="#jobs"]');
+  await mods(page, (store) => Promise.all(store.store.state.jobs.filter((j) => j.day <= new Date().toISOString().slice(0, 10)).map((j) => store.actions.deleteJob(j.id))));
+  await go(page, '#today');
+  const next = page.locator('a.next-job');
+  assert.equal(await next.count(), 1);
+  assert.match(await next.textContent(), /Nothing due today/);
+  await page.context().close();
+});
+
+test("an event's page doesn't say its calendar twice", async () => {
+  const page = await open('ethan');
+  await page.click('button.ag-row:has-text("Team stand-up")');
+  await page.waitForSelector('[data-act="evBack"]');
+  const card = await page.textContent('.card.pad');
+  assert.equal((card.match(/Work/g) || []).length, 1, card);
+  await page.context().close();
+});
+
+test('choosing what your partner sees of a calendar says so', async () => {
+  const page = await open('ethan', '#settings/calendars');
+  await page.click('[data-act="openCal"][data-k="ethan__family"]');
+  await page.click('[data-act="calShare"][data-v="busy"]');
+  assert.match(await page.textContent('.toast'), /Sophie now sees “Busy” from Family/);
+  await page.context().close();
+});
+
 // every button, tab and chip on a screen: its text stays inside it, it stays inside its row or card, a one-line label stays
 // on one line (a card button with parts is several), a row of buttons is never left ragged (two on a line and one under
 // them), and nothing makes the page scroll sideways
@@ -846,6 +960,7 @@ test('buttons, tabs and chips fit their labels on one line and button rows are n
       await tap('[data-act="evDeleteAsk"]'); await look('deleting an event');
       await go(page, '#today'); await tap('[data-act="noteOpen"]'); await look('a note');
       await go(page, '#jar'); await tap('[data-act="jarPick"]'); await look('an idea picked');
+      await go(page, '#settings/shifts'); await tap('[data-act="shiftDay"]'); await look('a shift day opened');
       assert.deepEqual(bad, []);
       await ctx.close();
     }

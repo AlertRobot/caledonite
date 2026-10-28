@@ -61,7 +61,7 @@ export function viewEvent(state) {
     <div class="row">${icon.clock(22)}<span class="grow b">${esc(fmtDate(date))}, ${esc(item.allDay ? 'all day' : whenOn(item, day || dayKey(item.start)))}</span></div>
     <div class="row-wrap">${whoChip(state, item.who)}${item.calName ? `<span class="small muted">${esc(item.calName)}</span>` : ''}</div>
     ${location ? `<div class="row small-gap">${icon.home(20)}<span class="grow">${esc(location)}</span><a class="btn sec sm" href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(location)}" target="_blank" rel="noopener">Directions</a></div>` : ''}
-    ${sub && sub !== location ? `<p class="small muted">${esc(sub)}</p>` : ''}
+    ${sub && sub !== location && sub !== item.calName ? `<p class="small muted">${esc(sub)}</p>` : ''}
     ${base.sid || item.repeats ? '<p class="small">This repeats, so the reminder repeats too.</p>' : ''}
     ${pendingFor(state, src) ? '<p class="small note-box">Saving your change to Google Calendar. It shows here within a few minutes.</p>' : ''}
   </div>`);

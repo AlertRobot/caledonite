@@ -22,7 +22,7 @@ export const ui = {
   jobs: { showDone: false },
   // folded lists opened (Older requests, Done jobs), so a redraw doesn't fold them again
   opened: {},
-  settings: { page: 'home', openCal: null, shiftWeek: 0, shiftPerson: null, editType: null, favDraft: '', partnerEmailDraft: '', linkDraft: '' },
+  settings: { page: 'home', openCal: null, shiftWeek: 0, shiftPerson: null, shiftOpen: null, editType: null, favDraft: '', partnerEmailDraft: '', linkDraft: '' },
   setup: { myName: '', myShifts: false, partnerName: '', partnerEmail: '', partnerShifts: false },
   toast: null
 };

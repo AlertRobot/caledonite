@@ -1,6 +1,6 @@
 // Settings (with its own menu), plus the sign-in and first-time screens.
 import { esc, dayKey, addDays, mondayOf, fmtDate, agoText, WEEKDAY_NAMES, fmtTime, atTime, MONTH_NAMES, fromDayKey } from './util.js';
-import { isLowCal, nameOf, shortName, settingsOf, shiftFor, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours, quietNight } from './logic.js';
+import { isLowCal, nameOf, shortName, settingsOf, shiftFor, SHIFT_ORDER, nextAltDaysOff, myReminders, remindSummary, REMIND_OPTIONS, leaveSummary, inQuietHours, quietNight } from './logic.js';
 import { icon, avatar, seg, toggleRow } from './ui.js';
 import { ui } from './uistate.js';
 import { APP, FIREBASE } from './config.js';
@@ -190,11 +190,9 @@ function secShifts(state) {
   out.push(`<div class="card stack-s">
     <div class="row"><span class="grow col"><span class="b">${who === me ? 'Your' : esc(nameOf(state, who)) + "'s"} work rota</span>
     <span class="small muted">${rotaCals.length ? `From ${esc(rotaCals.map((c) => c.name).join(', '))}. Updates by itself.` : 'Not linked yet. Shifts can still be added by hand below.'}</span></span>${rotaCals.length ? '<span class="pill ok">Linked</span>' : ''}</div>
-    ${who === me ? `<div class="field"><label for="rota-url">Rota calendar link (for example from Loop)</label><input id="rota-url" type="url" inputmode="url" placeholder="https://..." data-bind="settings.rotaDraft" value="${esc(ui.settings.rotaDraft ?? s.rotaUrl ?? '')}"></div>
-      <button type="button" class="btn sec self-start" data-act="saveRota">Save link</button>
-      <p class="small muted">In Loop on the web: Personal roster, then "View and share your roster calendar on other devices". Copy the iCalendar link and paste it here.</p>` : ''}
+    ${who === me ? (rotaCals.length || s.rotaUrl ? `<details class="older" data-keep="rota-link" ${ui.opened['rota-link'] ? 'open' : ''}><summary class="b">Change the rota link</summary><div class="stack-s">${rotaLink(s)}</div></details>` : rotaLink(s)) : ''}
   </div>`);
-  // week editor
+  // week editor: tap a day, then the shift it is
   const wk = ui.settings.shiftWeek;
   const ws = addDays(mondayOf(new Date()), wk * 7);
   const rows = [];
@@ -206,13 +204,15 @@ function secShifts(state) {
     const type = sh ? sh.type : null;
     const label = sh ? sh.label : 'No shift';
     const times = sh && !sh.allDay ? `${fmtTime(sh.start)} to ${fmtTime(sh.end)}` : (sh ? (type === 'leave' ? 'Annual leave' : 'Not working') : 'Tap to add a shift');
-    rows.push(`<button type="button" class="list-row btn-row" data-act="cycleShift" data-p="${esc(who)}" data-day="${k}" data-type="${esc(type || '')}" aria-label="${esc(fmtDate(d))}: ${esc(label)}. Tap to change.">
-      <span class="grow col"><span class="b">${esc(fmtDate(d))}</span><span class="small muted">${esc(times)}</span></span>
-      ${ov ? `<span class="small b link" data-act="clearShift" data-p="${esc(who)}" data-day="${k}" role="button" tabindex="0">Undo</span>` : ''}
-      <span class="shift-pill sp-${esc(type || 'none')}">${esc(label)}</span></button>`);
+    const open = ui.settings.shiftOpen === k;
+    rows.push(`<button type="button" class="list-row btn-row" ${open ? 'id="shift-open"' : ''} aria-expanded="${open}" data-act="shiftDay" data-p="${esc(who)}" data-day="${k}" aria-label="${esc(fmtDate(d))}: ${esc(label)}${ov ? ', changed here' : ''}. Tap to change.">
+      <span class="grow col"><span class="b">${esc(fmtDate(d))}</span><span class="small muted">${esc(times)}${ov ? '. Changed here' : ''}</span></span>
+      <span class="shift-pill sp-${esc(type || 'none')}">${esc(label)}</span></button>
+      ${open ? `<div class="shift-pick"><div class="row-wrap">${SHIFT_ORDER.map((t) => `<button type="button" class="chip-btn chip-sm ${type === t ? 'on' : ''}" aria-pressed="${type === t}" data-act="shiftSet" data-p="${esc(who)}" data-day="${k}" data-v="${t}">${esc((s.shiftTypes[t] || {}).label || t)}</button>`).join('')}</div>
+        ${ov ? `<button type="button" class="btn link-btn sm self-start" data-act="clearShift" data-p="${esc(who)}" data-day="${k}">${rotaCals.length ? 'Back to the rota' : 'No shift'}</button>` : ''}</div>` : ''}`);
   }
   out.push(`<section class="stack-s"><h2 class="h4">Change a shift</h2>
-    <p class="small muted">Swapped a shift or picked up an extra one? Tap a day to change it. Changes win over the rota for that day.</p>
+    <p class="small muted">Swapped or picked up a shift? Tap the day. A change wins over the rota.</p>
     <div class="row between"><button type="button" class="icon-btn" aria-label="Previous week" data-act="shiftWeek" data-d="-1">${icon.back(20)}</button><span class="b">${esc(`${ws.getDate()} ${MONTH_NAMES[ws.getMonth()]} to ${addDays(ws, 6).getDate()} ${MONTH_NAMES[addDays(ws, 6).getMonth()]}`)}</span><button type="button" class="icon-btn" aria-label="Next week" data-act="shiftWeek" data-d="1">${icon.next(20)}</button></div>
     <div class="card flush">${rows.join('')}</div></section>`);
   // types
@@ -229,6 +229,12 @@ function secShifts(state) {
     <div class="field"><label for="travel">Travel home</label><select id="travel" data-act="personField" data-p="${esc(who)}" data-f="travelMins">${[15, 30, 45, 60].map((m) => `<option value="${m}" ${Number(s.travelMins) === m ? 'selected' : ''}>${m === 60 ? '1 hour' : m + ' minutes'}</option>`).join('')}</select></div>
   </div></section>`);
   return out.join('');
+}
+
+function rotaLink(s) {
+  return `<div class="field"><label for="rota-url">Rota calendar link (for example from Loop)</label><input id="rota-url" type="url" inputmode="url" placeholder="https://..." data-bind="settings.rotaDraft" value="${esc(ui.settings.rotaDraft ?? s.rotaUrl ?? '')}"></div>
+      <button type="button" class="btn sec self-start" data-act="saveRota">Save link</button>
+      <p class="small muted">In Loop on the web: Personal roster, then "View and share your roster calendar on other devices". Copy the iCalendar link and paste it here.</p>`;
 }
 
 // ---------- routine ----------
