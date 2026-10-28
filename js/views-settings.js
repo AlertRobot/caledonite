@@ -26,7 +26,8 @@ export function viewSettings(state) {
     calendars: secCalendars, shifts: secShifts, routine: secRoutine, requests: secRequests, holidays: secHolidays,
     notifications: secNotifications, theme: secTheme, apps: secApps, account: secAccount
   }[page] || (() => '');
-  return `<button type="button" class="back-link" data-act="setPage" data-v="home">${icon.back(20)}All settings</button>
+  const back = page === 'shifts' && ui.settings.back;
+  return `${back ? `<a href="${back}" class="back-link">${icon.back(20)}${back === '#calendar' ? 'Calendar' : 'Today'}</a>` : `<button type="button" class="back-link" data-act="setPage" data-v="home">${icon.back(20)}All settings</button>`}
     <h1 class="h1">${esc(title)}</h1>
     <nav class="chips-scroll set-tabs" aria-label="Settings sections">${SECTIONS.map(([k, l]) => `<button type="button" class="tab-chip ${k === page ? 'on' : ''}" ${k === page ? 'aria-current="page"' : ''} data-act="setPage" data-v="${k}">${esc(l)}</button>`).join('')}</nav>
     <div class="stack-l">${body(state)}</div>`;

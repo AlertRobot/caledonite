@@ -440,7 +440,7 @@ const H = {
     } catch (e) { console.error(e); toast('That didn’t save. Check your connection and try again.'); }
   },
   addAgain: () => { resetAdd(); render(); },
-  setPage: (el) => { go(el.dataset.v === 'home' ? '#settings' : `#settings/${el.dataset.v}`); },
+  setPage: (el) => { ui.settings.back = null; go(el.dataset.v === 'home' ? '#settings' : `#settings/${el.dataset.v}`); },
   openCal: (el) => { ui.settings.openCal = ui.settings.openCal === el.dataset.k ? null : el.dataset.k; render(); },
   // hiding a calendar from yourself also stops your partner seeing it, unless you've chosen its sharing yourself
   calShow: (el) => { const c = store.state.calendars[el.dataset.k]; const show = c.show === false; run(actions.updateCalendar(el.dataset.k, !show && !c.shareSet && c.share !== 'none' ? { show, share: 'none' } : { show })); },
@@ -474,6 +474,8 @@ const H = {
     ui.settings.shiftPerson = p; ui.settings.shiftOpen = day;
     ui.settings.shiftWeek = Math.round((mondayOf(fromDayKey(day)) - mondayOf(new Date())) / (7 * 86400000));
     ui.scrollTo = 'shift-open';
+    // Back goes back to where the shift was tapped
+    ui.settings.back = (location.hash || '#today').startsWith('#calendar') ? '#calendar' : '#today';
     go('#settings/shifts');
   },
   clearShift: (el) => { ui.settings.shiftOpen = null; run(actions.setShift(el.dataset.p, el.dataset.day, null), 'Changed back.'); },

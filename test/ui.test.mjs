@@ -841,6 +841,7 @@ test('a shift: tapped on Today it opens that day in Settings, Shifts, and one mo
   await page.click('[data-act="shiftSet"][data-v="late"]');
   assert.equal(await mods(page, (store, ui, k) => store.store.state.shifts[`sophie|${k}`].type, today), 'late');
   assert.match(await page.textContent('.toast'), /^Late today\.$/);
+  assert.equal(await page.getAttribute('a.back-link', 'href'), '#today');
   // and back to the rota again
   await page.click(`[data-act="shiftDay"][data-day="${today}"]`);
   await page.click('[data-act="clearShift"]');
