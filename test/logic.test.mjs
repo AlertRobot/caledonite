@@ -32,6 +32,34 @@ function load({ events = [], outbox = {}, requests = {}, ethan = {}, sophie = {}
 }
 const timed = (owner, calKey, day, s, e, extra = {}) => Object.assign({ owner, calKey, id: `${owner}${day}${s}`, t: 'Thing', s: atTime(day, s).getTime(), e: atTime(day, e).getTime() }, extra);
 const freeAt = (st, day, hm) => L.buildDay(st, day).bothFree.some(([a, b]) => a <= atTime(day, hm).getTime() && b > atTime(day, hm).getTime());
+
+test('Study day survives saved shift sanitising, uses editable hours and is not holiday or night recovery', () => {
+  load({ sophie: { shiftTypes: { study: { label: 'Study day', start: '08:30', end: '16:30' } } } });
+  store.raw.shifts = { study: { person: 'sophie', day: k(4), type: 'study' } };
+  setRaw(store.raw, { phase: 'ready', demo: true, me: 'ethan', user: { email: 'e@x.com' } });
+  const sh = L.shiftFor(store.state, 'sophie', k(4));
+  assert.equal(sh.type, 'study');
+  assert.equal(sh.label, 'Study day');
+  assert.equal(sh.start.getTime(), atTime(k(4), '08:30').getTime());
+  assert.equal(sh.end.getTime(), atTime(k(4), '16:30').getTime());
+  assert.ok(L.isWorkingShift(sh));
+  const day = L.buildDay(store.state, k(4)).persons.sophie;
+  assert.ok(day.busy.some(([a, b]) => a <= atTime(k(4), '12:00') && b > atTime(k(4), '12:00')));
+  assert.equal(L.buildDay(store.state, k(5)).persons.sophie.sleep, null);
+  assert.equal(L.leaveDaysFor(store.state, 'sophie', k(4), k(4)), 1, 'a study day remains a working day when requesting annual leave');
+});
+
+test('timed and all-day Study day rota entries keep their name and block their study hours', () => {
+  for (const allDay of [false, true]) {
+    const ev = allDay ? { owner: 'sophie', calKey: 'rota', id: 'study', t: 'Study day', ad: 1, sd: k(4), ed: k(5) }
+      : timed('sophie', 'rota', k(4), '10:00', '16:00', { t: 'Study day' });
+    const st = load({ events: [ev] });
+    const sh = L.shiftFor(st, 'sophie', k(4));
+    assert.equal(sh.type, 'study'); assert.equal(sh.label, 'Study day'); assert.equal(sh.allDay, false);
+    assert.ok(L.isWorkingShift(sh));
+    assert.equal(sh.start.getTime(), atTime(k(4), allDay ? '09:00' : '10:00').getTime());
+  }
+});
 // a Saturday a week or two ahead, so work and "from now" don't get in the way
 const sat = (() => { for (let i = 7; i < 14; i++) if (addDays(T, i).getDay() === 6) return k(i); })();
 

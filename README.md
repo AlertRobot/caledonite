@@ -4,6 +4,8 @@ Your calendars, side by side. A phone app (installable from Chrome) for Ethan an
 
 Try it with made-up data: open the app with `?demo=ethan` or `?demo=sophie` on the end of the address.
 
+Study days are available in Add → Shift and Settings → Shifts. They start at 9am–5pm, with the usual hours editable alongside the other shift times. They count as busy time, not annual leave or night-shift recovery. Study day entries from a work rota are recognised too; all-day rota entries use the saved study hours.
+
 ## How it fits together
 
 - **The app** (this repo) is a static web app on GitHub Pages. It works offline and installs from Chrome.

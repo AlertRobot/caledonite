@@ -1716,6 +1716,7 @@ var DEFAULT_SHIFTS_ = {
   night: { label: 'Night', start: '19:30', end: '08:00' },
   early: { label: 'Early', start: '07:00', end: '15:30' },
   late: { label: 'Late', start: '12:30', end: '20:30' },
+  study: { label: 'Study day', start: '09:00', end: '17:00' },
   leave: { label: 'Holiday', allDay: true },
   off: { label: 'Day off', allDay: true }
 };
@@ -1842,7 +1843,16 @@ function personDay_(p, key, data) {
     }
   } else if (rota.length) {
     var r = rota[0];
-    if (r.ad) { if (/leave|holiday|annual/i.test(r.t || '')) out.off = 'holiday'; else if (/off|rest/i.test(r.t || '')) out.off = 'day off'; }
+    if (r.ad) {
+      if (/\bstudy\b|\btraining\s+day\b/i.test(r.t || '')) {
+        var study = merge_(DEFAULT_SHIFTS_.study, (s.shiftTypes || {}).study || {});
+        var studyStart = localTime_(key, hm_(study.start) || '09:00');
+        var studyEnd = localTime_(key, hm_(study.end) || '17:00');
+        if (studyEnd <= studyStart) studyEnd = localTime_(keyPlus_(key, 1), hm_(study.end) || '17:00');
+        out.shift = { t: study.label, s: studyStart, e: studyEnd, type: 'study' };
+      } else if (/leave|holiday|annual/i.test(r.t || '')) out.off = 'holiday';
+      else if (/off|rest/i.test(r.t || '')) out.off = 'day off';
+    }
     else out.shift = { t: r.t, s: r.s, e: r.e };
   }
   if (!s.hasShifts && !out.shift) {
@@ -1866,7 +1876,7 @@ function altOff_(s, key) {
 // "long day until 8pm", "night shift from 7:30pm"
 function shiftWords_(sh) {
   var t = String(sh.t || '').toLowerCase();
-  var kind = /night/.test(t) ? 'night shift' : /long/.test(t) ? 'long day' : /early/.test(t) ? 'early shift' : /late/.test(t) ? 'late shift' : '';
+  var kind = sh.type === 'study' || /\bstudy\b|\btraining\s+day\b/.test(t) ? 'study day' : /night/.test(t) ? 'night shift' : /long/.test(t) ? 'long day' : /early/.test(t) ? 'early shift' : /late/.test(t) ? 'late shift' : '';
   if (!kind && sh.s && sh.e) {
     var hours = (sh.e - sh.s) / 3600e3;
     var startH = Number(Utilities.formatDate(new Date(sh.s), TZ, 'H'));
@@ -1904,7 +1914,7 @@ function morningText_(data, key) {
   if (jobs.length) parts.push('Jobs: ' + jobs.map(function (j) { return j.title; }).join(', '));
   return parts.join('. ') + '.';
 }
-var SHIFT_PLURAL_ = { 'long day': 'long days', 'night shift': 'nights', 'early shift': 'earlies', 'late shift': 'lates', 'shift': 'shifts' };
+var SHIFT_PLURAL_ = { 'long day': 'long days', 'night shift': 'nights', 'early shift': 'earlies', 'late shift': 'lates', 'study day': 'study days', 'shift': 'shifts' };
 function weekText_(data, monday) {
   var keys = [];
   for (var i = 0; i < 7; i++) keys.push(keyPlus_(monday, i));

@@ -10,10 +10,11 @@ export const DEFAULT_SHIFT_TYPES = {
   night: { label: 'Night', start: '19:30', end: '08:00' },
   early: { label: 'Early', start: '07:00', end: '15:30' },
   late: { label: 'Late', start: '12:30', end: '20:30' },
+  study: { label: 'Study day', start: '09:00', end: '17:00' },
   leave: { label: 'Holiday', allDay: true },
   off: { label: 'Day off', allDay: true }
 };
-export const SHIFT_ORDER = ['off', 'long', 'night', 'early', 'late', 'leave'];
+export const SHIFT_ORDER = ['off', 'long', 'night', 'early', 'late', 'leave', 'study'];
 
 export const DEFAULT_SETTINGS = {
   workLabel: 'Working',
@@ -122,6 +123,7 @@ function eventsOn(state, pid, key) {
 // ---------- shifts ----------
 function inferShift(ev) {
   const t = (ev.title || '').toLowerCase();
+  if (/\bstudy(?:\s+day)?\b|\btraining\s+day\b/i.test(t)) return 'study';
   if (ev.allDay) {
     if (/leave|holiday|annual|\bal\b/.test(t)) return 'leave';
     if (/off|rest/.test(t)) return 'off';
@@ -161,6 +163,10 @@ export function shiftFor(state, pid, key) {
     const ev = rota[0];
     type = inferShift(ev) || 'other'; source = 'rota'; title = ev.title;
     if (!ev.allDay) { start = ev.start; end = ev.end; }
+    else if (type === 'study') {
+      start = atTime(key, s.shiftTypes.study.start); end = atTime(key, s.shiftTypes.study.end);
+      if (end <= start) end = addDays(end, 1);
+    }
     if (ev.start < dayStart && !ev.allDay) return null;
   }
   const def = s.shiftTypes[type] || { label: title || 'Shift' };

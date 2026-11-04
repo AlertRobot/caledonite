@@ -307,6 +307,8 @@ details.older .stack { margin-top: 8px; }
 .sp-night { background: #2E3270; color: #FFFFFF; }
 .sp-early { background: var(--orange-sleep); color: var(--ink); }
 .sp-late { background: var(--orange-soft); color: var(--orange-ink); }
+.sp-study { background: var(--accent-soft); color: var(--accent); }
+.study-choice { grid-column: 1 / -1; }
 .sp-leave { background: var(--tog-soft); color: var(--tog-ink); }
 .sp-none { background: transparent; color: var(--muted); border: 1.5px dashed var(--muted); }
 .theme-tile { padding: 0; border-radius: 16px; border: 2px solid var(--line2); overflow: hidden; display: flex; flex-direction: column; text-align: left; cursor: pointer; }

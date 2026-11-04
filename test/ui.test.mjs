@@ -843,9 +843,9 @@ test('a shift: tapped on Today it opens that day in Settings, Shifts, and one mo
   const today = await dayAhead(page, 0);
   assert.equal(await page.getAttribute('[data-act="shiftDay"][aria-expanded="true"]', 'data-day'), today);
   assert.ok(await page.evaluate(() => { const r = document.getElementById('shift-open').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }), 'the opened day is on screen');
-  // the six shifts sit in even rows of two, never four and two left over
+  // Existing shifts stay in pairs; Study day has its own full-width final row.
   const tops = await page.$$eval('[data-act="shiftSet"]', (els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
-  assert.deepEqual([...new Set(tops)].map((t) => tops.filter((x) => x === t).length), [2, 2, 2]);
+  assert.deepEqual([...new Set(tops)].map((t) => tops.filter((x) => x === t).length), [2, 2, 2, 1]);
   await page.click('[data-act="shiftSet"][data-v="late"]');
   assert.equal(await mods(page, (store, ui, k) => store.store.state.shifts[`sophie|${k}`].type, today), 'late');
   assert.match(await page.textContent('.toast'), /^Late today\.$/);
@@ -854,6 +854,27 @@ test('a shift: tapped on Today it opens that day in Settings, Shifts, and one mo
   await page.click(`[data-act="shiftDay"][data-day="${today}"]`);
   await page.click('[data-act="clearShift"]');
   assert.equal(await mods(page, (store, ui, k) => store.store.state.shifts[`sophie|${k}`] || null, today), null);
+  await page.context().close();
+});
+
+test('Study day can be saved from either shift picker and its hours remain configurable', async () => {
+  const page = await open('sophie', '#settings/shifts');
+  const today = await dayAhead(page, 0);
+  await page.click(`[data-act="shiftDay"][data-day="${today}"]`);
+  const study = page.locator('[data-act="shiftSet"][data-v="study"]');
+  assert.equal(await study.textContent(), 'Study day');
+  await study.click();
+  assert.match(await page.locator(`[data-act="shiftDay"][data-day="${today}"]`).textContent(), /Study day/);
+  assert.equal(await mods(page, (store, ui, key) => store.store.state.shifts[`sophie|${key}`].type, today), 'study');
+  await page.fill('#st-study', '10:00'); await page.locator('#st-study').dispatchEvent('change');
+  assert.equal(await mods(page, async (store) => (await import('./js/logic.js')).settingsOf(store.store.state, 'sophie').shiftTypes.study.start), '10:00');
+  await go(page, '#add');
+  await page.click('[data-act="addKind"][data-v="shift"]');
+  await page.click('[data-act="addShiftType"][data-v="study"]');
+  await page.click('[data-act="addShiftSave"]');
+  await page.waitForSelector('.done-card');
+  assert.match(await page.locator('.done-card').textContent(), /Study day/);
+  assert.deepEqual(page.errors, []);
   await page.context().close();
 });
 

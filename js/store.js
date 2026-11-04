@@ -32,7 +32,7 @@ const COLOURS = ['blue', 'orange', 'green', 'purple', 'pink', 'teal', 'red', 'gr
 const LAYERS = ['own', 'family', 'friends', 'other'];
 const ROLES = ['normal', 'work', 'rota'];
 const SHARES = ['all', 'busy', 'none', 'hours'];
-const SHIFT_TYPES = ['long', 'night', 'early', 'late', 'off', 'leave'];
+const SHIFT_TYPES = ['long', 'night', 'early', 'late', 'off', 'leave', 'study'];
 const pick = (v, list, d) => (list.includes(v) ? v : d);
 // Shared lists either of you can write to: only the shapes the screens draw, so one odd record can't break them
 const isDay = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);

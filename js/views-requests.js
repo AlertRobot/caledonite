@@ -339,7 +339,7 @@ function addShiftForm(state) {
       <div class="f-block"><span class="b">Which shift?</span>
       <div class="grid2">${SHIFT_ORDER.map((t) => {
         const def = types[t] || {};
-        return `<button type="button" class="type-card ${a.shiftType === t ? 'on' : ''}" aria-pressed="${a.shiftType === t}" data-act="addShiftType" data-v="${t}"><span class="b">${esc(def.label)}</span><span class="small muted">${def.allDay ? (t === 'off' ? 'Not working' : 'Annual leave') : esc(`${fmtHMs(def.start)} to ${fmtHMs(def.end)}`)}</span></button>`;
+        return `<button type="button" class="type-card ${t === 'study' ? 'study-choice' : ''} ${a.shiftType === t ? 'on' : ''}" aria-pressed="${a.shiftType === t}" data-act="addShiftType" data-v="${t}"><span class="b">${esc(def.label)}</span><span class="small muted">${def.allDay ? (t === 'off' ? 'Not working' : 'Annual leave') : esc(`${fmtHMs(def.start)} to ${fmtHMs(def.end)}`)}</span></button>`;
       }).join('')}</div></div>
     </div>
     <p class="small muted f-hint">${who === me ? 'Your shifts' : `${esc(nameOf(state, who))}'s shifts`}. A change here wins over the rota for that day.</p>

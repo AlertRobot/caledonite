@@ -30,6 +30,21 @@ const Utilities = {
 const ctx = vm.createContext({ Utilities, Logger: { log() {} } });
 vm.runInContext(readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8'), ctx);
 
+test('Study day summaries use its name and hours for manual and all-day rota entries', () => {
+  const key = '2026-11-10';
+  const person = { id: 'sophie', mine: true, settings: { hasShifts: true, shiftTypes: { study: { label: 'Study day', start: '08:30', end: '16:30' } } }, items: [] };
+  const manual = ctx.personDay_(person, key, { overrides: { ['sophie|' + key]: { type: 'study' } } });
+  assert.equal(manual.off, ''); assert.equal(manual.shift.type, 'study');
+  assert.equal(ctx.shiftWords_(manual.shift), 'study day');
+  assert.equal(manual.shift.s, ctx.localTime_(key, '08:30'));
+  assert.equal(manual.shift.e, ctx.localTime_(key, '16:30'));
+  person.items = [{ ev: { ad: 1, sd: key, ed: '2026-11-11', t: 'Study day' }, cal: { role: 'rota' } }];
+  const rota = ctx.personDay_(person, key, { overrides: {} });
+  assert.equal(rota.shift.type, 'study'); assert.equal(ctx.shiftWords_(rota.shift), 'study day');
+  assert.equal(rota.shift.s, manual.shift.s); assert.equal(rota.shift.e, manual.shift.e);
+  assert.equal(ctx.shiftWords_({ t: 'Study day', s: manual.shift.s, e: manual.shift.e }), 'study day');
+});
+
 test('event times use the phone time zone the app sent, and London otherwise', () => {
   assert.equal(ctx.tzOf_({ tz: 'Europe/Madrid' }), 'Europe/Madrid');
   assert.equal(ctx.tzOf_({ tz: 'America/Argentina/Buenos_Aires' }), 'America/Argentina/Buenos_Aires');
