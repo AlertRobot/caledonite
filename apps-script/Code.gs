@@ -1369,9 +1369,11 @@ function createEvent_(me, ctx, o, own, rs) {
   } else {
     var st = hm_(ev.start) || '19:00';
     var en = hm_(ev.end) || hm_(ev.start) || '20:00';
-    if (mins_(en) <= mins_(st)) en = addMins_(st, 60);
+    // over several days: from the start on the first day to the end on the last
+    var endOn = /^\d{4}-\d{2}-\d{2}$/.test(String(ev.endDay || '')) && ev.endDay > day ? ev.endDay : day;
+    if (endOn === day && mins_(en) <= mins_(st)) en = addMins_(st, 60);
     resource.start = { dateTime: day + 'T' + st + ':00', timeZone: tzOf_(o) };
-    resource.end = { dateTime: day + 'T' + en + ':00', timeZone: tzOf_(o) };
+    resource.end = { dateTime: endOn + 'T' + en + ':00', timeZone: tzOf_(o) };
   }
   var rule = rrule_(ev.repeat);
   if (rule) resource.recurrence = [rule];

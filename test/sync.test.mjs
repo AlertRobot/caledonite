@@ -109,6 +109,20 @@ test('saying yes to the other time: the pencilled-in event goes, then the agreed
   assert.equal(calendar.events[0].start.dateTime.slice(0, 10), '2026-11-07', 'at the agreed time');
 });
 
+test('something over several days goes in as one event: all day to the end of the last day, or timed from the first start to the last end', () => {
+  const calendar = fakeCalendar([]);
+  runOutbox([
+    { id: 'o1', person: 'ethan', op: 'create', tag: 'add:camp', created: 1, event: { title: 'Camping', day: '2026-11-24', endDay: '2026-11-28', allDay: true, start: null, end: null } },
+    { id: 'o2', person: 'ethan', op: 'create', tag: 'add:wknd', created: 2, event: { title: 'Weekend away', day: '2026-11-27', endDay: '2026-11-29', allDay: false, start: '18:00', end: '11:00' } }
+  ], { calendar });
+  const camp = calendar.events.find((e) => e.summary === 'Camping');
+  assert.equal(camp.start.date, '2026-11-24');
+  assert.equal(camp.end.date, '2026-11-29');
+  const wk = calendar.events.find((e) => e.summary === 'Weekend away');
+  assert.equal(wk.start.dateTime, '2026-11-27T18:00:00');
+  assert.equal(wk.end.dateTime, '2026-11-29T11:00:00');
+});
+
 test('the other time for something added for you goes in their calendar only', async () => {
   const Ops = globalThis.CaledoniteOps;
   const r = { from: 'ethan', to: 'sophie', type: 'add', title: 'Dentist', when: { day: '2026-11-06', start: '10:00', end: '11:00' }, counter: { day: '2026-11-07', start: '10:00', end: '11:00', label: 'x' }, status: 'other' };

@@ -427,6 +427,8 @@ const H = {
     const a = ui.add; a.multi = !a.multi;
     const first = addDayKey();
     if (a.multi && (!a.until || a.until <= first)) a.until = dayKey(addDays(fromDayKey(first), 1));
+    // a stretch of days is usually all day: start it that way unless a time's already in
+    if (a.multi && !a.start) a.allDay = true;
     render();
   },
   addMore: () => { ui.add.more = !ui.add.more; render(); },
@@ -438,11 +440,14 @@ const H = {
     // several days in a row are all day, from the first to the last (the last can be the first: just that day)
     const range = !!a.multi;
     if (range && a.until && a.until < day) { ui.focus = 'add-until'; return toast('The last day needs to be on or after the first.'); }
-    const endDay = range ? addUntil(a) : null;
-    const allDay = range || a.allDay;
+    const last = range ? addUntil(a) : day;
+    const endDay = last > day ? last : null;
+    const allDay = a.allDay;
     if (!allDay && !a.start) { ui.focus = 'add-start'; return toast('Add a start time, or tick All day.'); }
+    // timed over several days: from the start on the first day to the end on the last
+    if (!allDay && endDay && !a.end) { ui.focus = 'add-end'; return toast('Add when it ends on the last day.'); }
     let end = a.end;
-    if (!allDay && end && end <= a.start) { ui.focus = 'add-end'; return toast('The end needs to be after the start.'); }
+    if (!allDay && !endDay && end && end <= a.start) { ui.focus = 'add-end'; return toast('The end needs to be after the start.'); }
     if (!allDay && !end) end = plusMins(a.start, 60);
     // for your partner it's a request: one for a time already gone could only ever be turned down
     if (a.who === 'partner' && requestPassed({ when: { day, endDay, start: allDay ? null : a.start, end: allDay ? null : end, allDay } })) { ui.focus = allDay ? 'add-title' : 'add-start'; return toast('That time has already gone. Pick a later one.'); }

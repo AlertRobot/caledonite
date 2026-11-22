@@ -161,8 +161,8 @@ export function createDemoBackend(me = 'ethan') {
         const ev = o.event;
         const day = ev.day;
         const off = Math.round((new Date(day + 'T00:00') - T) / 86400000); // whole days from today (noon would round up a day)
-        const last = ev.allDay && ev.endDay > day ? Math.round((new Date(ev.endDay + 'T00:00') - T) / 86400000) : off;
-        add(o.person, ev.calKey || cal, ev.title, off, ev.allDay ? null : ev.start, ev.allDay ? null : ev.end, Object.assign({ tag: o.tag, b: ev.busyOnly ? 1 : 0 }, last > off ? { ed: k(last + 1) } : {}));
+        const last = ev.endDay > day ? Math.round((new Date(ev.endDay + 'T00:00') - T) / 86400000) : off;
+        add(o.person, ev.calKey || cal, ev.title, off, ev.allDay ? null : ev.start, ev.allDay ? null : ev.end, Object.assign({ tag: o.tag, b: ev.busyOnly ? 1 : 0 }, last > off ? (ev.allDay ? { ed: k(last + 1) } : { e: atTime(ev.endDay, ev.end).getTime() }) : {}));
       } else if (o.op === 'update' || o.op === 'edit') {
         const ch = o.changes || o.event || {};
         for (const e of evs) {

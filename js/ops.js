@@ -48,7 +48,10 @@
   function fixedWhen(w) {
     if (!w || !/^\d{4}-\d{2}-\d{2}$/.test(String(w.day || ''))) return (w && w.label) || '';
     var base = dateText(w.day);
-    if (w.endDay && w.endDay !== w.day) return base + ' to ' + dateText(w.endDay);
+    if (w.endDay && w.endDay !== w.day) {
+      if (w.allDay || !w.start) return base + ' to ' + dateText(w.endDay);
+      return base + ', ' + timeText(w.start) + ' to ' + dateText(w.endDay) + (w.end ? ', ' + timeText(w.end) : '');
+    }
     if (w.allDay) return base + ', all day';
     var s = w.start || '19:00';
     return base + ', ' + timeText(s) + (w.end ? ' to ' + timeText(w.end) : '');

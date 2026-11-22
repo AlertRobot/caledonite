@@ -254,8 +254,9 @@ export function viewAdd(state) {
     ${P ? fRow('Who', seg(whos.map((w) => Object.assign(w, { on: a.who === w.v })), { act: 'addWho', label: 'Who is it for?' })) : ''}
     ${dayRows(a, a.multi)}
     <button type="button" class="f-row" aria-pressed="${!!a.multi}" data-act="addMultiT"><span class="b grow">Several days</span><span class="switch ${a.multi ? 'on' : ''}"><span></span></span></button>
-    ${a.multi ? fRow('<label for="add-until">Last day</label>', `<input id="add-until" type="date" data-bind="add.until" data-act="addRangeDate" min="${esc(addDayKey())}" value="${esc(addUntil(a))}">`) : `<button type="button" class="f-row" aria-pressed="${a.allDay}" data-act="addAllDayT"><span class="b grow">All day</span><span class="switch ${a.allDay ? 'on' : ''}"><span></span></span></button>`}
-    ${a.allDay || a.multi ? '' : fRow('<label for="add-start">Time</label>', `<input id="add-start" type="time" aria-label="Starts" data-bind="add.start" value="${esc(a.start)}"><span class="muted">to</span><input id="add-end" type="time" aria-label="Ends" data-bind="add.end" value="${esc(a.end)}">`, 'f-times')}
+    ${a.multi ? fRow('<label for="add-until">Last day</label>', `<input id="add-until" type="date" data-bind="add.until" data-act="addRangeDate" min="${esc(addDayKey())}" value="${esc(addUntil(a))}">`) : ''}
+    <button type="button" class="f-row" aria-pressed="${a.allDay}" data-act="addAllDayT"><span class="b grow">All day</span><span class="switch ${a.allDay ? 'on' : ''}"><span></span></span></button>
+    ${a.allDay ? '' : fRow('<label for="add-start">Time</label>', `<input id="add-start" type="time" aria-label="Starts" data-bind="add.start" value="${esc(a.start)}"><span class="muted">to</span><input id="add-end" type="time" aria-label="Ends" data-bind="add.end" value="${esc(a.end)}">`, 'f-times')}
   </div>`);
   if (a.who !== 'me' && P) out.push(`<p class="small muted f-hint">${esc(whoNote(state, a.who))}</p>`);
 
@@ -272,7 +273,7 @@ export function viewAdd(state) {
       inner.push(fRow('<label for="add-repeat">Repeats</label>', `<select id="add-repeat" data-bind="add.repeat" data-act="addRerender">${EVENT_REPEATS.map(([v, l]) => `<option value="${v}" ${(a.repeat || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`));
       if (a.who === 'me' && cals.length > 1) inner.push(fRow('<label for="add-cal">Calendar</label>', `<select id="add-cal" data-bind="add.cal" data-act="addRerender">${cals.map((c) => `<option value="${esc(c.calKey)}" ${cal && cal.calKey === c.calKey ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`));
       if (a.who === 'me' && P) inner.push(fRow(`${esc(shortName(state, P))} sees`, seg([{ v: 'all', label: 'Everything', on: !a.busyOnly }, { v: 'busy', label: '“Busy”', on: a.busyOnly }], { act: 'addBusy', label: 'What your partner sees' })));
-      const opts = REMIND_OPTIONS.filter((o) => !(a.allDay || a.multi) || !o.timedOnly);
+      const opts = REMIND_OPTIONS.filter((o) => !a.allDay || !o.timedOnly);
       inner.push(`<div class="f-block"><span class="b">Remind me</span>
         <div class="row-wrap">${opts.map((o) => `<button type="button" class="chip-btn ${a.remind.includes(o.v) ? 'on' : ''}" aria-pressed="${a.remind.includes(o.v)}" data-act="addRemind" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
         ${a.remind.length ? `<span class="b pad-top">What do you need to do?</span>

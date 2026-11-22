@@ -260,7 +260,7 @@ export const actions = {
   async addEvent({ who, title, day, endDay, start, end, allDay, calKey, busyOnly, repeat }) {
     const st = store.state;
     const when = { day, start, end, allDay, label: '' };
-    if (allDay && endDay && endDay > day) when.endDay = endDay;
+    if (endDay && endDay > day) when.endDay = endDay;
     if (who === 'partner') {
       return actions.createRequest({ type: 'add', title, when: Object.assign(when, { label: whenLabel(when) }), hold: false });
     }
@@ -576,7 +576,11 @@ export function whenLabel(w) {
   if (!w || !w.day) return '';
   const d = fromDayKey(w.day);
   const base = `${relDayCap(d)}`;
-  if (w.endDay && w.endDay !== w.day) return `${base} to ${relDayCap(fromDayKey(w.endDay))}`;
+  if (w.endDay && w.endDay !== w.day) {
+    const last = relDayCap(fromDayKey(w.endDay));
+    if (w.allDay || !w.start) return `${base} to ${last}`;
+    return `${base}, ${fmtHM(w.start)} to ${last}${w.end ? `, ${fmtHM(w.end)}` : ''}`;
+  }
   if (w.allDay) return `${base}, all day`;
   const [sh, sm] = (w.start || '19:00').split(':').map(Number);
   const s = new Date(d.getFullYear(), d.getMonth(), d.getDate(), sh, sm);
@@ -585,6 +589,7 @@ export function whenLabel(w) {
   const e = new Date(d.getFullYear(), d.getMonth(), d.getDate(), eh, em);
   return `${base}, ${fmtT(s)} to ${fmtT(e)}`;
 }
+function fmtHM(hm) { const [h, m] = String(hm).split(':').map(Number); return fmtT(new Date(2000, 0, 1, h || 0, m || 0)); }
 function fmtT(d) {
   const h = d.getHours(); const m = d.getMinutes();
   const suf = h < 12 ? 'am' : 'pm'; const h12 = h % 12 === 0 ? 12 : h % 12;

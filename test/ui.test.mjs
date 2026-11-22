@@ -202,9 +202,9 @@ test('Add: an event over several days runs all day from the first day to the las
   await page.click('[data-act="addDay"][data-v="pick"]');
   await page.fill('#add-date', await key(2));
   await page.click('[data-act="addMultiT"]');
-  // all day by its nature: no times or All day switch to fill in, and the last day starts as the day after
+  // all day to start with, and the last day starts as the day after
   assert.equal(await page.locator('#add-start').count(), 0);
-  assert.equal(await page.locator('[data-act="addAllDayT"]').count(), 0);
+  assert.equal(await page.getAttribute('[data-act="addAllDayT"]', 'aria-pressed'), 'true');
   assert.equal(await page.inputValue('#add-until'), await key(3));
   await page.fill('#add-until', await key(1));
   await page.click('[data-act="addSave"]');
@@ -214,7 +214,23 @@ test('Add: an event over several days runs all day from the first day to the las
   await page.click('[data-act="addSave"]');
   assert.match(await page.textContent('.done-card'), /Added: Camping \(.+ to .+\)/);
   const ev = await mods(page, (store) => Object.values(store.store.state.outbox || {}).map((o) => o.event).find((e) => e && e.title === 'Camping'));
-  if (ev) { assert.equal(ev.allDay, true); assert.equal(ev.day, await key(2)); assert.equal(ev.endDay, await key(6)); }
+  assert.equal(ev.allDay, true); assert.equal(ev.day, await key(2)); assert.equal(ev.endDay, await key(6));
+  // or timed: from the start on the first day to the end on the last
+  await page.click('[data-act="addAgain"]');
+  await page.fill('#add-title', 'Weekend away');
+  await page.click('[data-act="addDay"][data-v="pick"]');
+  await page.fill('#add-date', await key(2));
+  await page.click('[data-act="addMultiT"]');
+  await page.fill('#add-until', await key(4));
+  await page.click('[data-act="addAllDayT"]');
+  await page.fill('#add-start', '18:00');
+  await page.click('[data-act="addSave"]');
+  assert.match(await page.textContent('.toast'), /when it ends on the last day/);
+  await page.fill('#add-end', '11:00');
+  await page.click('[data-act="addSave"]');
+  assert.match(await page.textContent('.done-card'), /Weekend away \(.+, 6pm to .+, 11am\)/);
+  const wk = await mods(page, (store) => Object.values(store.store.state.outbox || {}).map((o) => o.event).find((e) => e && e.title === 'Weekend away'));
+  assert.equal(wk.allDay, false); assert.equal(wk.start, '18:00'); assert.equal(wk.end, '11:00'); assert.equal(wk.endDay, await key(4));
   // for your partner it's a request with both days on it
   await page.click('[data-act="addAgain"]');
   await page.click('[data-act="addWho"][data-v="partner"]');
