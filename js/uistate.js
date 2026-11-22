@@ -16,7 +16,7 @@ export const ui = {
   suggestFor: null,
   suggestSlots: [],
   ask: { type: 'plan', title: '', slot: 0, custom: false, cday: '', cstart: '19:00', cend: '21:00', hold: null, sent: false, lfrom: '', lto: '', pick: null, shown: null },
-  add: { kind: 'event', who: 'me', title: '', day: 'today', date: '', start: '', end: '', allDay: false, cal: '', busyOnly: false, shiftType: 'long', shiftWho: null, done: '', remind: [], note: '', repeat: '', jobWho: 'me', jobRepeat: '', lfrom: '', lto: '', more: false },
+  add: { kind: 'event', who: 'me', title: '', day: 'today', date: '', until: '', multi: false, start: '', end: '', allDay: false, cal: '', busyOnly: false, shiftType: 'long', shiftWho: null, done: '', remind: [], note: '', repeat: '', jobWho: 'me', jobRepeat: '', lfrom: '', lto: '', more: false },
   ev: { ref: null, day: null, back: '#today', noteDraft: null, editing: false, confirmDelete: false, scope: 'one', draft: null },
   jar: { pick: null, adding: false, draft: { title: '', cost: '', where: 'out' }, filter: 'all' },
   jobs: { showDone: false },

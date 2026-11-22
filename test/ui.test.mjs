@@ -195,6 +195,42 @@ test('Ask, or Add for your partner: a time that has already gone is questioned, 
   await page.context().close();
 });
 
+test('Add: an event over several days runs all day from the first day to the last, for you or your partner', async () => {
+  const page = await open('ethan', '#add');
+  const key = (n) => page.evaluate((x) => { const d = new Date(); d.setDate(d.getDate() + x); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }, n);
+  await page.fill('#add-title', 'Camping');
+  await page.click('[data-act="addDay"][data-v="pick"]');
+  await page.fill('#add-date', await key(2));
+  await page.click('[data-act="addMultiT"]');
+  // all day by its nature: no times or All day switch to fill in, and the last day starts as the day after
+  assert.equal(await page.locator('#add-start').count(), 0);
+  assert.equal(await page.locator('[data-act="addAllDayT"]').count(), 0);
+  assert.equal(await page.inputValue('#add-until'), await key(3));
+  await page.fill('#add-until', await key(1));
+  await page.click('[data-act="addSave"]');
+  assert.match(await page.textContent('.toast'), /last day needs to be on or after the first/);
+  await page.fill('#add-until', await key(6));
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 0);
+  await page.click('[data-act="addSave"]');
+  assert.match(await page.textContent('.done-card'), /Added: Camping \(.+ to .+\)/);
+  const ev = await mods(page, (store) => Object.values(store.store.state.outbox || {}).map((o) => o.event).find((e) => e && e.title === 'Camping'));
+  if (ev) { assert.equal(ev.allDay, true); assert.equal(ev.day, await key(2)); assert.equal(ev.endDay, await key(6)); }
+  // for your partner it's a request with both days on it
+  await page.click('[data-act="addAgain"]');
+  await page.click('[data-act="addWho"][data-v="partner"]');
+  await page.fill('#add-title', 'Festival');
+  await page.click('[data-act="addDay"][data-v="pick"]');
+  await page.fill('#add-date', await key(3));
+  await page.click('[data-act="addMultiT"]');
+  await page.fill('#add-until', await key(5));
+  await page.click('[data-act="addSave"]');
+  assert.match(await page.textContent('.done-card'), /Sent to .+: Festival \(.+ to .+\)/);
+  const req = await mods(page, (store) => Object.values(store.store.state.requests || {}).find((r) => r.title === 'Festival'));
+  if (req) { assert.equal(req.when.endDay, await key(5)); assert.equal(req.when.allDay, true); }
+  assert.deepEqual(page.errors, []);
+  await page.context().close();
+});
+
 test("going back with the phone's Back while a box is still focused (keyboard closed) moves to the screen it says", async () => {
   const page = await open('ethan', '#today');
   await go(page, '#ask');

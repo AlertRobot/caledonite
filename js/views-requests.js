@@ -252,9 +252,10 @@ export function viewAdd(state) {
   out.push(`<div class="card flush form-card">
     ${titleRow('add-title', 'add.title', a.title, 'What is it?', 'For example: Dentist')}
     ${P ? fRow('Who', seg(whos.map((w) => Object.assign(w, { on: a.who === w.v })), { act: 'addWho', label: 'Who is it for?' })) : ''}
-    ${dayRows(a)}
-    <button type="button" class="f-row" aria-pressed="${a.allDay}" data-act="addAllDayT"><span class="b grow">All day</span><span class="switch ${a.allDay ? 'on' : ''}"><span></span></span></button>
-    ${a.allDay ? '' : fRow('<label for="add-start">Time</label>', `<input id="add-start" type="time" aria-label="Starts" data-bind="add.start" value="${esc(a.start)}"><span class="muted">to</span><input id="add-end" type="time" aria-label="Ends" data-bind="add.end" value="${esc(a.end)}">`, 'f-times')}
+    ${dayRows(a, a.multi)}
+    <button type="button" class="f-row" aria-pressed="${!!a.multi}" data-act="addMultiT"><span class="b grow">Several days</span><span class="switch ${a.multi ? 'on' : ''}"><span></span></span></button>
+    ${a.multi ? fRow('<label for="add-until">Last day</label>', `<input id="add-until" type="date" data-bind="add.until" data-act="addRangeDate" min="${esc(addDayKey())}" value="${esc(addUntil(a))}">`) : `<button type="button" class="f-row" aria-pressed="${a.allDay}" data-act="addAllDayT"><span class="b grow">All day</span><span class="switch ${a.allDay ? 'on' : ''}"><span></span></span></button>`}
+    ${a.allDay || a.multi ? '' : fRow('<label for="add-start">Time</label>', `<input id="add-start" type="time" aria-label="Starts" data-bind="add.start" value="${esc(a.start)}"><span class="muted">to</span><input id="add-end" type="time" aria-label="Ends" data-bind="add.end" value="${esc(a.end)}">`, 'f-times')}
   </div>`);
   if (a.who !== 'me' && P) out.push(`<p class="small muted f-hint">${esc(whoNote(state, a.who))}</p>`);
 
@@ -271,7 +272,7 @@ export function viewAdd(state) {
       inner.push(fRow('<label for="add-repeat">Repeats</label>', `<select id="add-repeat" data-bind="add.repeat" data-act="addRerender">${EVENT_REPEATS.map(([v, l]) => `<option value="${v}" ${(a.repeat || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`));
       if (a.who === 'me' && cals.length > 1) inner.push(fRow('<label for="add-cal">Calendar</label>', `<select id="add-cal" data-bind="add.cal" data-act="addRerender">${cals.map((c) => `<option value="${esc(c.calKey)}" ${cal && cal.calKey === c.calKey ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`));
       if (a.who === 'me' && P) inner.push(fRow(`${esc(shortName(state, P))} sees`, seg([{ v: 'all', label: 'Everything', on: !a.busyOnly }, { v: 'busy', label: '“Busy”', on: a.busyOnly }], { act: 'addBusy', label: 'What your partner sees' })));
-      const opts = REMIND_OPTIONS.filter((o) => !a.allDay || !o.timedOnly);
+      const opts = REMIND_OPTIONS.filter((o) => !(a.allDay || a.multi) || !o.timedOnly);
       inner.push(`<div class="f-block"><span class="b">Remind me</span>
         <div class="row-wrap">${opts.map((o) => `<button type="button" class="chip-btn ${a.remind.includes(o.v) ? 'on' : ''}" aria-pressed="${a.remind.includes(o.v)}" data-act="addRemind" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
         ${a.remind.length ? `<span class="b pad-top">What do you need to do?</span>
@@ -293,10 +294,16 @@ function fRow(label, ctl, cls = '') { return `<div class="f-row ${cls}"><span cl
 function titleRow(id, bind, value, label, placeholder) {
   return `<div class="f-title"><label for="${id}" class="sr">${esc(label)}</label><input id="${id}" class="title-input" type="text" data-bind="${bind}" value="${esc(value)}" placeholder="${esc(label)}" autocomplete="off" enterkeyhint="done"></div>`;
 }
-function dayRows(a) {
+// multi: an event over several days, where the day picked here is the first one
+function dayRows(a, multi = false) {
   const opts = [{ v: 'today', label: 'Today' }, { v: 'tomorrow', label: 'Tomorrow' }, { v: 'pick', label: 'Pick' }];
-  return fRow('Day', seg(opts.map((o) => Object.assign(o, { on: a.day === o.v })), { act: 'addDay', label: 'Which day' }))
-    + (a.day === 'pick' ? fRow('<label for="add-date">Date</label>', `<input id="add-date" type="date" data-bind="add.date" value="${esc(a.date || dayKey(new Date()))}">`) : '');
+  return fRow(multi ? 'First day' : 'Day', seg(opts.map((o) => Object.assign(o, { on: a.day === o.v })), { act: 'addDay', label: multi ? 'Which day it starts' : 'Which day' }))
+    + (a.day === 'pick' ? fRow('<label for="add-date">Date</label>', `<input id="add-date" type="date" data-bind="add.date" data-act="addRangeDate" value="${esc(a.date || dayKey(new Date()))}">`) : '');
+}
+// the last day of a several-day event: never before the first
+export function addUntil(a) {
+  const first = addDayKey();
+  return a.until && a.until >= first ? a.until : first;
 }
 function addJobForm(state) {
   const a = ui.add;

@@ -260,6 +260,7 @@ export const actions = {
   async addEvent({ who, title, day, endDay, start, end, allDay, calKey, busyOnly, repeat }) {
     const st = store.state;
     const when = { day, start, end, allDay, label: '' };
+    if (allDay && endDay && endDay > day) when.endDay = endDay;
     if (who === 'partner') {
       return actions.createRequest({ type: 'add', title, when: Object.assign(when, { label: whenLabel(when) }), hold: false });
     }

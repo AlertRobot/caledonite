@@ -2,7 +2,7 @@
 import { store, actions, setPhase, setLinked, requestPassed } from './store.js';
 import { ui, resetAsk, resetAdd } from './uistate.js';
 import { viewToday, viewCalendar, waitingForMe, rotateCountdown } from './views-main.js';
-import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey } from './views-requests.js';
+import { viewRequests, viewAsk, viewAdd, askWhen, addDayKey, addUntil } from './views-requests.js';
 import { viewSettings, viewSignedOut, viewSetup, viewStuck, viewNotMember, viewLoading } from './views-settings.js';
 import { viewEvent, findEvent } from './views-event.js';
 import { viewJobs, viewJar, STARTER_IDEAS, pickIdea, jarBudget } from './views-extra.js';
@@ -11,13 +11,20 @@ import { applyLook, setLook } from './theme.js';
 import { FIREBASE, APP } from './config.js';
 import { icon, fitButtonRows } from './ui.js';
 import { dayKey, addDays, fromDayKey, mondayOf, esc, minutesOf, pad } from './util.js';
-import { freeSlots, settingsOf, nameOf, reminderFor, reminderId, quietNight, repeatOf, leaveDaysFor, nextBothFree, countdownShared, editTimes } from './logic.js';
+import { freeSlots, settingsOf, nameOf, reminderFor, reminderId, quietNight, repeatOf, leaveDaysFor, nextBothFree, countdownShared, editTimes, REMIND_OPTIONS } from './logic.js';
 import { whenLabel } from './store.js';
 
 const root = document.getElementById('app');
 let pendingRender = false;
 let lastRoute = '';
 
+// a several-day event's last day stays on or after its first
+function keepUntil() {
+  const a = ui.add;
+  if (!a.multi) return;
+  const first = addDayKey();
+  if (!a.until || a.until < first) a.until = dayKey(addDays(fromDayKey(first), 1));
+}
 function route() {
   const h = (location.hash || '#today').slice(1);
   const [r, sub] = h.split('/');
@@ -404,7 +411,7 @@ const H = {
     render();
   },
   addWho: (el) => { ui.add.who = el.dataset.v; render(); },
-  addDay: (el) => { ui.add.day = el.dataset.v; if (el.dataset.v === 'pick' && !ui.add.date) ui.add.date = dayKey(new Date()); render(); },
+  addDay: (el) => { ui.add.day = el.dataset.v; if (el.dataset.v === 'pick' && !ui.add.date) ui.add.date = dayKey(new Date()); keepUntil(); render(); },
   addBusy: (el) => { ui.add.busyOnly = el.dataset.v === 'busy'; render(); },
   calPriority: (el) => {
     const s = settingsOf(store.state, store.state.me);
@@ -415,25 +422,38 @@ const H = {
   },
   cdNext: () => rotateCountdown(),
   addAllDayT: () => { ui.add.allDay = !ui.add.allDay; render(); },
+  // several days in a row: from the day picked to a last day, starting with the day after unless one's been picked
+  addMultiT: () => {
+    const a = ui.add; a.multi = !a.multi;
+    const first = addDayKey();
+    if (a.multi && (!a.until || a.until <= first)) a.until = dayKey(addDays(fromDayKey(first), 1));
+    render();
+  },
   addMore: () => { ui.add.more = !ui.add.more; render(); },
   addSave: async () => {
     const a = ui.add;
     const st = store.state;
     if (!a.title.trim()) { ui.focus = 'add-title'; return toast('Add what it is first.'); }
-    if (!a.allDay && !a.start) { ui.focus = 'add-start'; return toast('Add a start time, or tick All day.'); }
     const day = addDayKey();
+    // several days in a row are all day, from the first to the last (the last can be the first: just that day)
+    const range = !!a.multi;
+    if (range && a.until && a.until < day) { ui.focus = 'add-until'; return toast('The last day needs to be on or after the first.'); }
+    const endDay = range ? addUntil(a) : null;
+    const allDay = range || a.allDay;
+    if (!allDay && !a.start) { ui.focus = 'add-start'; return toast('Add a start time, or tick All day.'); }
     let end = a.end;
-    if (!a.allDay && end && end <= a.start) { ui.focus = 'add-end'; return toast('The end needs to be after the start.'); }
-    if (!a.allDay && !end) end = plusMins(a.start, 60);
+    if (!allDay && end && end <= a.start) { ui.focus = 'add-end'; return toast('The end needs to be after the start.'); }
+    if (!allDay && !end) end = plusMins(a.start, 60);
     // for your partner it's a request: one for a time already gone could only ever be turned down
-    if (a.who === 'partner' && requestPassed({ when: { day, start: a.allDay ? null : a.start, end: a.allDay ? null : end, allDay: a.allDay } })) { ui.focus = a.allDay ? 'add-title' : 'add-start'; return toast('That time has already gone. Pick a later one.'); }
+    if (a.who === 'partner' && requestPassed({ when: { day, endDay, start: allDay ? null : a.start, end: allDay ? null : end, allDay } })) { ui.focus = allDay ? 'add-title' : 'add-start'; return toast('That time has already gone. Pick a later one.'); }
     const cals = Object.values(st.calendars).filter((c) => c.owner === st.me && c.canWrite && c.role !== 'rota');
     const calKey = a.cal || (cals.find((c) => c.primary) || cals[0] || {}).calKey || null;
     try {
       const rep = a.who !== 'partner' && a.repeat ? { freq: a.repeat.split(':')[0], interval: Number(a.repeat.split(':')[1]) || 1 } : null;
-      const tag = await actions.addEvent({ who: a.who, title: a.title, day, start: a.allDay ? null : a.start, end: a.allDay ? null : end, allDay: a.allDay, calKey, busyOnly: a.busyOnly, repeat: rep });
-      if (a.who !== 'partner' && a.remind.length && tag) await actions.setReminder({ ref: `t:${tag}`, owner: st.me, title: a.title.trim(), times: a.remind, note: a.note.trim() });
-      const when = whenLabel({ day, start: a.start, end, allDay: a.allDay });
+      const tag = await actions.addEvent({ who: a.who, title: a.title, day, endDay, start: allDay ? null : a.start, end: allDay ? null : end, allDay, calKey, busyOnly: a.busyOnly, repeat: rep });
+      const times = allDay ? a.remind.filter((v) => !(REMIND_OPTIONS.find((o) => o.v === v) || {}).timedOnly) : a.remind;
+      if (a.who !== 'partner' && times.length && tag) await actions.setReminder({ ref: `t:${tag}`, owner: st.me, title: a.title.trim(), times, note: a.note.trim() });
+      const when = whenLabel({ day, endDay, start: a.start, end, allDay });
       ui.add.done = a.who === 'partner' ? `Sent to ${nameOf(st, st.partner)}: ${a.title} (${when}). It goes in their calendar when they say yes.`
         : a.who === 'both' ? `Added for both of you: ${a.title} (${when}).` : `Added: ${a.title} (${when}). It reaches Google Calendar within a few minutes.`;
       render();
@@ -598,6 +618,8 @@ const C = {
   },
   askLeaveDate: () => render(),
   addLeaveDate: () => render(),
+  // moving the first day past the last takes the last along with it (a last day before the first is questioned on save)
+  addRangeDate: (el) => { if (el.id === 'add-date') keepUntil(); render(); },
   addRerender: () => render(),
   hhBday: (el) => {
     // just this one birthday (it merges into what's saved, so one your partner changed meanwhile stays).
